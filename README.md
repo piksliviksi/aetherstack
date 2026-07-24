@@ -1,5 +1,7 @@
 # AetherStack
 
+![AetherStack](./aetherstack.jpg)
+
 **Multi-model LLM control plane in Docker** — local Ollama + cloud providers (Grok, OpenAI/Codex, Claude) behind one gateway, with a chat UI and Redis for shared working memory.
 
 | | |
@@ -153,11 +155,25 @@ aetherstack/
 
 ---
 
+## WSL + AMD GPU (optional host path)
+
+On Windows + WSL2 with a Radeon GPU, run **Ollama inside WSL** (not in the compose profile) so ROCm can use DXCore (`/dev/dxg`).
+
+```bash
+# Debian WSL — after ROCm/librocdxg setup (see docs/WSL-AMD-GPU.md)
+source /etc/profile.d/aether-rocm.sh
+rocminfo | grep -A3 "Agent 2"    # expect your Radeon
+sudo systemctl restart ollama
+curl http://127.0.0.1:11434/
+```
+
+Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA_ENABLE_DXG_DETECTION=1`, `OLLAMA_HOST=0.0.0.0:11434`).
+
 ## Related ideas
 
 - Capability / routing “sync matrix” between local and cloud models  
 - Redis / vector DB as shared agent memory  
-- Debian WSL workstation notes (optional host path, not required to use this repo)
+- Debian WSL workstation notes: [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md)
 
 ---
 
