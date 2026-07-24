@@ -1,0 +1,17 @@
+# Optional overlay: AMD ROCm Ollama on bare-metal Linux
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.amd.yml --profile with-ollama-container up -d
+#
+# Requires /dev/kfd and /dev/dri (not available on typical Windows/WSL setups).
+
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG:-rocm}
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-10.3.0}
