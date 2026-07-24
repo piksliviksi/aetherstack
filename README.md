@@ -7,6 +7,7 @@
 | | |
 |---|---|
 | **Repo** | [github.com/piksliviksi/aetherstack](https://github.com/piksliviksi/aetherstack) |
+| **VS Code** | [Marketplace: AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
 | **Who it’s for** | Anyone who wants a small, shareable stack without installing a full “AI distro” |
 | **GPU note** | Prefer **host Ollama** for AMD GPUs; containers handle UI + gateway |
 
@@ -176,11 +177,16 @@ Open a folder, scan prior AI chats (Continue / Claude / Aider / WayLog / …), w
 
 | Piece | Location |
 |-------|----------|
-| Extension | [`integrations/vscode/`](./integrations/vscode/) |
+| **Marketplace** | [AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
+| Extension source | [`integrations/vscode/`](./integrations/vscode/) |
 | Tutorial | [docs/VSCODE.md](./docs/VSCODE.md) |
 | CLI scan | `scripts/scan-project-ai.ps1` / `scripts/scan-project-ai.sh` |
 
 ```bash
+# From VS Code Marketplace (recommended)
+code --install-extension AetherStack.aetherstack
+
+# Or from this repo (dev)
 code --install-extension integrations/vscode
 # Command Palette → AetherStack: Scan Project AI History
 # Command Palette → AetherStack: Wire Continue.dev to AetherStack
@@ -238,7 +244,9 @@ aetherstack/
 - Default `WEBUI_AUTH=false` is for **local lab** use only. Enable auth before exposing ports.  
 - Do not commit `.env`.  
 - Change `LITELLM_MASTER_KEY` in production.  
-- Bind to localhost or put a reverse proxy with TLS in front if remote.
+- Bind to localhost or put a reverse proxy with TLS in front if remote.  
+- Project Engine (`:8765`) only scans **cwd / home / repo / `--project`** (not whole drives). Optional: `AETHERSTACK_ENGINE_TOKEN` or `--token`.  
+- Details: [docs/SECURITY-NOTES.md](./docs/SECURITY-NOTES.md).
 
 ---
 
