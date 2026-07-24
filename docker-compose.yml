@@ -1,0 +1,75 @@
+# AetherStack — multi-model LLM control plane
+# https://github.com/piksliviksi/aetherstack
+#
+# Prefer host Ollama for AMD GPUs. Optional container: --profile with-ollama-container
+# AMD ROCm overlay (Linux): -f docker-compose.amd.yml
+
+services:
+  # Local OpenAI-compatible API + model manager
+  # NOTE: GPU access in containers on AMD is host/driver specific.
+  # Prefer host Ollama (port 11434) and point Open WebUI at it.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aether-ollama
+    profiles: ["with-ollama-container"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ../models:/models
+    restart: unless-stopped
+    # NVIDIA only out of the box:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: aether-open-webui
+    ports:
+      - "3000:8080"
+    environment:
+      # Host Ollama from WSL/Windows Docker: host.docker.internal
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - WEBUI_AUTH=false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open_webui_data:/app/backend/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: aether-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Unified gateway for Grok / OpenAI / Anthropic / local Ollama
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: aether-litellm
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  open_webui_data:
+  redis_data:
