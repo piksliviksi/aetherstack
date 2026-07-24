@@ -102,14 +102,21 @@ HSA_OVERRIDE_GFX_VERSION=10.3.0
 
 ## LiteLLM models (defaults)
 
-Configured in [`litellm_config.yaml`](./litellm_config.yaml):
+Configured in [`litellm_config.yaml`](./litellm_config.yaml). Aliases map to **current** provider IDs (Grok 4.x, GPT-4.1 / o-series, Claude 4, Gemini 2.5, local Ollama). Edit the YAML to add more; LiteLLM also accepts `xai/<any-xai-model>` style names if you extend the list.
 
 | Alias | Backend |
 |-------|---------|
-| `local-llama` | Host Ollama `llama3.1:8b` |
-| `grok` | xAI (needs `XAI_API_KEY`) |
-| `gpt-4o` | OpenAI (needs `OPENAI_API_KEY`) |
-| `claude` | Anthropic (needs `ANTHROPIC_API_KEY`) |
+| `local-default` / `local-llama` | Host Ollama (`llama3.1:8b`) |
+| `local-tiny` | Host Ollama (`tinyllama`) |
+| `grok` / `grok-4.5` | xAI Grok 4.5 |
+| `grok-4.3` / `grok-4` / `grok-4-fast` / `grok-code` | xAI Grok 4.x family |
+| `grok-3` | xAI Grok 3 (legacy alias) |
+| `gpt-4.1` / `gpt-4.1-mini` / `gpt-4o` / `o3` / `o4-mini` | OpenAI |
+| `codex` / `openai-default` | OpenAI GPT-4.1 |
+| `claude` / `claude-sonnet-4` / `claude-opus-4` / `claude-haiku` | Anthropic |
+| `gemini` / `gemini-2.5-pro` / `gemini-2.5-flash` | Google Gemini |
+
+Keys in `.env`: `XAI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` (only for providers you use).
 
 Point any OpenAI-compatible client at:
 
