@@ -52,6 +52,10 @@
       {
         "command": "aetherstack.saveSnapshot",
         "title": "AetherStack: Save Chat Snapshot Note"
+      },
+      {
+        "command": "aetherstack.openProjectEngine",
+        "title": "AetherStack: Open Project Data Engine"
       }
     ],
     "configuration": {

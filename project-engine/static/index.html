@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AetherStack Project Engine</title>
+  <style>
+    :root {
+      --bg: #0b1020; --card: #141b2f; --border: #243056; --text: #e8eefc;
+      --muted: #9db0d0; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --accent: #3b82f6;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
+    h1 { font-size: 1.15rem; margin: 0; }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    main { padding: 1rem 1.25rem 2rem; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
+    .card h2 { margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+    .big { font-size: 1.75rem; font-weight: 700; }
+    .row { display: flex; justify-content: space-between; gap: 0.5rem; margin: 0.35rem 0; font-size: 0.92rem; }
+    .bar { height: 8px; background: #0f172a; border-radius: 99px; overflow: hidden; margin-top: 0.35rem; }
+    .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+    .bar.warn > i { background: var(--warn); } .bar.bad > i { background: var(--bad); }
+    input[type=text] { width: 100%; max-width: 420px; padding: 0.5rem 0.65rem; border-radius: 8px; border: 1px solid var(--border); background: #0f172a; color: var(--text); }
+    button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 0.5rem 0.85rem; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #334155; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    td, th { text-align: left; padding: 0.35rem 0.25rem; border-bottom: 1px solid #1e293b; }
+    .span2 { grid-column: 1 / -1; }
+    ul.tips { margin: 0; padding-left: 1.1rem; }
+    ul.tips li { margin: 0.4rem 0; }
+    .tag { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 4px; background: #1e293b; color: var(--muted); }
+    .tag.safe { color: var(--ok); } .tag.medium { color: var(--warn); } .tag.info { color: var(--accent); }
+    code { font-size: 0.8rem; background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AetherStack · Project Engine</h1>
+      <div class="muted">Live resources · project disk impact · system installations</div>
+    </div>
+    <div style="flex:1"></div>
+    <input id="project" type="text" placeholder="Project path (optional)" />
+    <button id="scan">Scan project</button>
+    <button class="secondary" id="refresh">Refresh live</button>
+  </header>
+  <main>
+    <section class="card" id="cpuCard">
+      <h2>CPU</h2>
+      <div class="big" id="cpuPct">—</div>
+      <div class="bar" id="cpuBar"><i style="width:0%"></i></div>
+      <div class="muted" id="cpuMeta"></div>
+    </section>
+    <section class="card">
+      <h2>Memory</h2>
+      <div class="big" id="memPct">—</div>
+      <div class="bar" id="memBar"><i style="width:0%"></i></div>
+      <div class="muted" id="memMeta"></div>
+    </section>
+    <section class="card">
+      <h2>Disk I/O</h2>
+      <div class="row"><span>Read</span><strong id="dioR">—</strong></div>
+      <div class="row"><span>Write</span><strong id="dioW">—</strong></div>
+      <div class="muted">MB/s (sampled)</div>
+    </section>
+    <section class="card">
+      <h2>GPU</h2>
+      <div id="gpuBox" class="muted">Scanning…</div>
+    </section>
+    <section class="card span2">
+      <h2>Disk volumes</h2>
+      <table><thead><tr><th>Mount</th><th>Used</th><th>Free</th><th>Total</th><th>%</th></tr></thead>
+      <tbody id="diskBody"></tbody></table>
+    </section>
+    <section class="card span2">
+      <h2>System installations & footprint</h2>
+      <div id="sysBox" class="muted">Loading…</div>
+    </section>
+    <section class="card span2">
+      <h2>Project impact</h2>
+      <div id="projBox" class="muted">Enter a project path and click Scan.</div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    if (params.get("project") || params.get("path")) {
+      $("project").value = params.get("project") || params.get("path");
+    }
+
+    function bar(el, pct) {
+      const i = el.querySelector("i");
+      const p = Math.min(100, Math.max(0, pct || 0));
+      i.style.width = p + "%";
+      el.classList.remove("warn", "bad");
+      if (p >= 90) el.classList.add("bad");
+      else if (p >= 75) el.classList.add("warn");
+    }
+
+    async function loadLive() {
+      const r = await fetch("/api/live");
+      const j = await r.json();
+      const cpu = j.cpu?.percent;
+      $("cpuPct").textContent = cpu != null ? cpu.toFixed(1) + "%" : "n/a";
+      bar($("cpuBar"), cpu);
+      $("cpuMeta").textContent = `Logical CPUs: ${j.cpu?.count_logical ?? "?"} · backend: ${j.backend}`;
+      const m = j.memory || {};
+      $("memPct").textContent = m.percent != null ? m.percent.toFixed(1) + "%" : "n/a";
+      bar($("memBar"), m.percent);
+      $("memMeta").textContent = m.used_gb != null
+        ? `${m.used_gb} / ${m.total_gb} GB used · ${m.available_gb} GB free`
+        : (m.note || "");
+      $("dioR").textContent = j.disk_io?.read_mb_s != null ? j.disk_io.read_mb_s + " MB/s" : "n/a";
+      $("dioW").textContent = j.disk_io?.write_mb_s != null ? j.disk_io.write_mb_s + " MB/s" : "n/a";
+      const tb = $("diskBody");
+      tb.innerHTML = "";
+      (j.disks || []).forEach(d => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${d.mount || d.device || "?"}</td>
+          <td>${d.used_gb ?? "—"} GB</td><td>${d.free_gb ?? "—"} GB</td>
+          <td>${d.total_gb ?? "—"} GB</td><td>${d.percent ?? "—"}%</td>`;
+        tb.appendChild(tr);
+      });
+      const g = j.gpu || [];
+      if (!g.length) $("gpuBox").textContent = "No GPU telemetry (install nvidia-smi or use WSL rocminfo for AMD).";
+      else $("gpuBox").innerHTML = g.map(x =>
+        `<div><strong>${x.name || x.vendor}</strong>
+         ${x.util_percent != null ? ` · util ${x.util_percent}%` : ""}
+         ${x.mem_used_mb != null ? ` · VRAM ${x.mem_used_mb}/${x.mem_total_mb} MB` : ""}
+         ${x.note ? `<div class="muted">${x.note}</div>` : ""}
+         ${x.detail ? `<pre class="muted" style="white-space:pre-wrap;font-size:0.75rem">${x.detail}</pre>` : ""}
+         </div>`
+      ).join("<hr style='border-color:#243056'>");
+    }
+
+    async function loadSystem() {
+      const r = await fetch("/api/system");
+      const j = await r.json();
+      let html = `<p class="muted">${j.os || ""} · Python ${j.python?.version || "?"}</p><ul>`;
+      (j.installations || []).forEach(i => {
+        html += `<li><strong>${i.name}</strong>`;
+        if (i.version) html += ` ${i.version}`;
+        if (i.path) html += ` <code>${i.path}</code>`;
+        if (i.size_gb != null) html += ` · ${i.size_gb} GB`;
+        if (i.detail) html += ` — ${i.detail}`;
+        if (i.note) html += ` <span class="muted">(${i.note})</span>`;
+        html += `</li>`;
+      });
+      html += `</ul>`;
+      if (j.paths?.length) {
+        html += `<h3 style="font-size:0.9rem;color:var(--muted)">Heavy paths</h3><table><tr><th>Kind</th><th>Path</th><th>GB</th></tr>`;
+        j.paths.forEach(p => {
+          html += `<tr><td>${p.kind}</td><td><code>${p.path}</code></td><td>${p.size_gb ?? "—"}</td></tr>`;
+        });
+        html += `</table>`;
+      }
+      if (j.wsl_list) html += `<pre class="muted" style="font-size:0.75rem;overflow:auto">${j.wsl_list}</pre>`;
+      $("sysBox").innerHTML = html;
+    }
+
+    async function loadProject() {
+      const path = $("project").value.trim();
+      if (!path) { $("projBox").textContent = "Enter a project path and click Scan."; return; }
+      $("projBox").textContent = "Scanning (may take a minute on large trees)…";
+      const r = await fetch("/api/project?path=" + encodeURIComponent(path));
+      const j = await r.json();
+      if (j.error) { $("projBox").innerHTML = `<span style="color:var(--bad)">${j.error}</span>`; return; }
+      let html = `<div class="big">${j.total_gb ?? "?"} GB</div>
+        <div class="muted">approx ${j.file_count_approx} files under <code>${j.path}</code>
+        · safe reclaim estimate: <strong>${j.reclaimable_safe_gb ?? 0} GB</strong></div>`;
+      html += `<h3 style="font-size:0.9rem;color:var(--muted)">Top level</h3><table><tr><th>Name</th><th>GB</th><th></th></tr>`;
+      (j.top_levels || []).slice(0, 20).forEach(t => {
+        html += `<tr><td>${t.name}</td><td>${t.size_gb ?? "—"}</td><td>${t.heavy ? '<span class="tag">heavy</span>' : ""}</td></tr>`;
+      });
+      html += `</table>`;
+      if (j.manifests && Object.keys(j.manifests).length) {
+        html += `<h3 style="font-size:0.9rem;color:var(--muted)">Manifests / deps</h3><ul>`;
+        Object.entries(j.manifests).forEach(([k, v]) => {
+          html += `<li><code>${k}</code> — ${v.dependency_count ?? "?"} deps`;
+          if (v.mentions_torch) html += ` <span class="tag warn">torch</span>`;
+          if (v.deps_sample) html += `<div class="muted">${(v.deps_sample || []).slice(0, 12).join(", ")}</div>`;
+          html += `</li>`;
+        });
+        html += `</ul>`;
+      }
+      html += `<h3 style="font-size:0.9rem;color:var(--muted)">Optimize (manual)</h3><ul class="tips">`;
+      (j.suggestions || []).forEach(s => {
+        html += `<li><span class="tag ${s.severity}">${s.severity}</span> <strong>${s.action}</strong>
+          <div class="muted">${s.why || ""}</div>
+          ${s.command ? `<div><code>${s.command}</code></div>` : ""}</li>`;
+      });
+      html += `</ul><p class="muted">Engine never deletes data automatically.</p>`;
+      $("projBox").innerHTML = html;
+    }
+
+    $("refresh").onclick = () => loadLive().catch(e => alert(e));
+    $("scan").onclick = () => loadProject().catch(e => alert(e));
+    loadLive();
+    loadSystem();
+    if ($("project").value) loadProject();
+    setInterval(() => loadLive().catch(() => {}), 4000);
+  </script>
+</body>
+</html>

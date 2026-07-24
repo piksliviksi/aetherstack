@@ -543,6 +543,18 @@ function activate(context) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("aetherstack.openProjectEngine", async () => {
+      const root = workspaceRoot();
+      let url = "http://127.0.0.1:8765/";
+      if (root) url += `?project=${encodeURIComponent(root)}`;
+      vscode.env.openExternal(vscode.Uri.parse(url));
+      vscode.window.showInformationMessage(
+        "Opened Project Engine. If offline, run: project-engine/start-engine.ps1 (or start-engine.sh)"
+      );
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("aetherstack.saveSnapshot", async () => {
       const root = workspaceRoot();
       if (!root) return;
