@@ -7,3 +7,8 @@ data/
 *.log
 *.err
 webui-up.*
+
+__pycache__/
+*.pyc
+.aetherstack/
+
