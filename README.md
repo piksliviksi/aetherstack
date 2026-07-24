@@ -160,11 +160,11 @@ Use **Open WebUI** at http://localhost:3000 for a UI without hand-rolling header
 
 ## GPU support
 
-| Vendor | Support | How |
-|--------|---------|-----|
-| **NVIDIA** | Full | Host Ollama or `docker-compose.nvidia.yml` — [docs/GPU-NVIDIA.md](./docs/GPU-NVIDIA.md) |
-| **AMD** | Good (host/WSL ROCm) | Host/WSL Ollama or `docker-compose.amd.yml` — [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md) |
-| **Intel** | Best-effort | Host Ollama / OpenVINO — [docs/GPU-INTEL.md](./docs/GPU-INTEL.md) |
+| Vendor | How |
+|--------|-----|
+| **NVIDIA** | Host Ollama or `docker-compose.nvidia.yml` — [docs/GPU-NVIDIA.md](./docs/GPU-NVIDIA.md) |
+| **AMD** | Host/WSL Ollama or `docker-compose.amd.yml` — [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md) |
+| **Intel** | Host Ollama / OpenVINO / IPEX — [docs/GPU-INTEL.md](./docs/GPU-INTEL.md) |
 
 ## Docker Desktop Extension
 
