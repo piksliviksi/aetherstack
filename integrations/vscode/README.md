@@ -39,6 +39,18 @@ code --install-extension aetherstack-0.1.0.vsix
 2. Optional: [Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue) for in-editor chat/edit
 3. Optional: host Ollama for `local-*` models
 
+### Windows 11 + AMD GPU
+
+**VS Code cannot run local LLMs on the Radeon GPU.** Extensions only call an HTTP API.
+
+| Do | Don't |
+|----|--------|
+| Ollama in **WSL** with ROCm/DXG (or host Ollama if supported) | Expect VS Code / Continue to load ROCm |
+| Point models at `http://127.0.0.1:4000/v1` | Look for “AMD GPU” inside VS Code for inference |
+| Watch GPU while **Ollama** runs (`rocminfo` / Task Manager) | Blame VS Code if `local-*` is slow — check Ollama |
+
+See [docs/VSCODE.md](../../docs/VSCODE.md) and [docs/WSL-AMD-GPU.md](../../docs/WSL-AMD-GPU.md).
+
 ## Settings
 
 | Setting | Default |
