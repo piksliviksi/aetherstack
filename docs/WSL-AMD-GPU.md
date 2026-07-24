@@ -1,4 +1,4 @@
-# WSL + AMD Radeon RX 6600 XT (this machine)
+# WSL + AMD Radeon RX 6600 XT example
 
 ## Status (2026-07-25)
 
