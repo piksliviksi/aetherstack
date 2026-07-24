@@ -1,5 +1,9 @@
 # AetherStack + VS Code projects
 
+> **Using the extension day to day?** Start here:  
+> **[How to use the VS Code extension](./VSCODE-EXTENSION.md)**  
+> (install, find the sidebar, commands, Continue wiring, troubleshooting)
+
 ## Goal
 
 Open a **project folder** in VS Code, recover context from **previous AI chats** (when stored in the repo or known folders), see **which models/tools were used**, and **continue** via AetherStack (multi-model LiteLLM + Open WebUI + optional Ollama).
