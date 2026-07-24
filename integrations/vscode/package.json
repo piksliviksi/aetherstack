@@ -125,6 +125,6 @@
   "bugs": {
     "url": "https://github.com/piksliviksi/aetherstack/issues"
   },
-  "homepage": "https://github.com/piksliviksi/aetherstack/tree/main/integrations/vscode",
-  "qna": "https://github.com/piksliviksi/aetherstack/issues"
+  "homepage": "https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md",
+  "qna": "https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md"
 }

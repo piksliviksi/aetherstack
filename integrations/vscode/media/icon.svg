@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <circle cx="12" cy="12" r="9" stroke="#3b82f6" stroke-width="2"/>
-  <circle cx="12" cy="12" r="3" fill="#60a5fa"/>
+  <!-- Monochrome: VS Code activity bar uses currentColor -->
+  <path fill="currentColor" d="M12 2L3 7v10l9 5 9-5V7L12 2zm0 2.2l6.5 3.6v7.4L12 18.8 5.5 15.2V7.8L12 4.2z"/>
+  <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
+  <path fill="currentColor" d="M11.2 6.5h1.6v2.2h-1.6zm0 8.8h1.6v2.2h-1.6zM6.5 11.2h2.2v1.6H6.5zm8.8 0h2.2v1.6h-2.2z"/>
 </svg>

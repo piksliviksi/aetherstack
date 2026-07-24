@@ -6,6 +6,12 @@
 code --install-extension AetherStack.aetherstack
 ```
 
+## How to use
+
+Full help guide (install, find the UI, commands, Continue, troubleshooting):
+
+**[docs/VSCODE-EXTENSION.md](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
+
 Open a project folder, scan prior AI chat artifacts, see which tools/models were used, and continue building through [AetherStack](https://github.com/piksliviksi/aetherstack) (LiteLLM multi-model gateway + Open WebUI + Ollama).
 
 ## Features

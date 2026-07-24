@@ -178,8 +178,9 @@ Open a folder, scan prior AI chats (Continue / Claude / Aider / WayLog / …), w
 | Piece | Location |
 |-------|----------|
 | **Marketplace** | [AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
+| **How to use (help)** | [docs/VSCODE-EXTENSION.md](./docs/VSCODE-EXTENSION.md) |
 | Extension source | [`integrations/vscode/`](./integrations/vscode/) |
-| Tutorial | [docs/VSCODE.md](./docs/VSCODE.md) |
+| GPU / architecture notes | [docs/VSCODE.md](./docs/VSCODE.md) |
 | CLI scan | `scripts/scan-project-ai.ps1` / `scripts/scan-project-ai.sh` |
 
 ```bash
