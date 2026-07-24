@@ -1,6 +1,4 @@
-# Intel GPU support (AetherStack) — feasibility
-
-## Short answer
+# Intel GPU support (AetherStack)
 
 **Partially feasible**, but **not as smooth as NVIDIA CUDA** and different from **AMD ROCm**.
 
