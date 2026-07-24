@@ -56,7 +56,7 @@ vsce package
 
 1. Create a publisher at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage)
 2. Create an Azure DevOps PAT with **Marketplace → Manage**
-3. `vsce login piksliviksi`
+3. `vsce login AetherStack`
 4. `vsce publish`
 
 See [Publishing Extensions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
