@@ -1,0 +1,6 @@
+services:
+  litellm:
+    environment:
+      LITELLM_MASTER_KEY: ""
+    # try known disable flags if supported
+    # command remains default from main compose
