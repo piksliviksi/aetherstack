@@ -1,14 +1,12 @@
 # NVIDIA CUDA support (AetherStack)
 
-## Feasibility
+Use a local NVIDIA GPU for inference while AetherStack provides the chat UI and multi-model gateway.
 
-**Yes — fully supported and the most mature path.**
-
-| Path | Difficulty | Recommendation |
-|------|------------|----------------|
-| Host Ollama + CUDA | Easy | **Preferred** |
-| Ollama container + NVIDIA runtime | Easy on Linux / Docker Desktop | Use `docker-compose.nvidia.yml` |
-| vLLM / TensorRT-LLM containers | Medium | Advanced, not in default stack |
+| Path | How |
+|------|-----|
+| Host Ollama + CUDA | Preferred for most setups |
+| Ollama container + NVIDIA runtime | `docker-compose.nvidia.yml` |
+| vLLM / TensorRT-LLM | Advanced; not in the default stack |
 
 ---
 
@@ -41,7 +39,7 @@ docker compose -f docker-compose.yml -f docker-compose.nvidia.yml \
 **Windows 11 + Docker Desktop**
 
 1. Enable WSL2 backend.  
-2. Install NVIDIA driver that supports WSL.  
+2. Install an NVIDIA driver that supports WSL.  
 3. Docker Desktop → Settings → Resources → enable GPU.  
 4. Same compose command as above.
 

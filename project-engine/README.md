@@ -31,7 +31,7 @@ chmod +x project-engine/start-engine.sh
 
 | Area | Content |
 |------|---------|
-| **Live pressure** | CPU %, RAM used/available, disk free/total, disk queue & transfer rates (when available), GPU (NVIDIA `nvidia-smi`, AMD best-effort) |
+| **Live pressure** | CPU %, RAM used/available, disk free/total, disk queue & transfer rates (when available), GPU (NVIDIA `nvidia-smi`, AMD via WMI / WSL ROCm probe) |
 | **Project impact** | Folder size, heavy dirs (`node_modules`, `.venv`, `.git`, caches), estimated reclaimable space |
 | **Installations** | Detected: WSL distros/VHDX, Docker, Python envs, torch/CUDA hints, Ollama models dir, AetherStack |
 | **Dependencies** | `requirements*.txt`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod` summaries |

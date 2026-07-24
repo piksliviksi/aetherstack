@@ -1,11 +1,11 @@
 # AetherStack as a Docker Desktop Extension
 
-Docker Extensions are a supported way to ship a UI + optional backend next to Docker Desktop. AetherStack maps well:
+Ship a small panel in Docker Desktop that links to the AetherStack control plane.
 
-| Extension piece | AetherStack mapping |
-|-----------------|---------------------|
-| UI panel | Start/stop status, links to :3000 / :4000 |
-| Backend / compose | Existing `docker-compose.yml` |
+| Extension piece | Mapping |
+|-----------------|---------|
+| UI panel | Status links to `:3000` / `:4000` |
+| Backend / compose | Root `docker-compose.yml` services |
 | Marketplace | Optional later publish |
 
 ## What we ship in-repo
@@ -16,10 +16,10 @@ Directory: [`extension/`](../extension/)
 |------|------|
 | `metadata.json` | Extension metadata + compose path |
 | `Dockerfile` | Packages UI + metadata |
-| `docker-compose.yaml` | Points at parent stack services |
-| `ui/index.html` | Minimal dashboard (open Chat / Gateway) |
+| `docker-compose.yaml` | Control-plane services |
+| `ui/index.html` | Minimal dashboard (Chat / Gateway) |
 
-## Build & install (developer)
+## Build & install
 
 Requires Docker Desktop with Extensions enabled.
 
@@ -38,12 +38,9 @@ docker extension update piksliviksi/aetherstack-extension:latest
 
 Open **Docker Desktop → Extensions → AetherStack**.
 
-## Limitations
+## Notes
 
 - Extensions run in **Docker Desktop** (Windows/Mac), not headless Linux servers.  
-- GPU still follows host rules (NVIDIA Desktop GPU, AMD via host Ollama, etc.).  
-- Marketplace listing needs Docker’s review process — local install is enough for development.
-
-## Alternative
-
-For most users, **`start.bat` / `./start.sh` is simpler** than an Extension. The Extension is optional polish for Docker Desktop users.
+- GPU inference still follows host setup (NVIDIA, AMD host/WSL Ollama, Intel host tools).  
+- Marketplace listing needs Docker’s process; local install is enough for development.  
+- For most users, **`start.bat` / `./start.sh`** is the primary way to run the stack.

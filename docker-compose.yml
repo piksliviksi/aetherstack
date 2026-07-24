@@ -4,7 +4,7 @@
 # Prefer host Ollama for GPUs. Optional container: --profile with-ollama-container
 # NVIDIA CUDA:  -f docker-compose.nvidia.yml --profile with-ollama-container
 # AMD ROCm:     -f docker-compose.amd.yml --profile with-ollama-container
-# Intel:        best-effort host Ollama — see docs/GPU-INTEL.md
+# Intel:        host Ollama / OpenVINO — see docs/GPU-INTEL.md
 
 services:
   # Local OpenAI-compatible API + model manager

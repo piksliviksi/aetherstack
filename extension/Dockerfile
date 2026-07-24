@@ -5,7 +5,7 @@ LABEL org.opencontainers.image.title="AetherStack" \
       com.docker.desktop.extension.api.version=">= 0.2.3" \
       com.docker.desktop.extension.icon="https://raw.githubusercontent.com/piksliviksi/aetherstack/main/aetherstack.jpg" \
       com.docker.extension.screenshots="" \
-      com.docker.extension.detailed-description="Start Open WebUI, LiteLLM, and Redis. Connect host Ollama for local GPU inference (NVIDIA/AMD/Intel best-effort)." \
+      com.docker.extension.detailed-description="Start Open WebUI, LiteLLM, and Redis. Connect host Ollama for local GPU inference (NVIDIA, AMD, Intel)." \
       com.docker.extension.publisher-url="https://github.com/piksliviksi/aetherstack" \
       com.docker.extension.additional-urls='[{"title":"Documentation","url":"https://github.com/piksliviksi/aetherstack"}]' \
       com.docker.extension.categories="ai-ml,utility-tools" \
