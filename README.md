@@ -135,8 +135,38 @@ Point any OpenAI-compatible client at:
 
 ```text
 Base URL: http://localhost:4000/v1
-API key:  value of LITELLM_MASTER_KEY (default sk-aether-local)
+API key:  only if LITELLM_MASTER_KEY is set in .env
 ```
+
+### LiteLLM 401 “No api key passed in”
+
+Opening `http://localhost:4000/v1/models` in a browser sends **no** `Authorization` header. If `LITELLM_MASTER_KEY` is set, LiteLLM returns 401.
+
+**Fix A — open local lab (default in this repo):** leave `LITELLM_MASTER_KEY=` empty in `.env`, then:
+
+```bash
+docker compose up -d --force-recreate litellm
+```
+
+**Fix B — keep a key (recommended if LAN-exposed):**
+
+```bash
+curl http://localhost:4000/v1/models -H "Authorization: Bearer sk-aether-local"
+```
+
+---
+
+## GPU support
+
+| Vendor | Support | How |
+|--------|---------|-----|
+| **NVIDIA** | Full | Host Ollama or `docker-compose.nvidia.yml` — [docs/GPU-NVIDIA.md](./docs/GPU-NVIDIA.md) |
+| **AMD** | Good (host/WSL ROCm) | Host/WSL Ollama or `docker-compose.amd.yml` — [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md) |
+| **Intel** | Best-effort | Host Ollama / OpenVINO — [docs/GPU-INTEL.md](./docs/GPU-INTEL.md) |
+
+## Docker Desktop Extension
+
+Optional UI inside Docker Desktop — scaffold in [`extension/`](./extension/), guide: [docs/DOCKER-EXTENSION.md](./docs/DOCKER-EXTENSION.md).
 
 ---
 

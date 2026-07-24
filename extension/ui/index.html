@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AetherStack</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 1.25rem; background: #0b1020; color: #e8eefc; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.25rem; }
+    p { color: #9db0d0; line-height: 1.45; }
+    .card { background: #141b2f; border: 1px solid #243056; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
+    a.btn {
+      display: inline-block; margin: 0.35rem 0.5rem 0.35rem 0; padding: 0.55rem 0.9rem;
+      border-radius: 8px; background: #3b82f6; color: white; text-decoration: none; font-weight: 600;
+    }
+    a.btn.secondary { background: #334155; }
+    code { background: #0f172a; padding: 0.15rem 0.35rem; border-radius: 4px; }
+    .ok { color: #4ade80; } .bad { color: #f87171; } .muted { color: #7c8db5; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>AetherStack</h1>
+  <p>Multi-model LLM control plane — Open WebUI + LiteLLM + Redis. Use host Ollama for local GPUs.</p>
+
+  <div class="card">
+    <div><strong>Chat UI</strong> — <span id="s3000" class="muted">checking…</span></div>
+    <div><strong>LiteLLM</strong> — <span id="s4000" class="muted">checking…</span></div>
+    <div><strong>Ollama</strong> — <span id="s11434" class="muted">checking…</span></div>
+    <p style="margin-top:1rem">
+      <a class="btn" href="http://localhost:3000" target="_blank" rel="noreferrer">Open Chat</a>
+      <a class="btn secondary" href="http://localhost:4000/v1/models" target="_blank" rel="noreferrer">Models API</a>
+    </p>
+  </div>
+
+  <div class="card">
+    <strong>Auth for LiteLLM</strong>
+    <p class="muted">If you set <code>LITELLM_MASTER_KEY</code>, browsers need a header. Example:</p>
+    <pre style="overflow:auto;background:#0f172a;padding:0.75rem;border-radius:8px;font-size:0.8rem">curl http://localhost:4000/v1/models \
+  -H "Authorization: Bearer sk-aether-local"</pre>
+    <p class="muted">Leave the key empty in <code>.env</code> for open local lab access (not for the public internet).</p>
+  </div>
+
+  <div class="card">
+    <strong>GPU</strong>
+    <p class="muted">NVIDIA: host Ollama or <code>docker-compose.nvidia.yml</code>. AMD: host/WSL Ollama + ROCm. Intel: best-effort host Ollama / OpenVINO — see docs.</p>
+  </div>
+
+  <script>
+    async function ping(url, el) {
+      try {
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), 2500);
+        const r = await fetch(url, { signal: c.signal, mode: "no-cors" });
+        clearTimeout(t);
+        el.textContent = "reachable (open in browser)";
+        el.className = "ok";
+      } catch {
+        el.textContent = "not reachable from extension UI (start stack / allow CORS)";
+        el.className = "bad";
+      }
+    }
+    // no-cors cannot read status; still useful as smoke for open ports in some contexts
+    ping("http://localhost:3000/", document.getElementById("s3000"));
+    ping("http://localhost:4000/", document.getElementById("s4000"));
+    ping("http://localhost:11434/", document.getElementById("s11434"));
+  </script>
+</body>
+</html>
