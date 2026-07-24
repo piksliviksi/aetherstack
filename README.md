@@ -186,6 +186,25 @@ code --install-extension integrations/vscode
 # Command Palette → AetherStack: Wire Continue.dev to AetherStack
 ```
 
+**Win11 + AMD:** VS Code does **not** drive the Radeon for LLMs — only Ollama (e.g. WSL ROCm) does. See [docs/VSCODE.md](./docs/VSCODE.md).
+
+## Project Data Management Engine
+
+Live **CPU / RAM / disk I/O / GPU**, per-project **disk impact**, **safe cleanup suggestions**, and system footprint (**WSL VHDX**, Docker, Python/torch, Ollama models, …).
+
+```powershell
+# Windows
+.\project-engine\start-engine.ps1 -Project D:\code\myapp
+# → http://127.0.0.1:8765
+```
+
+```bash
+# Ubuntu
+./project-engine/start-engine.sh /path/to/project
+```
+
+Details: [`project-engine/README.md`](./project-engine/README.md)
+
 ---
 
 ## Why host Ollama on AMD?

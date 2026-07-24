@@ -1,0 +1,2 @@
+# Optional but recommended for accurate live CPU/RAM/disk I/O
+psutil>=5.9.0
