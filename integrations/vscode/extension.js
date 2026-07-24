@@ -151,10 +151,16 @@ function sampleSourceModels(root, sources) {
 function buildOverview(root) {
   const sources = detectSources(root);
   const modelsGuessed = sampleSourceModels(root, sources);
+  const c = cfg();
+  // Never persist secrets into overview JSON written on disk
   const overview = {
     generatedAt: new Date().toISOString(),
     workspace: root,
-    aetherstack: cfg(),
+    aetherstack: {
+      baseUrl: c.baseUrl,
+      chatUiUrl: c.chatUiUrl,
+      defaultModel: c.defaultModel,
+    },
     sources,
     modelsMentioned: modelsGuessed,
     howToContinue: [
@@ -211,7 +217,9 @@ function writeOverviewFiles(root, overview) {
   md.push(`Default model: \`${overview.aetherstack.defaultModel}\``);
   md.push("");
   md.push(`---`);
-  md.push(`_This file is local project metadata for AetherStack. Safe to commit if you want team continuity._`);
+  md.push(
+    `_Project metadata for AetherStack. Do not put API keys here. Prefer User settings or env AETHERSTACK_API_KEY._`
+  );
 
   const mdPath = path.join(dir, "project-overview.md");
   fs.writeFileSync(mdPath, md.join("\n"), "utf8");
@@ -260,44 +268,51 @@ async function fetchModels() {
 
 function continueConfigYaml(c) {
   // OpenAI-compatible → LiteLLM
+  // Do NOT write real API keys into workspace files (they get committed).
+  // Continue accepts a placeholder; set AETHERSTACK_API_KEY in the environment
+  // or put the key only in User settings (not Workspace).
+  const keyPlaceholder = "${env:AETHERSTACK_API_KEY}";
   return `name: AetherStack
 version: 1.0.0
 schema: v1
+# apiBase is safe to commit. Do not put secrets in this file.
+# Set env AETHERSTACK_API_KEY=sk-... (default lab: sk-aether-local)
+# or configure aetherstack.apiKey in VS Code *User* settings.
 
 models:
   - name: Aether local-default
     provider: openai
     model: local-default
     apiBase: ${c.baseUrl}
-    apiKey: ${c.apiKey}
+    apiKey: ${keyPlaceholder}
     roles: [chat, edit, apply]
 
   - name: Aether Grok 4.5
     provider: openai
     model: grok-4.5
     apiBase: ${c.baseUrl}
-    apiKey: ${c.apiKey}
+    apiKey: ${keyPlaceholder}
     roles: [chat, edit, apply]
 
   - name: Aether GPT-4.1
     provider: openai
     model: gpt-4.1
     apiBase: ${c.baseUrl}
-    apiKey: ${c.apiKey}
+    apiKey: ${keyPlaceholder}
     roles: [chat, edit, apply]
 
   - name: Aether Claude Sonnet 4
     provider: openai
     model: claude-sonnet-4
     apiBase: ${c.baseUrl}
-    apiKey: ${c.apiKey}
+    apiKey: ${keyPlaceholder}
     roles: [chat, edit, apply]
 
   - name: Aether Gemini 2.5 Pro
     provider: openai
     model: gemini-2.5-pro
     apiBase: ${c.baseUrl}
-    apiKey: ${c.apiKey}
+    apiKey: ${keyPlaceholder}
     roles: [chat, edit, apply]
 `;
 }
@@ -476,13 +491,23 @@ function activate(context) {
         }
       }
       const c = cfg();
+      // Non-secret workspace settings only (safe-ish to commit)
       settings["aetherstack.baseUrl"] = c.baseUrl;
-      settings["aetherstack.apiKey"] = c.apiKey;
       settings["aetherstack.chatUiUrl"] = c.chatUiUrl;
       settings["aetherstack.defaultModel"] = c.defaultModel;
-      // Common OpenAI-compatible extension keys
       settings["openai.baseUrl"] = c.baseUrl;
+      // Never write aetherstack.apiKey into workspace settings.json (leaks via git)
+      if (Object.prototype.hasOwnProperty.call(settings, "aetherstack.apiKey")) {
+        delete settings["aetherstack.apiKey"];
+      }
       fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+
+      // Store API key in User settings only (not workspace / not repo)
+      if (c.apiKey) {
+        await vscode.workspace
+          .getConfiguration("aetherstack")
+          .update("apiKey", c.apiKey, vscode.ConfigurationTarget.Global);
+      }
 
       const recPath = path.join(dir, "extensions.json");
       let rec = { recommendations: [] };
@@ -493,14 +518,16 @@ function activate(context) {
           /* keep default */
         }
       }
-      const want = ["Continue.continue", "piksliviksi.aetherstack"];
+      const want = ["Continue.continue", "AetherStack.aetherstack"];
       rec.recommendations = rec.recommendations || [];
       for (const id of want) {
         if (!rec.recommendations.includes(id)) rec.recommendations.push(id);
       }
       fs.writeFileSync(recPath, JSON.stringify(rec, null, 2), "utf8");
 
-      vscode.window.showInformationMessage("Wrote .vscode/settings.json + extensions.json for AetherStack.");
+      vscode.window.showInformationMessage(
+        "Wrote .vscode settings (no API key in workspace). Key stored in User settings if set."
+      );
     })
   );
 
