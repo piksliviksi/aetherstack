@@ -1,5 +1,11 @@
 # AetherStack for VS Code
 
+**Marketplace:** [AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack)
+
+```bash
+code --install-extension AetherStack.aetherstack
+```
+
 Open a project folder, scan prior AI chat artifacts, see which tools/models were used, and continue building through [AetherStack](https://github.com/piksliviksi/aetherstack) (LiteLLM multi-model gateway + Open WebUI + Ollama).
 
 ## Features

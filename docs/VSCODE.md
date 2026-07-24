@@ -33,13 +33,22 @@ VS Code only **sends prompts over the network**; it never loads ROCm or `/dev/dx
 ## Quick start
 
 1. Start AetherStack: `start.bat` (Windows) or `./start.sh` (Ubuntu).
-2. Install the extension from this repo:
+2. Install the extension:
+
+**Marketplace (recommended):**  
+[https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack)
+
+```bash
+code --install-extension AetherStack.aetherstack
+```
+
+**From this repo (dev):**
 
 ```bash
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
 
-Or copy `integrations/vscode` to your VS Code extensions directory as `piksliviksi.aetherstack-0.1.0`.
+Or install the packaged VSIX under `packages/`.
 
 3. **File → Open Folder** on your project.
 4. Command Palette:

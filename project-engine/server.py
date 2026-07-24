@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import secrets
 import sys
 import threading
 import webbrowser
@@ -20,31 +22,44 @@ STATIC = ROOT / "static"
 DEFAULT_PORT = 8765
 
 
+def _path_under(target: Path, root: Path) -> bool:
+    """True if target is root or a strict descendant (no prefix tricks)."""
+    try:
+        target.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def _allowed_roots(project_default: str | None) -> list[Path]:
-    """Roots that /api/project and /api/full may inspect."""
-    roots: list[Path] = []
-    candidates = [
+    """
+    Roots that /api/project and /api/full may inspect.
+
+    Intentionally narrow — no whole drive letters / no /var|/opt|/tmp.
+    """
+    candidates: list[Path] = [
         Path.cwd().resolve(),
         Path.home().resolve(),
         ROOT.parent.resolve(),  # AetherStack repo
+        ROOT.resolve(),
     ]
     if project_default:
         try:
-            candidates.append(Path(project_default).expanduser().resolve())
+            p = Path(project_default).expanduser().resolve()
+            candidates.append(p)
+            # Allow scanning the project itself and its immediate parent workspace
+            if p.parent and p.parent != p:
+                candidates.append(p.parent.resolve())
         except OSError:
             pass
-    if sys.platform == "win32":
-        for letter in "CDEFGHIJ":
-            p = Path(f"{letter}:/")
-            if p.exists():
-                candidates.append(p.resolve())
-    else:
-        for p in (Path("/home"), Path("/opt"), Path("/var"), Path("/tmp")):
-            if p.exists():
-                candidates.append(p.resolve())
+
     seen: set[str] = set()
+    roots: list[Path] = []
     for c in candidates:
-        key = str(c)
+        try:
+            key = str(c.resolve())
+        except OSError:
+            continue
         if key not in seen:
             seen.add(key)
             roots.append(c)
@@ -58,29 +73,30 @@ def resolve_project_path(raw: str | None, project_default: str | None) -> tuple[
     """
     if not raw or not str(raw).strip():
         return None, "pass ?path= or start with --project"
+    if "\x00" in str(raw):
+        return None, "invalid path"
     try:
         target = Path(str(raw).strip()).expanduser().resolve(strict=False)
     except (OSError, RuntimeError) as e:
         return None, f"invalid path: {e}"
     if not target.exists() or not target.is_dir():
         return None, f"Not a directory: {target}"
-    # Reject null bytes / odd control chars
-    if "\x00" in str(raw):
-        return None, "invalid path"
+
     allowed = _allowed_roots(project_default)
-    t_str = str(target)
     for root in allowed:
-        r_str = str(root)
-        if t_str == r_str or t_str.startswith(r_str + "\\") or t_str.startswith(r_str + "/"):
+        if _path_under(target, root):
             return target, None
+    roots_hint = ", ".join(str(r) for r in allowed[:6])
+    more = " …" if len(allowed) > 6 else ""
     return None, (
-        "path not under allowed roots (cwd, home, AetherStack repo, "
-        "optional --project parent drives). Refusing filesystem scan."
+        "path not under allowed roots (cwd, home, AetherStack repo, --project). "
+        f"Allowed: {roots_hint}{more}. Refusing filesystem scan."
     )
 
 
 class Handler(BaseHTTPRequestHandler):
     project_default: str | None = None
+    engine_token: str | None = None  # if set, required for /api/*
 
     def log_message(self, fmt: str, *args) -> None:
         sys.stderr.write("[engine] " + (fmt % args) + "\n")
@@ -91,6 +107,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         # Local tool only — do not open responses to arbitrary web origins
         self.send_header("Access-Control-Allow-Origin", "null")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Aether-Token")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
@@ -98,11 +115,46 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code: int, obj) -> None:
         self._send(code, json.dumps(obj, default=str).encode("utf-8"), "application/json; charset=utf-8")
 
+    def _client_token(self, qs: dict) -> str | None:
+        auth = self.headers.get("X-Aether-Token") or self.headers.get("Authorization") or ""
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        if auth and not auth.lower().startswith("bearer"):
+            # raw header value if not Bearer scheme
+            if self.headers.get("X-Aether-Token"):
+                return self.headers.get("X-Aether-Token", "").strip()
+        xt = self.headers.get("X-Aether-Token")
+        if xt:
+            return xt.strip()
+        t = (qs.get("token") or [None])[0]
+        return t.strip() if t else None
+
+    def _require_api_auth(self, qs: dict) -> bool:
+        """Return True if request may proceed; send 401 and return False if blocked."""
+        expected = self.engine_token
+        if not expected:
+            return True
+        got = self._client_token(qs)
+        if (
+            got
+            and len(got) == len(expected)
+            and secrets.compare_digest(got, expected)
+        ):
+            return True
+        self._json(
+            401,
+            {
+                "error": "unauthorized",
+                "hint": "Set header X-Aether-Token or ?token= (env AETHERSTACK_ENGINE_TOKEN / --token)",
+            },
+        )
+        return False
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "null")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Aether-Token")
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
@@ -113,11 +165,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/index.html"):
             html = (STATIC / "index.html").read_bytes()
+            # Soft hint for UI: whether token is required (never embed the secret)
+            flag = b"true" if self.engine_token else b"false"
+            html = html.replace(b"__AETHER_TOKEN_REQUIRED__", flag)
+            roots = [str(r) for r in _allowed_roots(self.project_default)]
+            html = html.replace(
+                b"__AETHER_ALLOWED_ROOTS__",
+                json.dumps(roots).encode("utf-8"),
+            )
             self._send(200, html, "text/html; charset=utf-8")
             return
         if path.startswith("/static/"):
             rel = path[len("/static/") :]
-            # block path traversal in static
             if ".." in rel.replace("\\", "/").split("/"):
                 self._json(404, {"error": "not found"})
                 return
@@ -125,9 +184,20 @@ class Handler(BaseHTTPRequestHandler):
             if not str(fp).startswith(str(STATIC.resolve())) or not fp.is_file():
                 self._json(404, {"error": "not found"})
                 return
-            ctype = "text/css" if fp.suffix == ".css" else "application/javascript" if fp.suffix == ".js" else "application/octet-stream"
+            ctype = (
+                "text/css"
+                if fp.suffix == ".css"
+                else "application/javascript"
+                if fp.suffix == ".js"
+                else "application/octet-stream"
+            )
             self._send(200, fp.read_bytes(), ctype)
             return
+
+        # API routes need optional token
+        if path.startswith("/api/"):
+            if path != "/api/health" and not self._require_api_auth(qs):
+                return
 
         try:
             if path == "/api/live":
@@ -145,14 +215,42 @@ class Handler(BaseHTTPRequestHandler):
                 if err and project_raw:
                     self._json(400, {"error": err})
                 elif err:
-                    # full without project still returns live+system
                     self._json(200, full_report(None))
                 else:
                     self._json(200, full_report(str(target)))
             elif path == "/api/health":
-                self._json(200, {"ok": True, "service": "aetherstack-project-engine"})
+                self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "service": "aetherstack-project-engine",
+                        "auth_required": bool(self.engine_token),
+                    },
+                )
+            elif path == "/api/roots":
+                self._json(
+                    200,
+                    {
+                        "allowed_roots": [str(r) for r in _allowed_roots(self.project_default)],
+                        "auth_required": bool(self.engine_token),
+                    },
+                )
             else:
-                self._json(404, {"error": "not found", "paths": ["/", "/api/live", "/api/system", "/api/project", "/api/full"]})
+                self._json(
+                    404,
+                    {
+                        "error": "not found",
+                        "paths": [
+                            "/",
+                            "/api/live",
+                            "/api/system",
+                            "/api/project",
+                            "/api/full",
+                            "/api/health",
+                            "/api/roots",
+                        ],
+                    },
+                )
         except Exception as e:
             self._json(500, {"error": str(e)})
 
@@ -162,6 +260,11 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1", help="Bind address (default localhost only)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--project", default=None, help="Default project path for scans")
+    ap.add_argument(
+        "--token",
+        default=os.environ.get("AETHERSTACK_ENGINE_TOKEN") or None,
+        help="Optional shared secret for /api/* (or env AETHERSTACK_ENGINE_TOKEN)",
+    )
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
 
@@ -172,13 +275,18 @@ def main() -> None:
         )
 
     Handler.project_default = args.project
+    Handler.engine_token = (args.token or "").strip() or None
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}/"
     if args.project:
         url += f"?project={args.project}"
     print(f"AetherStack Project Engine → {url}")
-    print("API: /api/live  /api/system  /api/project?path=  /api/full")
-    print("Project scans restricted to allowed roots (cwd, home, repo, drives).")
+    print("API: /api/live  /api/system  /api/project?path=  /api/full  /api/roots")
+    print("Project scans: cwd, home, AetherStack repo, --project only (no whole drives).")
+    if Handler.engine_token:
+        print("Auth: ON — send X-Aether-Token or ?token= for /api/* (except /api/health).")
+    else:
+        print("Auth: OFF — set AETHERSTACK_ENGINE_TOKEN or --token to require a secret.")
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
