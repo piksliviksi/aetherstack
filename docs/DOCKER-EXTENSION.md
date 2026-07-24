@@ -1,8 +1,6 @@
 # AetherStack as a Docker Desktop Extension
 
-## Feasibility
-
-**Yes.** Docker Extensions are a supported way to ship a UI + optional backend next to Docker Desktop. AetherStack maps well:
+Docker Extensions are a supported way to ship a UI + optional backend next to Docker Desktop. AetherStack maps well:
 
 | Extension piece | AetherStack mapping |
 |-----------------|---------------------|
