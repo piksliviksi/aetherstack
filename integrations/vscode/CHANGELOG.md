@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- **Security:** do not write API keys into workspace files (Continue config uses `${env:AETHERSTACK_API_KEY}`; `.vscode/settings.json` strips `aetherstack.apiKey`; keys go to User settings only)
+- Overview JSON/Markdown omit secrets
+- Recommend `AetherStack.aetherstack` (not old publisher id) in workspace `extensions.json`
+- Activity bar icon uses monochrome `currentColor` so it shows in the VS Code Activity Bar
+- README + package homepage link to the how-to guide: [VSCODE-EXTENSION.md](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)
+
 ## 0.1.0
 
 - Initial release
