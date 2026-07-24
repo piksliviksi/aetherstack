@@ -1,10 +1,16 @@
 {
   "name": "aetherstack",
   "displayName": "AetherStack",
-  "description": "Open project AI history overview and continue building via AetherStack (LiteLLM + Open WebUI + multi-model).",
+  "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama).",
   "version": "0.1.0",
   "publisher": "piksliviksi",
   "license": "MIT",
+  "pricing": "Free",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0b1020",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -17,7 +23,9 @@
     "aetherstack",
     "ollama",
     "continue",
-    "litellm"
+    "litellm",
+    "openai",
+    "multi-model"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -113,5 +121,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/piksliviksi/aetherstack"
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/piksliviksi/aetherstack/issues"
+  },
+  "homepage": "https://github.com/piksliviksi/aetherstack/tree/main/integrations/vscode",
+  "qna": "https://github.com/piksliviksi/aetherstack/issues"
 }
