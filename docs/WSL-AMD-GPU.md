@@ -56,6 +56,11 @@ ollama run tinyllama "hi"
 
 Optional: upgrade Adrenalin to **26.2.2+**, then retest.
 
+## VS Code on the same machine
+
+**VS Code does not attach to the AMD GPU for LLM work on Windows 11.**  
+Wire Continue/Cline to LiteLLM (`http://127.0.0.1:4000/v1`); keep **Ollama in WSL** as the only process that should use ROCm/DXG. See [VSCODE.md](./VSCODE.md).
+
 ## Dual-boot alternative
 
 For full Mesa Vulkan + native `amdgpu` (no DXG): install Debian bare metal with Mesa/ROCm — more reliable than WSL for RDNA2 inference.

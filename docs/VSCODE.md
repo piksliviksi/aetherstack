@@ -4,6 +4,32 @@
 
 Open a **project folder** in VS Code, recover context from **previous AI chats** (when stored in the repo or known folders), see **which models/tools were used**, and **continue** via AetherStack (multi-model LiteLLM + Open WebUI + optional Ollama).
 
+## Important: VS Code does **not** use the AMD GPU on Windows 11
+
+This is expected and not a bug in AetherStack.
+
+| Layer | Runs on | AMD GPU? |
+|-------|---------|----------|
+| **VS Code UI** | Windows process | Display only (Chromium/ANGLE) — **not** LLM compute |
+| **Continue / Cline / Copilot chat UI** | VS Code extension host | **No** local ROCm/CUDA inside the extension |
+| **AetherStack LiteLLM** (`:4000`) | Docker | CPU gateway only |
+| **Local model inference** | **Host Ollama** or **WSL Ollama + ROCm/DXG** | **Yes — only here** |
+
+```
+VS Code  ──HTTP──►  LiteLLM :4000  ──HTTP──►  Ollama (Windows or WSL)
+   │                      │                        │
+   │ no GPU for LLM       │ no GPU                 │ AMD RX 6600 XT
+   └──────────────────────┴────────────────────────┘  (ROCm / Vulkan / DXG)
+```
+
+**On Win11 + Radeon, do this:**
+
+1. Run GPU inference in **WSL Ollama** (ROCm/DXG — see [WSL-AMD-GPU.md](./WSL-AMD-GPU.md)) or native Ollama if it supports your card.  
+2. Keep AetherStack stack up (`start.bat`).  
+3. Point VS Code tools at **`http://127.0.0.1:4000/v1`** (or Open WebUI at `:3000`).  
+
+VS Code only **sends prompts over the network**; it never loads ROCm or `/dev/dxg`. NVIDIA on Windows is similar for most extensions (host Ollama/CUDA or cloud), except some vendor plugins — still not “VS Code owns the GPU.”
+
 ## Quick start
 
 1. Start AetherStack: `start.bat` (Windows) or `./start.sh` (Ubuntu).
