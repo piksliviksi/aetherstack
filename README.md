@@ -170,6 +170,22 @@ Use **Open WebUI** at http://localhost:3000 for a UI without hand-rolling header
 
 Optional UI inside Docker Desktop — scaffold in [`extension/`](./extension/), guide: [docs/DOCKER-EXTENSION.md](./docs/DOCKER-EXTENSION.md).
 
+## VS Code projects
+
+Open a folder, scan prior AI chats (Continue / Claude / Aider / WayLog / …), write `.aetherstack/project-overview.md`, and wire **Continue.dev** to AetherStack so you can keep building with every model on the gateway.
+
+| Piece | Location |
+|-------|----------|
+| Extension | [`integrations/vscode/`](./integrations/vscode/) |
+| Tutorial | [docs/VSCODE.md](./docs/VSCODE.md) |
+| CLI scan | `scripts/scan-project-ai.ps1` / `scripts/scan-project-ai.sh` |
+
+```bash
+code --install-extension integrations/vscode
+# Command Palette → AetherStack: Scan Project AI History
+# Command Palette → AetherStack: Wire Continue.dev to AetherStack
+```
+
 ---
 
 ## Why host Ollama on AMD?

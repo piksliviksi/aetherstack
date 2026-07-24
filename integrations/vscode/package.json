@@ -1,0 +1,113 @@
+{
+  "name": "aetherstack",
+  "displayName": "AetherStack",
+  "description": "Open project AI history overview and continue building via AetherStack (LiteLLM + Open WebUI + multi-model).",
+  "version": "0.1.0",
+  "publisher": "piksliviksi",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "llm",
+    "aetherstack",
+    "ollama",
+    "continue",
+    "litellm"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aetherstack.scanProject",
+        "title": "AetherStack: Scan Project AI History"
+      },
+      {
+        "command": "aetherstack.showOverview",
+        "title": "AetherStack: Show Project Overview"
+      },
+      {
+        "command": "aetherstack.configureContinue",
+        "title": "AetherStack: Wire Continue.dev to AetherStack"
+      },
+      {
+        "command": "aetherstack.configureWorkspace",
+        "title": "AetherStack: Write .vscode Settings for AetherStack"
+      },
+      {
+        "command": "aetherstack.openChatUI",
+        "title": "AetherStack: Open Chat UI (Open WebUI)"
+      },
+      {
+        "command": "aetherstack.openModels",
+        "title": "AetherStack: List Models (API)"
+      },
+      {
+        "command": "aetherstack.saveSnapshot",
+        "title": "AetherStack: Save Chat Snapshot Note"
+      }
+    ],
+    "configuration": {
+      "title": "AetherStack",
+      "properties": {
+        "aetherstack.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4000/v1",
+          "description": "LiteLLM OpenAI-compatible base URL"
+        },
+        "aetherstack.apiKey": {
+          "type": "string",
+          "default": "sk-aether-local",
+          "description": "LiteLLM master key (Authorization Bearer)"
+        },
+        "aetherstack.chatUiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3000",
+          "description": "Open WebUI URL"
+        },
+        "aetherstack.defaultModel": {
+          "type": "string",
+          "default": "local-default",
+          "description": "Default model id from AetherStack /v1/models"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aetherstack",
+          "title": "AetherStack",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aetherstack": [
+        {
+          "id": "aetherstack.overview",
+          "name": "Project AI Overview"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "aetherstack.scanProject",
+          "when": "view == aetherstack.overview",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/piksliviksi/aetherstack"
+  }
+}
