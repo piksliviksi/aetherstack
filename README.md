@@ -140,19 +140,21 @@ API key:  only if LITELLM_MASTER_KEY is set in .env
 
 ### LiteLLM 401 “No api key passed in”
 
-Opening `http://localhost:4000/v1/models` in a browser sends **no** `Authorization` header. If `LITELLM_MASTER_KEY` is set, LiteLLM returns 401.
-
-**Fix A — open local lab (default in this repo):** leave `LITELLM_MASTER_KEY=` empty in `.env`, then:
+**Expected.** LiteLLM always wants an API key on `/v1/*`. A normal browser tab does **not** send one.
 
 ```bash
-docker compose up -d --force-recreate litellm
-```
+# Windows
+powershell -File scripts/list-models.ps1
 
-**Fix B — keep a key (recommended if LAN-exposed):**
+# Linux / macOS
+./scripts/list-models.sh
 
-```bash
+# or:
 curl http://localhost:4000/v1/models -H "Authorization: Bearer sk-aether-local"
 ```
+
+Default key: `sk-aether-local` (from `.env` → `LITELLM_MASTER_KEY`).  
+Use **Open WebUI** at http://localhost:3000 for a UI without hand-rolling headers.
 
 ---
 

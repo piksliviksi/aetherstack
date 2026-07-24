@@ -58,8 +58,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      # Empty = open local lab (browser can open /v1/models). Set sk-... to require auth.
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
+      # Required by current LiteLLM for /v1/* — browsers must send Authorization header.
+      # Default is for local lab only; change if you expose the port.
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
