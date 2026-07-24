@@ -1,0 +1,18 @@
+{
+  "name": "AetherStack",
+  "provider": "piksliviksi",
+  "icon": "aetherstack.svg",
+  "vm": {
+    "composefile": "docker-compose.yaml",
+    "exposes": {
+      "socket": "backend.sock"
+    }
+  },
+  "ui": {
+    "dashboard-tab": {
+      "title": "AetherStack",
+      "root": "/ui",
+      "src": "index.html"
+    }
+  }
+}

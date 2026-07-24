@@ -1,0 +1,24 @@
+# Optional overlay: NVIDIA CUDA for Ollama-in-container
+# Prerequisites (Linux or Windows Docker Desktop with WSL2 backend):
+#   - NVIDIA driver
+#   - NVIDIA Container Toolkit (Linux) / Docker Desktop GPU support
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml --profile with-ollama-container up -d
+#
+# Prefer host Ollama when possible; this profile is for full-in-Docker setups.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    gpus: all
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,0 +1,151 @@
+# AetherStack — LiteLLM multi-provider config
+# One OpenAI-compatible endpoint for local + cloud models.
+# Aliases (model_name) are what clients request; litellm_params.model is the provider slug.
+# Set API keys in .env — unused providers are simply not called.
+
+model_list:
+  # ── Local (host Ollama; WSL ROCm recommended on AMD) ──────────────
+  - model_name: local-default
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: http://host.docker.internal:11434
+
+  - model_name: local-llama
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: http://host.docker.internal:11434
+
+  - model_name: local-tiny
+    litellm_params:
+      model: ollama/tinyllama
+      api_base: http://host.docker.internal:11434
+
+  # ── xAI / Grok (latest first) ─────────────────────────────────────
+  - model_name: grok
+    litellm_params:
+      model: xai/grok-4.5
+      api_key: os.environ/XAI_API_KEY
+
+  - model_name: grok-4.5
+    litellm_params:
+      model: xai/grok-4.5
+      api_key: os.environ/XAI_API_KEY
+
+  - model_name: grok-4.3
+    litellm_params:
+      model: xai/grok-4.3
+      api_key: os.environ/XAI_API_KEY
+
+  - model_name: grok-4
+    litellm_params:
+      model: xai/grok-4
+      api_key: os.environ/XAI_API_KEY
+
+  - model_name: grok-4-fast
+    litellm_params:
+      model: xai/grok-4-1-fast-reasoning
+      api_key: os.environ/XAI_API_KEY
+
+  - model_name: grok-4-fast-non-reasoning
+    litellm_params:
+      model: xai/grok-4-1-fast-non-reasoning
+      api_key: os.environ/XAI_API_KEY
+
+  - model_name: grok-code
+    litellm_params:
+      model: xai/grok-code-fast-1
+      api_key: os.environ/XAI_API_KEY
+
+  - model_name: grok-3
+    litellm_params:
+      model: xai/grok-3
+      api_key: os.environ/XAI_API_KEY
+
+  # ── OpenAI ────────────────────────────────────────────────────────
+  - model_name: gpt-4.1
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4.1-mini
+    litellm_params:
+      model: openai/gpt-4.1-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: o3
+    litellm_params:
+      model: openai/o3
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: o4-mini
+    litellm_params:
+      model: openai/o4-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: codex
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai-default
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ── Anthropic / Claude ────────────────────────────────────────────
+  - model_name: claude
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet-4
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-opus-4
+    litellm_params:
+      model: anthropic/claude-opus-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku
+    litellm_params:
+      model: anthropic/claude-3-5-haiku-latest
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ── Google Gemini (optional GOOGLE_API_KEY) ───────────────────────
+  - model_name: gemini
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_key: os.environ/GOOGLE_API_KEY
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  # Prefer failing with a clear auth/model error over silent wrong defaults
+  # request_timeout: 600
