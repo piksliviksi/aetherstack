@@ -5,3 +5,5 @@ Thumbs.db
 models/
 data/
 *.log
+*.err
+webui-up.*

@@ -41,35 +41,48 @@
 
 ---
 
-## Quick start
+## Quick start (click to run)
 
-### 1. Prerequisites
+### Windows 11
 
-- [Docker](https://docs.docker.com/get-docker/) / Docker Desktop  
-- [Ollama](https://ollama.com) **on the host** (recommended for GPU)
+1. Install [Docker Desktop](https://docs.docker.com/desktop/) + (optional) [Ollama](https://ollama.com).  
+2. Clone this repo.  
+3. **Double-click `start.bat`**  
+4. Stop later with **`stop.bat`**
 
-```bash
-# Install a small local model (example)
-ollama pull llama3.1:8b
-```
+Full walkthrough: [docs/TUTORIAL-WINDOWS.md](./docs/TUTORIAL-WINDOWS.md)
 
-### 2. Clone & configure
+### Ubuntu (native)
 
 ```bash
 git clone https://github.com/piksliviksi/aetherstack.git
 cd aetherstack
-cp .env.example .env
-# Edit .env — add OPENAI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY as needed
+chmod +x start.sh stop.sh
+./start.sh          # starts Docker services + opens browser
+./stop.sh           # stop
 ```
 
-### 3. Start the control plane
+Full walkthrough: [docs/TUTORIAL-UBUNTU.md](./docs/TUTORIAL-UBUNTU.md)
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) (Desktop on Windows, Engine on Ubuntu)  
+- [Ollama](https://ollama.com) **on the host** (recommended for GPU)
+
+```bash
+ollama pull llama3.1:8b
+```
+
+```bash
+cp .env.example .env
+# Edit .env — OPENAI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY
+```
+
+Manual start (any OS with Docker):
 
 ```bash
 docker compose up -d
 ```
-
-This starts **Open WebUI**, **LiteLLM**, and **Redis**.  
-They talk to host Ollama at `http://host.docker.internal:11434`.
 
 | Open | URL |
 |------|-----|
