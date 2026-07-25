@@ -28,7 +28,13 @@ class MemoryStore:
         self._r = None
         if redis is not None:
             try:
-                self._r = redis.Redis.from_url(self.url, decode_responses=True)
+                # Short connect/socket timeouts so missing Redis fails fast → memory fallback
+                self._r = redis.Redis.from_url(
+                    self.url,
+                    decode_responses=True,
+                    socket_connect_timeout=float(os.environ.get("AETHER_REDIS_CONNECT_TIMEOUT", "1.5")),
+                    socket_timeout=float(os.environ.get("AETHER_REDIS_SOCKET_TIMEOUT", "3")),
+                )
                 self._r.ping()
             except Exception:
                 self._r = None
@@ -112,8 +118,15 @@ class MemoryStore:
         """
         Prefer Ollama embeddings; fall back to deterministic hash embedding
         so lab demos work without models (weaker recall quality).
+        Set AETHER_HASH_EMBED=1 to skip network (tests / offline).
         """
-        base = (os.environ.get("OLLAMA_BASE_URL") or "http://host.docker.internal:11434").rstrip("/")
+        if os.environ.get("AETHER_HASH_EMBED", "").strip().lower() in ("1", "true", "yes"):
+            return _hash_embed(text, dim=256)
+        base = (
+            os.environ.get("OLLAMA_BASE_URL")
+            or os.environ.get("AETHER_EMBED_URL")
+            or "http://host.docker.internal:11434"
+        ).rstrip("/")
         model = os.environ.get("AETHER_EMBED_MODEL", "nomic-embed-text")
         body = json.dumps({"model": model, "prompt": text}).encode("utf-8")
         req = urllib.request.Request(
@@ -122,8 +135,9 @@ class MemoryStore:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        timeout = float(os.environ.get("AETHER_EMBED_TIMEOUT", "2.5"))
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 data = json.loads(r.read().decode())
             emb = data.get("embedding")
             if isinstance(emb, list) and emb:

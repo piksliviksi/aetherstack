@@ -61,6 +61,7 @@ After that you do **not** hop between Claude.app, Grok, and ChatGPT for normal w
 - **You** chat in one thread, same as with a single product model.  
 - **Hub** (if multi-agent / pipeline is active) splits work: e.g. high-tier research, another maker for critique/ack, cheap/local for bulk code and tests.  
 - **Memory** keeps decisions when you `/done` and `/clear` or `/compact`, so context stays lean without losing history.  
+- **Cross-project memory** (optional): index `.claude` / `.continue` / `.cursor` / … across repos; with **multi-project mode ON**, search and **auto-pull** already built/tested concepts into the active plan. See [docs/CROSS-MEMORY.md](./docs/CROSS-MEMORY.md).  
 - **GPU** stays on the host (not inside VS Code). The IDE only speaks HTTP to the gateway.
 
 ### Policy you control (without changing the chat UI)
@@ -73,6 +74,7 @@ After that you do **not** hop between Claude.app, Grok, and ChatGPT for normal w
 | Token spend discipline | Hub token saver; shorter prompts; `/clear` after tasks |
 | Hardware vs cloud | Local combos (`fable`, `private_local`) vs cloud stages |
 | Share setups | Export/import `.aether-combo.json` / `.aether-pipeline.json` / graphs |
+| Multi-project memory | Hub `/api/xref` (off by default) + `scripts/scan-cross-projects.ps1` |
 
 ### What “looks like one model” means in VS Code
 

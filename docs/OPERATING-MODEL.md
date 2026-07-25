@@ -108,6 +108,7 @@ Chat in VS Code (one model façade)
 | [PIPELINES.md](./PIPELINES.md) | Stage scripts + voting |
 | [NODE-GRAPH.md](./NODE-GRAPH.md) | Visual canvas |
 | [SLASH-COMMANDS.md](./SLASH-COMMANDS.md) | `/clear` memory hygiene |
+| [CROSS-MEMORY.md](./CROSS-MEMORY.md) | Multi-project session/code/research pull |
 | [AGENT-MODES.md](./AGENT-MODES.md) | inline vs multi-agent |
 | [AMD-COMPUTE.md](./AMD-COMPUTE.md) | Radeon CUs |
 | [TUTORIAL-MACOS.md](./TUTORIAL-MACOS.md) | Metal on Apple Silicon |
