@@ -10,7 +10,7 @@
 | **VS Code** | [Marketplace: AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
 | **Who it’s for** | Anyone who wants a small, shareable stack without installing a full “AI distro” |
 | **Platforms** | **Windows 11**, **macOS** (Intel / **Apple Silicon ARM + Metal**), **Ubuntu/Linux** |
-| **GPU note** | Host Ollama: **Metal (Mac ARM)**, ROCm (AMD WSL/Linux), CUDA (NVIDIA); Docker = UI/gateway only |
+| **GPU note** | Host Ollama must use **compute engines**: Metal (Mac ARM), **ROCm/HIP CUs** (AMD), CUDA (NVIDIA); Docker = UI/gateway only |
 
 ---
 
@@ -365,6 +365,18 @@ Ready-made JSON: [combos/export/](./combos/export/) · guide: [combos/README.md]
 ### Mac ARM GPU
 
 **Supported** via **host Ollama + Apple Metal** (not ROCm/CUDA). Use combos `inline_fable` / `private_local`. Details: [docs/TUTORIAL-MACOS.md](./docs/TUTORIAL-MACOS.md).
+
+### AMD compute engines (Radeon CUs)
+
+`rocminfo` seeing the card is not enough — Ollama must load the **ROCm** package so HIP runs on the GPU’s **compute units** (e.g. 32 CUs on RX 6600 XT). On WSL, stock install often skips ROCm (no `lspci` amdgpu).
+
+```powershell
+# Force ROCm runners + wire env (Debian WSL)
+wsl -d Debian -- bash -lc "sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh"
+wsl -d Debian -- bash -lc "bash /mnt/d/llm/stack/scripts/amd-compute-status.sh"
+```
+
+Guide: [docs/AMD-COMPUTE.md](./docs/AMD-COMPUTE.md) · WSL notes: [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md)
 
 ## Related
 

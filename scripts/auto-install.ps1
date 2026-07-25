@@ -140,13 +140,17 @@ if ($IncludeElevated) {
   # portproxy
   $ens = Join-Path $Root "scripts\ensure-wsl-ollama.ps1"
   if (Test-Path $ens) { & powershell -NoProfile -ExecutionPolicy Bypass -File $ens 2>&1 | Out-Host }
-  # ROCm ollama package in WSL
+  # ROCm ollama package — required to use AMD compute units (not stock install on WSL)
   $rocm = (wsl -d $Distro -- bash -lc "test -d /usr/local/lib/ollama/rocm && echo yes || echo no" 2>$null)
   if ($rocm -match "no") {
-    Write-Host "  Installing Ollama (may fetch ROCm bundle) in WSL — long download…" -ForegroundColor Yellow
-    wsl -d $Distro -- bash -lc "curl -fsSL https://ollama.com/install.sh | sudo sh" 2>&1 | Select-Object -Last 20
-    wsl -d $Distro -- bash -lc "sudo mkdir -p /etc/systemd/system/ollama.service.d; printf '%s\n' '[Service]' 'Environment=HSA_ENABLE_DXG_DETECTION=1' 'Environment=HSA_OVERRIDE_GFX_VERSION=10.3.0' 'Environment=OLLAMA_HOST=0.0.0.0:11434' 'Environment=LD_LIBRARY_PATH=/opt/rocm/lib:/usr/lib/wsl/lib' | sudo tee /etc/systemd/system/ollama.service.d/aether-rocm.conf; sudo systemctl daemon-reload; sudo systemctl restart ollama" 2>&1 | Select-Object -Last 15
+    Write-Host "  Installing Ollama ROCm backend for AMD compute engines (large download)..." -ForegroundColor Yellow
+    $script = "/mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh"
+    # Prefer repo path if mounted; fall back to copy
+    wsl -d $Distro -- bash -lc "if [ -f '$script' ]; then sudo bash '$script'; else curl -fsSL https://ollama.com/download/ollama-linux-amd64-rocm.tar.zst -o /tmp/rocm.tzst && sudo mkdir -p /usr/local && sudo zstd -d -c /tmp/rocm.tzst | sudo tar -xf - -C /usr/local; fi" 2>&1 | Select-Object -Last 30
+  } else {
+    Write-Host "  Ollama ROCm libs present." -ForegroundColor Green
   }
+  wsl -d $Distro -- bash -lc "bash /mnt/d/llm/stack/scripts/amd-compute-status.sh 2>/dev/null || true" 2>&1 | Select-Object -Last 25
 }
 
 # 5) Tell hub to apply safe leftovers + refresh

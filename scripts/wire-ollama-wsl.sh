@@ -21,13 +21,15 @@ RestartSec=3
 Environment=OLLAMA_HOST=0.0.0.0:11434
 Environment=OLLAMA_ORIGINS=*
 
-# AMD ROCm via ROCDXG (DXCore) in WSL
+# AMD compute engines via ROCm + ROCDXG (DXCore) in WSL
 Environment=HSA_ENABLE_DXG_DETECTION=1
+# RDNA2 consumer (RX 6600 XT / gfx1032) — expose as gfx1030 for HIP kernels
+Environment=HSA_OVERRIDE_GFX_VERSION=10.3.0
 Environment=LD_LIBRARY_PATH=/opt/rocm/lib:/usr/lib/wsl/lib
 Environment=PATH=/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/wsl/lib
-
-# Optional RDNA2 override for some ROCm apps (uncomment if needed):
-# Environment=HSA_OVERRIDE_GFX_VERSION=10.3.0
+Environment=HIP_VISIBLE_DEVICES=0
+Environment=ROCR_VISIBLE_DEVICES=0
+Environment=OLLAMA_VULKAN=false
 
 [Install]
 WantedBy=default.target
