@@ -15,4 +15,5 @@ __pycache__/
 
 # Local-only (do not publish)
 docs/VSCODE-PUBLISH.md
+docs/FUTURE.md
 
