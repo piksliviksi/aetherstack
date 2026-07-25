@@ -292,6 +292,7 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 |-----|--------|
 | [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) | Local ↔ cloud routing / sync matrix |
 | [docs/AGENT-MEMORY.md](./docs/AGENT-MEMORY.md) | Redis sessions + vector search |
+| [docs/AGENT-MODES.md](./docs/AGENT-MODES.md) | Inline vs multi-agent, token saver, multi-LLM roles |
 | [`aether-hub/`](./aether-hub/) | Service source |
 
 ```bash
@@ -300,7 +301,11 @@ curl -s http://127.0.0.1:8766/api/discover | jq .summary
 # Windows deep scan (WSL/GPU/ports):  .\scripts\scan-system.ps1
 # Linux/macOS:                        ./scripts/scan-system.sh
 
-# 2) Best model for coding, prefer local
+# 2) Optional: multi-agent + token saver, pin roles by maker/tier/model
+curl -s -X POST http://127.0.0.1:8766/api/modes -H "Content-Type: application/json" \
+  -d "{\"mode\":\"multi_agent\",\"token_saver\":true,\"role_overrides\":{\"mastermind\":{\"maker\":\"xai\"},\"worker\":{\"tier\":\"local\",\"strategy\":\"cheapest\"}}}"
+
+# 3) Best model for coding, prefer local
 curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local"
 
 # 3) Shared memory search

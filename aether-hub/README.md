@@ -49,6 +49,20 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
   -d '{"model":"local-default","messages":[{"role":"user","content":"hi"}]}'
 ```
 
+### Agent modes (inline / multi-agent + token saver)
+
+```bash
+curl -s http://127.0.0.1:8766/api/modes | jq .runtime
+curl -s -X POST http://127.0.0.1:8766/api/modes \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"multi_agent","token_saver":true,"role_overrides":{"mastermind":{"maker":"xai"},"worker":{"strategy":"cheapest"}}}'
+curl -s -X POST http://127.0.0.1:8766/api/agents/plan \
+  -H "Content-Type: application/json" \
+  -d '{"goal":"Ship a patch","workers":2}'
+```
+
+Full guide: [docs/AGENT-MODES.md](../docs/AGENT-MODES.md)
+
 ### Memory example
 
 ```bash

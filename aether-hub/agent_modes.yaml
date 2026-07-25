@@ -1,0 +1,134 @@
+# AetherStack agent modes + optional token saver
+# Toggle at runtime via POST /api/modes  (persisted in Redis when available)
+
+version: 1
+
+# Default switches (user can flip without editing this file)
+defaults:
+  # inline = single model handles the whole event
+  # multi_agent = mastermind + supervisor + workers (possibly different LLMs)
+  mode: inline
+  # When true, prefer cheap/local paths, cap tokens, compress context
+  token_saver: false
+
+# Token saver knobs (only applied when token_saver=true)
+token_saver:
+  prefer_local: true
+  prefer_cheap: true
+  # Cap completion tokens per role
+  max_tokens:
+    mastermind: 1024
+    supervisor: 512
+    worker: 768
+    inline: 1024
+  # Soft cap on prompt characters injected into workers
+  max_prompt_chars:
+    mastermind: 12000
+    supervisor: 8000
+    worker: 6000
+    inline: 12000
+  # Drop low-value memory hits below this cosine score
+  memory_min_score: 0.35
+  # Max memory snippets attached
+  memory_top_k: 3
+  # Compress long user payloads (keep head+tail)
+  compress_input: true
+  compress_keep_head: 2000
+  compress_keep_tail: 1000
+  # Prefer these capability tags when routing under saver
+  route_need: [cheap, fast, chat]
+
+# Multi-agent role definitions
+# User can override model selection by: price | tier | maker | model | capability
+roles:
+  mastermind:
+    description: Orchestrates the event — plans, splits work, picks workers
+    needs: [reason, tools, chat]
+    prefer: cloud
+    # Selection policy (first match wins unless force_model set)
+    select:
+      strategy: best_score   # best_score | cheapest | by_maker | by_model | by_tier
+      # Optional hard pins (examples — leave null for auto):
+      model: null            # e.g. grok-4.5
+      maker: null            # ollama | openai | anthropic | xai | google
+      tier: null             # local | cloud
+      max_cost: high         # 0 | low | medium | high | very_high
+    max_workers: 4
+
+  supervisor:
+    description: Reviews worker outputs, quality-gates, may request rework
+    needs: [reason, chat]
+    prefer: cloud
+    select:
+      strategy: best_score
+      model: null
+      maker: null
+      tier: null
+      max_cost: high
+    # If true, supervisor runs after each worker batch
+    after_each_batch: true
+
+  worker:
+    description: Bulk work (drafts, code chunks, extraction) — cost-sensitive
+    needs: [chat, code, cheap]
+    prefer: local
+    select:
+      strategy: cheapest
+      model: null
+      maker: null
+      tier: null
+      max_cost: medium
+    # How many parallel worker agents for one event (plan only; execution optional)
+    default_parallel: 2
+    max_parallel: 6
+
+  inline:
+    description: Single-model path when mode=inline
+    needs: [chat]
+    prefer: auto
+    select:
+      strategy: best_score
+      model: null
+      maker: null
+      tier: null
+      max_cost: very_high
+
+# Named presets users can apply in one shot
+presets:
+  thrifty:
+    mode: multi_agent
+    token_saver: true
+    roles:
+      mastermind: { select: { strategy: cheapest, max_cost: medium } }
+      supervisor: { select: { strategy: cheapest, max_cost: medium } }
+      worker: { select: { strategy: cheapest, max_cost: low, prefer: local } }
+
+  quality:
+    mode: multi_agent
+    token_saver: false
+    roles:
+      mastermind: { select: { strategy: best_score, maker: xai } }
+      supervisor: { select: { strategy: best_score, maker: anthropic } }
+      worker: { select: { strategy: best_score, maker: openai } }
+
+  local_only:
+    mode: multi_agent
+    token_saver: true
+    roles:
+      mastermind: { select: { strategy: best_score, tier: local } }
+      supervisor: { select: { strategy: best_score, tier: local } }
+      worker: { select: { strategy: cheapest, tier: local } }
+
+  single_inline:
+    mode: inline
+    token_saver: false
+    roles:
+      inline: { select: { strategy: best_score } }
+
+# Cost ranking for comparisons (lower = cheaper)
+cost_rank:
+  0: 0
+  low: 1
+  medium: 2
+  high: 3
+  very_high: 4
