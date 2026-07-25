@@ -165,7 +165,6 @@ Procedure: [docs/QUICKSTART.md](./docs/QUICKSTART.md)
 | Capability matrix | [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) |
 | Project engine | [project-engine/README.md](./project-engine/README.md) |
 | Security | [docs/SECURITY-NOTES.md](./docs/SECURITY-NOTES.md) |
-| Future / enterprise | [docs/FUTURE.md](./docs/FUTURE.md) |
 | Full index | [docs/README.md](./docs/README.md) |
 
 ---

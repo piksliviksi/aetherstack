@@ -3,7 +3,7 @@
 Export AetherStack **memory, research, session context** — per **project** or **global** — **manually** or on a **schedule**.  
 Write to a **local folder** on the PC and/or a pre-configured **AWS S3** / **Azure Blob** bucket.
 
-Status: **shipped** for local hub (lab). Enterprise tenant silo DR remains in [FUTURE.md](./FUTURE.md).
+Status: **shipped** for local hub (lab).
 
 ---
 
