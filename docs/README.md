@@ -27,6 +27,7 @@ This tree holds procedures, APIs, and platform facts.
 | [DOCKER-EXTENSION.md](./DOCKER-EXTENSION.md) | Docker Desktop extension scaffold |
 | [GATEWAY.md](./GATEWAY.md) | LiteLLM aliases, keys, 401 |
 | [MULTI-KEYS.md](./MULTI-KEYS.md) | Personal + enterprise keys per provider |
+| [BACKUP.md](./BACKUP.md) | Project/global backup to local PC, AWS, Azure |
 
 ---
 

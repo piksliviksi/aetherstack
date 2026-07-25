@@ -68,7 +68,9 @@ Relationship to current local private mode: [PRIVATE-MODE.md](./PRIVATE-MODE.md)
 
 ### Backup and restore
 
-Enterprise account data can be **backed up to destinations controlled by the client**, not only platform-managed storage.
+**Local PC backups (project/global → folder / S3 / Azure)** are shipped for single-machine hub — see [BACKUP.md](./BACKUP.md).
+
+Enterprise account data can be **backed up to destinations controlled by the client**, not only platform-managed storage (multi-seat tenant DR):
 
 | Destination | Examples |
 |-------------|---------|
