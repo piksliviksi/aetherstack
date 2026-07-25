@@ -3,6 +3,9 @@
 ## 0.1.2
 
 - Marketplace README: remove packaging / `vsce publish` developer instructions (user-facing only)
+- Document **macOS / OSX** support (Metal Ollama, `./start.sh`, Apple Silicon)
+- Keywords: `macos`, `osx`, `apple-silicon`; gateway error text mentions macOS/Linux
+
 ## 0.1.1
 
 - **Security:** do not write API keys into workspace files (Continue config uses `${env:AETHERSTACK_API_KEY}`; `.vscode/settings.json` strips `aetherstack.apiKey`; keys go to User settings only)

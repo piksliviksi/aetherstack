@@ -563,7 +563,7 @@ function activate(context) {
         }
       } catch (e) {
         vscode.window.showErrorMessage(
-          `Cannot reach AetherStack gateway: ${e.message}. Run start.bat / ./start.sh first.`
+          `Cannot reach AetherStack gateway: ${e.message}. Start the stack first (start.bat on Windows, ./start.sh on macOS/Linux).`
         );
       }
     })

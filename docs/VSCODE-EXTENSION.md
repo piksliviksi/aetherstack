@@ -68,8 +68,8 @@ Duplicates can hide the Activity Bar icon or confuse settings.
 
 ### 1. Start AetherStack on the machine
 
-Windows: double-click `start.bat` in the [AetherStack repo](https://github.com/piksliviksi/aetherstack).  
-Ubuntu: `./start.sh`.
+- **Windows:** double-click `start.bat` in the [AetherStack repo](https://github.com/piksliviksi/aetherstack).  
+- **macOS / Ubuntu / Linux:** `./start.sh` (Docker Desktop must be running on Mac).
 
 You want at least:
 
@@ -123,6 +123,11 @@ If missing:
 ```powershell
 # Windows PowerShell (user or session)
 $env:AETHERSTACK_API_KEY = "sk-aether-local"
+```
+
+```bash
+# macOS / Linux (add to ~/.zshrc or ~/.bashrc, then restart VS Code)
+export AETHERSTACK_API_KEY=sk-aether-local
 ```
 
 Or VS Code **User** settings (not workspace — safer for git):

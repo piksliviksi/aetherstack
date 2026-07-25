@@ -8,16 +8,16 @@
 
 Open a **project folder** in VS Code, recover context from **previous AI chats** (when stored in the repo or known folders), see **which models/tools were used**, and **continue** via AetherStack (multi-model LiteLLM + Open WebUI + optional Ollama).
 
-## Important: VS Code does **not** use the AMD GPU on Windows 11
+## Important: VS Code does **not** run local LLMs on the GPU
 
-This is expected and not a bug in AetherStack.
+This is expected on **Windows, macOS, and Linux** — not a bug in AetherStack.
 
-| Layer | Runs on | AMD GPU? |
-|-------|---------|----------|
-| **VS Code UI** | Windows process | Display only (Chromium/ANGLE) — **not** LLM compute |
-| **Continue / Cline / Copilot chat UI** | VS Code extension host | **No** local ROCm/CUDA inside the extension |
+| Layer | Runs on | Local GPU for LLMs? |
+|-------|---------|---------------------|
+| **VS Code UI** | Desktop process | Display only — **not** LLM compute |
+| **Continue / Cline / Copilot chat UI** | VS Code extension host | **No** Metal/ROCm/CUDA inside the extension |
 | **AetherStack LiteLLM** (`:4000`) | Docker | CPU gateway only |
-| **Local model inference** | **Host Ollama** or **WSL Ollama + ROCm/DXG** | **Yes — only here** |
+| **Local model inference** | **Host Ollama** (Mac Metal · Win/Linux ROCm/CUDA/WSL) | **Yes — only here** |
 
 ```
 VS Code  ──HTTP──►  LiteLLM :4000  ──HTTP──►  Ollama (Windows or WSL)
@@ -36,7 +36,7 @@ VS Code only **sends prompts over the network**; it never loads ROCm or `/dev/dx
 
 ## Quick start
 
-1. Start AetherStack: `start.bat` (Windows) or `./start.sh` (Ubuntu).
+1. Start AetherStack: `start.bat` (Windows) or `./start.sh` (macOS / Ubuntu / Linux).
 2. Install the extension:
 
 **Marketplace (recommended):**  
@@ -80,7 +80,7 @@ powershell -File scripts/scan-project-ai.ps1 -Path C:\path\to\project
 ```
 
 ```bash
-# Linux
+# macOS / Linux
 ./scripts/scan-project-ai.sh /path/to/project
 ```
 
