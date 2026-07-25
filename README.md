@@ -9,8 +9,8 @@
 | **Repo** | [github.com/piksliviksi/aetherstack](https://github.com/piksliviksi/aetherstack) |
 | **VS Code** | [Marketplace: AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
 | **Who it’s for** | Anyone who wants a small, shareable stack without installing a full “AI distro” |
-| **Platforms** | **Windows 11**, **macOS** (Intel / Apple Silicon), **Ubuntu/Linux** |
-| **GPU note** | Host Ollama: Metal (Mac), ROCm/CUDA (Linux/Win as available); containers handle UI + gateway |
+| **Platforms** | **Windows 11**, **macOS** (Intel / **Apple Silicon ARM + Metal**), **Ubuntu/Linux** |
+| **GPU note** | Host Ollama: **Metal (Mac ARM)**, ROCm (AMD WSL/Linux), CUDA (NVIDIA); Docker = UI/gateway only |
 
 ---
 
@@ -294,6 +294,7 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 | [docs/AGENT-MEMORY.md](./docs/AGENT-MEMORY.md) | Redis sessions + vector search |
 | [docs/AGENT-MODES.md](./docs/AGENT-MODES.md) | Inline vs multi-agent, token saver, multi-LLM roles |
 | [docs/AUTO-INSTALL.md](./docs/AUTO-INSTALL.md) | Optional auto-install of missing packages |
+| [combos/](./combos/) | Shareable LLM tier + situation packs (export/import) |
 | [`aether-hub/`](./aether-hub/) | Service source |
 
 ```bash
@@ -339,6 +340,31 @@ Optional embed model for better recall: `ollama pull nomic-embed-text`
 ```
 
 Off by default — see [docs/AUTO-INSTALL.md](./docs/AUTO-INSTALL.md).
+
+### LLM combos (tiers + situations, export/import)
+
+Presets: **Fable Low**, **Sonnet**, **Opus**, **GPT-4.1** (flagship track), **Grok**, plus packs for **coding / research / testing / review**.
+
+```bash
+# List tiers + situations
+curl -s http://127.0.0.1:8766/api/combos | jq '.situations|keys'
+
+# Launch "coding" multi-LLM combo
+curl -s -X POST http://127.0.0.1:8766/api/combos/coding/launch
+
+# Export to file (email / GitHub)
+curl -s http://127.0.0.1:8766/api/combos/research/export -o research.aether-combo.json
+
+# Import somewhere else
+curl -s -X POST http://127.0.0.1:8766/api/combos/import \
+  -H "Content-Type: application/json" -d @research.aether-combo.json
+```
+
+Ready-made JSON: [combos/export/](./combos/export/) · guide: [combos/README.md](./combos/README.md)
+
+### Mac ARM GPU
+
+**Supported** via **host Ollama + Apple Metal** (not ROCm/CUDA). Use combos `inline_fable` / `private_local`. Details: [docs/TUTORIAL-MACOS.md](./docs/TUTORIAL-MACOS.md).
 
 ## Related
 

@@ -76,10 +76,14 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - AETHER_COMBOS_CATALOG=/combos/catalog.yaml
+      - AETHER_COMBOS_EXPORT=/combos/export
+      - AETHER_COMBOS_IMPORT=/combos/import
     volumes:
       - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
       - ./aether-hub/agent_modes.yaml:/app/agent_modes.yaml:ro
       - ./aether-hub/bootstrap.yaml:/app/bootstrap.yaml:ro
+      - ./combos:/combos:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

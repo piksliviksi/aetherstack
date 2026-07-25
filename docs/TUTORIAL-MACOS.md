@@ -56,17 +56,46 @@ docker compose ps
 docker compose down
 ```
 
-## Apple Silicon notes
+## Apple Silicon (ARM64) + Metal GPU
 
-- Prefer **host Ollama** (Metal) over the optional Ollama Docker profile for speed and battery.  
-- Docker Desktop runs Linux containers via a VM; that is expected.  
-- If LiteLLM cannot reach host Ollama, ensure Ollama is listening and Docker can use `host.docker.internal` (set in `docker-compose.yml`).  
-- AMD ROCm overlays (`docker-compose.amd.yml`) **do not apply** on Mac — use Metal Ollama or cloud models via LiteLLM.
+**Yes — local GPU works on Mac ARM**, via **Apple Metal**, not CUDA/ROCm.
+
+| Layer | GPU? |
+|-------|------|
+| **Host Ollama** (Apple Silicon) | **Yes — Metal** (check Activity Monitor → GPU, or `ollama ps` after a run) |
+| **Docker containers** (LiteLLM, WebUI, Hub) | No — control plane only |
+| **VS Code extension** | No — HTTP client only |
+| **ROCm / CUDA compose overlays** | **Not for Mac** |
+
+### Recommended Mac ARM path
+
+```bash
+# 1) Ollama for macOS (Apple Silicon build from ollama.com)
+ollama pull llama3.1:8b   # or tinyllama for low RAM
+# Run a prompt; then:
+ollama ps                 # expect GPU / metal, not 100% CPU
+
+# 2) Aether control plane
+./start.sh
+
+# 3) Use local combo
+curl -s -X POST http://127.0.0.1:8766/api/combos/inline_fable/launch
+# or private multi-agent:
+curl -s -X POST http://127.0.0.1:8766/api/combos/private_local/launch
+```
+
+### Tips
+
+- Prefer **host Ollama + Metal** over `with-ollama-container` (Linux VM, usually no Metal).  
+- Docker Desktop uses a Linux VM; that is expected for UI/gateway only.  
+- LiteLLM reaches Ollama at `host.docker.internal:11434` (set in compose).  
+- Unified memory: larger models (70B) need enough unified RAM; start with 7–8B or smaller.  
+- Combos `fable_low`, `inline_fable`, `private_local` are tuned for Metal/local.
 
 ## NVIDIA / Intel discrete GPU on Mac
 
 - NVIDIA CUDA and AMD ROCm paths are **Linux/Windows**, not macOS.  
-- On Mac, local inference = **Ollama + Metal** (or CPU).  
+- On Mac, local inference = **Ollama + Metal** (Apple Silicon) or **CPU** (Intel without usable GPU path).  
 - Cloud models (Grok, OpenAI, Claude, Gemini) work the same as on other OSes once keys are in `.env`.
 
 ## VS Code on macOS

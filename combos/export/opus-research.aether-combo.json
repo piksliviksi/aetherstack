@@ -1,0 +1,30 @@
+{
+  "schema": "aetherstack.combo.v1",
+  "id": "review",
+  "label": "Code review (Opus supervise)",
+  "description": "Careful supervisor-heavy review with Opus",
+  "exported_at": "2026-07-25T00:00:00Z",
+  "source": "aetherstack/combos",
+  "mode": "multi_agent",
+  "token_saver": false,
+  "workers": 2,
+  "roles": {
+    "mastermind": {
+      "model": "gpt-4.1",
+      "maker": "openai",
+      "fallbacks": ["claude-sonnet-4"]
+    },
+    "supervisor": {
+      "model": "claude-opus-4",
+      "maker": "anthropic",
+      "fallbacks": ["claude-sonnet-4", "o3"]
+    },
+    "worker": {
+      "model": "claude-sonnet-4",
+      "maker": "anthropic",
+      "fallbacks": ["gpt-4.1", "local-default"]
+    }
+  },
+  "good_for": ["PR_review", "security_pass"],
+  "requires_keys": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+}

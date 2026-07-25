@@ -1,0 +1,33 @@
+{
+  "schema": "aetherstack.combo.v1",
+  "id": "coding",
+  "label": "Coding",
+  "description": "Ship features and refactors — strong mastermind, cheap workers",
+  "exported_at": "2026-07-25T00:00:00Z",
+  "source": "aetherstack/combos",
+  "mode": "multi_agent",
+  "token_saver": true,
+  "workers": 3,
+  "roles": {
+    "mastermind": {
+      "model": "claude-sonnet-4",
+      "maker": "anthropic",
+      "fallbacks": ["gpt-4.1", "grok-code", "local-default"]
+    },
+    "supervisor": {
+      "model": "gpt-4.1",
+      "maker": "openai",
+      "fallbacks": ["claude-sonnet-4", "grok-4.5"]
+    },
+    "worker": {
+      "model": "local-default",
+      "strategy": "cheapest",
+      "tier": "local",
+      "fallbacks": ["gpt-4.1-mini", "claude-haiku", "grok-code"]
+    }
+  },
+  "good_for": ["implement", "refactor", "tests"],
+  "requires_keys": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+  "optional_keys": ["XAI_API_KEY"],
+  "local_models": ["tinyllama", "llama3.1:8b"]
+}

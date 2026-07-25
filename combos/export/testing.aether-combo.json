@@ -1,0 +1,33 @@
+{
+  "schema": "aetherstack.combo.v1",
+  "id": "testing",
+  "label": "Testing",
+  "description": "Fast cheap loops — Fable low / mini models",
+  "exported_at": "2026-07-25T00:00:00Z",
+  "source": "aetherstack/combos",
+  "mode": "multi_agent",
+  "token_saver": true,
+  "workers": 2,
+  "roles": {
+    "mastermind": {
+      "model": "gpt-4.1-mini",
+      "maker": "openai",
+      "fallbacks": ["local-default", "claude-haiku"]
+    },
+    "supervisor": {
+      "model": "local-default",
+      "tier": "local",
+      "fallbacks": ["claude-haiku", "gemini-flash"]
+    },
+    "worker": {
+      "model": "local-default",
+      "strategy": "cheapest",
+      "tier": "local",
+      "fallbacks": ["local-tiny", "gpt-4.1-mini"]
+    }
+  },
+  "good_for": ["smoke", "ci_style", "bulk_checks"],
+  "requires_keys": [],
+  "optional_keys": ["OPENAI_API_KEY"],
+  "local_models": ["tinyllama"]
+}

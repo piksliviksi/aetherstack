@@ -1,0 +1,252 @@
+# AetherStack model tiers + situation combos
+# Export as .aether-combo.json via hub API or scripts; share via GitHub / email.
+# model fields use LiteLLM aliases from litellm_config.yaml
+
+version: 1
+schema: aetherstack.combo.v1
+updated: "2026-07-25"
+
+# Named tier profiles (single-model or simple inline picks)
+tiers:
+  fable_low:
+    label: "Fable Low"
+    tier: low
+    description: "Cheapest/local — smoke tests, drafts, high volume"
+    good_for: [testing, bulk, private, offline]
+    model: local-default
+    maker: ollama
+    fallbacks: [local-tiny, gpt-4.1-mini, claude-haiku, gemini-flash]
+    cost: free_or_low
+    notes: "Prefer host Ollama (Metal on Mac ARM, ROCm on AMD WSL, CUDA on NVIDIA)"
+
+  low_cloud:
+    label: "Low cloud"
+    tier: low
+    description: "Small cloud models — fast iteration"
+    good_for: [testing, chat, bulk]
+    model: gpt-4.1-mini
+    maker: openai
+    fallbacks: [claude-haiku, gemini-flash, grok-4-fast-non-reasoning, local-default]
+    cost: low
+
+  medium_sonnet:
+    label: "Sonnet (medium)"
+    tier: medium
+    description: "Balanced coding + writing — daily driver cloud"
+    good_for: [coding, review, docs, research]
+    model: claude-sonnet-4
+    maker: anthropic
+    fallbacks: [gpt-4.1, grok-4.5, gemini-2.5-pro, local-llama31-8b]
+    cost: medium
+
+  medium_gpt:
+    label: "GPT-4.1 (medium-high)"
+    tier: medium
+    description: "OpenAI generalist — tools, code, chat"
+    good_for: [coding, research, tools]
+    model: gpt-4.1
+    maker: openai
+    # User-facing "GPT-5.x" maps here until a newer alias is wired in litellm_config
+    aliases_display: ["GPT-5.6-track", "OpenAI flagship track"]
+    fallbacks: [claude-sonnet-4, grok-4.5, o4-mini]
+    cost: medium_high
+
+  medium_grok:
+    label: "Grok 4.5 (medium-high)"
+    tier: medium
+    description: "xAI — reasoning + code with long context"
+    good_for: [research, coding, reason]
+    model: grok-4.5
+    maker: xai
+    fallbacks: [grok-4-fast, claude-sonnet-4, gpt-4.1]
+    cost: medium_high
+
+  high_opus:
+    label: "Opus (high)"
+    tier: high
+    description: "Anthropic top — hard reasoning, careful code"
+    good_for: [research, architecture, hard_bugs, review]
+    model: claude-opus-4
+    maker: anthropic
+    fallbacks: [o3, grok-4.5, claude-sonnet-4]
+    cost: high
+
+  high_o3:
+    label: "o3 (high)"
+    tier: high
+    description: "OpenAI reasoning — hard multi-step problems"
+    good_for: [research, math, architecture]
+    model: o3
+    maker: openai
+    fallbacks: [claude-opus-4, grok-4.5]
+    cost: very_high
+
+  high_gemini:
+    label: "Gemini 2.5 Pro (high context)"
+    tier: high
+    description: "Huge context / multimodal research"
+    good_for: [research, long_docs, vision]
+    model: gemini-2.5-pro
+    maker: google
+    fallbacks: [gemini-2.5-flash, claude-sonnet-4]
+    cost: medium
+
+# Situation combos = multi-agent role lineup for a use case
+situations:
+  coding:
+    label: "Coding"
+    description: "Ship features and refactors — strong mastermind, cheap workers"
+    mode: multi_agent
+    token_saver: true
+    roles:
+      mastermind:
+        model: claude-sonnet-4
+        maker: anthropic
+        fallbacks: [gpt-4.1, grok-code, local-default]
+      supervisor:
+        model: gpt-4.1
+        maker: openai
+        fallbacks: [claude-sonnet-4, grok-4.5]
+      worker:
+        model: local-default
+        strategy: cheapest
+        tier: local
+        fallbacks: [gpt-4.1-mini, claude-haiku, grok-code]
+    workers: 3
+    good_for: [implement, refactor, tests]
+
+  research:
+    label: "Research"
+    description: "Deep analysis — high-tier mastermind + supervisor, medium workers"
+    mode: multi_agent
+    token_saver: false
+    roles:
+      mastermind:
+        model: claude-opus-4
+        maker: anthropic
+        fallbacks: [o3, grok-4.5]
+      supervisor:
+        model: grok-4.5
+        maker: xai
+        fallbacks: [gpt-4.1, claude-sonnet-4]
+      worker:
+        model: gemini-2.5-pro
+        maker: google
+        fallbacks: [claude-sonnet-4, gpt-4.1]
+    workers: 3
+    good_for: [surveys, architecture, long_context]
+
+  testing:
+    label: "Testing"
+    description: "Fast cheap loops — Fable low / mini models"
+    mode: multi_agent
+    token_saver: true
+    roles:
+      mastermind:
+        model: gpt-4.1-mini
+        maker: openai
+        fallbacks: [local-default, claude-haiku]
+      supervisor:
+        model: local-default
+        tier: local
+        fallbacks: [claude-haiku, gemini-flash]
+      worker:
+        model: local-default
+        strategy: cheapest
+        tier: local
+        fallbacks: [local-tiny, gpt-4.1-mini]
+    workers: 2
+    good_for: [smoke, ci_style, bulk_checks]
+
+  review:
+    label: "Code review"
+    description: "Careful supervisor-heavy review"
+    mode: multi_agent
+    token_saver: false
+    roles:
+      mastermind:
+        model: gpt-4.1
+        maker: openai
+        fallbacks: [claude-sonnet-4]
+      supervisor:
+        model: claude-opus-4
+        maker: anthropic
+        fallbacks: [claude-sonnet-4, o3]
+      worker:
+        model: claude-sonnet-4
+        maker: anthropic
+        fallbacks: [gpt-4.1, local-default]
+    workers: 2
+    good_for: [PR_review, security_pass]
+
+  creative_docs:
+    label: "Docs & writing"
+    description: "Readable prose — Sonnet + flash workers"
+    mode: multi_agent
+    token_saver: true
+    roles:
+      mastermind:
+        model: claude-sonnet-4
+        maker: anthropic
+        fallbacks: [gpt-4.1, gemini-2.5-pro]
+      supervisor:
+        model: gpt-4.1-mini
+        maker: openai
+        fallbacks: [claude-haiku]
+      worker:
+        model: gemini-2.5-flash
+        maker: google
+        fallbacks: [local-default, claude-haiku]
+    workers: 2
+    good_for: [readme, rfcs, blog]
+
+  private_local:
+    label: "Private local"
+    description: "No cloud — all Ollama/Metal/ROCm"
+    mode: multi_agent
+    token_saver: true
+    roles:
+      mastermind:
+        model: local-default
+        tier: local
+        maker: ollama
+      supervisor:
+        model: local-default
+        tier: local
+      worker:
+        model: local-tiny
+        tier: local
+        strategy: cheapest
+    workers: 2
+    good_for: [airgap, secrets, mac_arm_metal, amd_wsl]
+
+  inline_sonnet:
+    label: "Inline Sonnet"
+    description: "Single-model daily coding"
+    mode: inline
+    token_saver: false
+    roles:
+      inline:
+        model: claude-sonnet-4
+        fallbacks: [gpt-4.1, grok-4.5, local-default]
+    good_for: [quick_chat, simple_edits]
+
+  inline_fable:
+    label: "Inline Fable Low"
+    description: "Single local model — free & private"
+    mode: inline
+    token_saver: true
+    roles:
+      inline:
+        model: local-default
+        tier: local
+        fallbacks: [local-tiny]
+    good_for: [offline, mac_arm, budget]
+
+# Quick matrix: situation → recommended tier labels
+matrix_guide:
+  coding: [medium_sonnet, medium_gpt, fable_low]
+  research: [high_opus, high_o3, high_gemini, medium_grok]
+  testing: [fable_low, low_cloud]
+  review: [high_opus, medium_sonnet]
+  private: [fable_low, private_local]
