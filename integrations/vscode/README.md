@@ -1,5 +1,12 @@
 # AetherStack for VS Code
 
+**One chat window. Many models underneath.**
+
+After AetherStack is set up once (Docker + keys + imported pipelines/graphs + limits), you talk to a **single gateway model** in VS Code (via Continue or similar) — same habit as Grok or Claude. Routing, multi-agent roles, tier/cost limits, and memory hygiene run in the background.
+
+How the system operates (full story):  
+**[Operating model](https://github.com/piksliviksi/aetherstack/blob/main/docs/OPERATING-MODEL.md)** · **[README modus operandi](https://github.com/piksliviksi/aetherstack/blob/main/README.md#how-aetherstack-operates-modus-operandi)**
+
 Install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack):
 
 ```bash
@@ -12,7 +19,12 @@ Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
 **[How to use the VS Code extension](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
 
-Open a project folder, scan prior AI chat artifacts, see which tools/models were used, and continue building through [AetherStack](https://github.com/piksliviksi/aetherstack) (LiteLLM multi-model gateway + Open WebUI + Ollama).
+1. Start AetherStack so LiteLLM (`:4000`) is up.  
+2. Wire Continue → `http://127.0.0.1:4000/v1` + master key + **one** model alias.  
+3. Work in that one chat; optionally open Hub (`:8766`) only to change trees or limits.  
+4. Scan project AI history when you want repo context recovery.
+
+Open a project folder, scan prior AI chat artifacts, and continue building through the gateway — not by juggling separate vendor apps.
 
 ## Features
 

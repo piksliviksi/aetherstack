@@ -2,15 +2,97 @@
 
 ![AetherStack](./aetherstack.jpg)
 
-**Multi-model LLM control plane in Docker** — local Ollama + cloud providers (Grok, OpenAI/Codex, Claude) behind one gateway, with a chat UI and Redis for shared working memory.
+**One setup. One chat window. Many models underneath.**
+
+AetherStack is a **multi-model LLM control plane**: you configure it once, import decision trees / pipelines / node graphs, set **token and tier limits**, then work in **VS Code or Open WebUI as if you were talking to a single model** (like Grok or Claude). Behind that façade, Aether routes research, critique, coding, and testing across local GPU models and cloud providers — with shared memory, slash hygiene, and optional spend controls.
 
 | | |
 |---|---|
 | **Repo** | [github.com/piksliviksi/aetherstack](https://github.com/piksliviksi/aetherstack) |
 | **VS Code** | [Marketplace: AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
-| **Who it’s for** | Anyone who wants a small, shareable stack without installing a full “AI distro” |
+| **Who it’s for** | Developers who want one IDE chat surface and a flexible multi-LLM engine underneath |
 | **Platforms** | **Windows 11**, **macOS** (Intel / **Apple Silicon ARM + Metal**), **Ubuntu/Linux** |
 | **GPU note** | Host Ollama must use **compute engines**: Metal (Mac ARM), **ROCm/HIP CUs** (AMD), CUDA (NVIDIA); Docker = UI/gateway only |
+
+---
+
+## How AetherStack operates (modus operandi)
+
+### The idea
+
+| Outside (what you feel) | Inside (what actually runs) |
+|-------------------------|-----------------------------|
+| **One** chat in VS Code / Continue / Open WebUI | LiteLLM gateway + hub routers + pipelines |
+| **One** model name (e.g. `local-default` or a combo alias) | Mastermind, critic, workers, testers — different makers/tiers |
+| Normal conversation | Optional multi-stage graph: research → critique → build → test |
+| You don’t reconfigure providers every prompt | Decision trees, combos, and node graphs you imported once |
+
+You set policy **once**. Day to day you only talk to **Aether**.
+
+### One-time setup
+
+1. **Install the stack** — Docker Compose (Open WebUI, LiteLLM, Redis, Aether Hub) + host Ollama for local GPU.  
+2. **Put keys in `.env`** — only the cloud providers you use (`XAI_`, `OPENAI_`, `ANTHROPIC_`, `GOOGLE_`, master key).  
+3. **Scan the machine** — `scripts/scan-system` / Hub `/api/discover` sees Ollama, GPU/CUs, missing packages.  
+4. **Import decision trees** — combos, pipeline scripts, or a **node graph** from GitHub/email (`combos/export`, `pipelines/catalog`, canvas at `/graph`).  
+5. **Set limits** — token saver on/off; per-role `max_cost` / tier pins; pipeline `hw_weight` / cost bias; LiteLLM master key as the single client secret.  
+6. **Wire the IDE once** — VS Code extension + Continue (or any OpenAI-compatible client) → `http://127.0.0.1:4000/v1` with one Bearer key. Pick **one** gateway model (or “Aether” combo) and leave it.
+
+After that you do **not** hop between Claude.app, Grok, and ChatGPT for normal work. You stay in **one window**.
+
+### Daily use (single surface)
+
+```text
+  You  ──type in VS Code / Open WebUI──►  “one model” façade
+                                              │
+                    ┌─────────────────────────┴─────────────────────────┐
+                    ▼                                                   ▼
+              LiteLLM :4000                                      Aether Hub :8766
+           (OpenAI-compatible)                          (routes, graphs, memory, slash)
+                    │                                                   │
+        ┌───────────┼───────────┐                         pipelines / combos / nodes
+        ▼           ▼           ▼                         master · analyser · workers
+     Ollama      Grok/xAI    Claude/GPT/…                 token saver · /clear after /done
+    (Metal/ROCm/CUDA)        (cloud keys)
+                    │
+                    └──────────────► Redis (cache + shared agent memory)
+```
+
+- **You** chat in one thread, same as with a single product model.  
+- **Hub** (if multi-agent / pipeline is active) splits work: e.g. high-tier research, another maker for critique/ack, cheap/local for bulk code and tests.  
+- **Memory** keeps decisions when you `/done` and `/clear` or `/compact`, so context stays lean without losing history.  
+- **GPU** stays on the host (not inside VS Code). The IDE only speaks HTTP to the gateway.
+
+### Policy you control (without changing the chat UI)
+
+| Policy | Where |
+|--------|--------|
+| Which models exist | `litellm_config.yaml` + Ollama pulls |
+| Who is master / critic / worker / tester | Combos, pipelines, **node canvas** (`/graph`) |
+| Tier & cost caps | Node/pipeline `max_cost`, `tier`, token saver |
+| Token spend discipline | Hub token saver; shorter prompts; `/clear` after tasks |
+| Hardware vs cloud | Local combos (`fable`, `private_local`) vs cloud stages |
+| Share setups | Export/import `.aether-combo.json` / `.aether-pipeline.json` / graphs |
+
+### What “looks like one model” means in VS Code
+
+Clients (Continue, Cline, Open WebUI custom OpenAI) only see:
+
+- **Base URL:** `http://127.0.0.1:4000/v1`  
+- **API key:** your `LITELLM_MASTER_KEY`  
+- **Model id:** one alias (e.g. `local-default`, `claude-sonnet-4`, or whatever the active combo resolves to)
+
+They do **not** need to know about multi-agent graphs. Aether Hub and LiteLLM apply your imported trees and limits under that single endpoint.
+
+### Operating loop (recommended)
+
+1. Start stack (`start.bat` / `./start.sh`) — leave it running.  
+2. Open the project in VS Code; chat via Continue → Aether gateway.  
+3. For structured jobs, run a **pipeline/graph plan** (or rely on default multi-agent mode).  
+4. When a unit of work finishes: **`/done`** → **`/compact` or `/clear`** (archives to memory, resets context).  
+5. Next message starts clean; search memory if you need old decisions.
+
+Deeper detail: [docs/OPERATING-MODEL.md](./docs/OPERATING-MODEL.md).
 
 ---
 
@@ -18,28 +100,26 @@
 
 | Service | Port | Role |
 |---------|------|------|
-| **Open WebUI** | [http://localhost:3000](http://localhost:3000) | Chat UI (Ollama + LiteLLM gateway) |
-| **LiteLLM** | [http://localhost:4000](http://localhost:4000) | One OpenAI-compatible API for local + cloud models |
-| **Aether Hub** | [http://localhost:8766](http://localhost:8766) | Capability **sync matrix** + agent **memory** API |
-| **Redis** | `6379` | LiteLLM cache + hub sessions/vectors |
-| **Ollama** (optional container) | `11434` | Local models — better as a **native** install on AMD |
+| **Open WebUI** | [http://localhost:3000](http://localhost:3000) | Chat UI — same “one window” surface in the browser |
+| **LiteLLM** | [http://localhost:4000](http://localhost:4000) | **Single** OpenAI-compatible façade for all models |
+| **Aether Hub** | [http://localhost:8766](http://localhost:8766) | Discover, routes, combos, pipelines, **node graph**, memory, slash |
+| **Redis** | `6379` | Cache + shared agent memory |
+| **Ollama** (host preferred) | `11434` | Local inference on real GPU compute |
 
 ```
-  Browser / IDE
-        │
-        ▼
-  ┌─────────────┐     ┌──────────────┐
-  │ Open WebUI  │────►│ Host Ollama  │  (GPU / Vulkan / ROCm)
-  └─────────────┘     └──────────────┘
-        │
-        ▼
-  ┌─────────────┐     ┌──────────────┐
-  │  LiteLLM    │────►│ Grok / GPT / │  (API keys)
-  │  :4000      │     │ Claude / …   │
-  └─────────────┘     └──────────────┘
-        │
-        ▼
-      Redis
+  VS Code / Continue / browser     ←── you only live here
+              │
+              │  one base URL + one key + one model id
+              ▼
+         LiteLLM :4000  ──►  cloud providers (as allowed by policy)
+              │
+              ├──►  host Ollama (Metal / ROCm CUs / CUDA)
+              │
+              └──►  Aether Hub :8766
+                      ├── decision trees / pipelines / node canvas
+                      ├── multi-agent roles (master, critic, workers, testers)
+                      ├── token saver & tier limits
+                      └── memory + /clear after work is done
 ```
 
 ---

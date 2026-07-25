@@ -4,6 +4,8 @@
 
 This guide is for day-to-day use: install, find the UI, run commands, wire chat, and fix “I installed it but see nothing.”
 
+**Operating model:** [OPERATING-MODEL.md](./OPERATING-MODEL.md) — set up once, import trees/limits, then chat in **one window** while multi-LLM pipelines run behind a single gateway model.
+
 Related:
 
 - Architecture / AMD GPU notes: [VSCODE.md](./VSCODE.md)
@@ -16,14 +18,15 @@ Related:
 
 | It **is** | It **is not** |
 |-----------|----------------|
-| A **project hub** for AI history in the repo | A full in-editor chat product by itself |
-| A way to **wire Continue** / settings to AetherStack | Something that loads models or your GPU inside VS Code |
-| Shortcuts to Open WebUI and the Project Engine | A replacement for LiteLLM / Ollama |
+| Glue so VS Code treats Aether as **one** OpenAI-compatible model | A place where you pick Claude vs GPT every message |
+| A **project hub** for AI history in the repo | A full multi-agent UI by itself (that’s Hub `/graph` + pipelines) |
+| A way to **wire Continue** to LiteLLM `:4000` | Something that loads weights or your GPU inside VS Code |
 
-Chat UI options after wiring:
+After wiring, day-to-day chat is:
 
-1. **[Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue)** in VS Code → LiteLLM `:4000`
-2. **Open WebUI** in the browser → `:3000`
+1. **[Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue)** (or similar) → **one** base URL + key + model id  
+2. Optional: **Open WebUI** at `:3000` for the same façade in a browser  
+3. Optional: **Aether Hub** at `:8766` when you change pipelines, limits, or run `/clear` hygiene
 
 ---
 
