@@ -97,13 +97,30 @@ Enterprise account data can be **backed up to destinations controlled by the cli
 
 ---
 
-## 2. Related backlog (pointers only)
+## 2. Continuity enhancements (quota-aware routing)
+
+Shipped today: façade + combos/pipelines fallbacks + live discover + local Ollama + private vault.  
+**Planned:** explicit tracking of provider session/day/week budgets so failover triggers on **quota remaining**, not only on hard failure/429.
+
+| Element | Planned |
+|---------|---------|
+| Per-maker budget meters | Daily / weekly / session headroom (operator-configured or scraped where APIs allow) |
+| Preemptive failover | Switch before hard stop when headroom hits threshold |
+| Local as last resort | Automatic `prefer=local` when all cloud budgets exhausted |
+| User-visible status | Hub UI: which maker is active, remaining budget band, last failover reason |
+
+Until shipped: configure ordered fallbacks and local tiers manually; use `/api/route` and combo pins.
+
+---
+
+## 3. Related backlog (pointers only)
 
 | Area | Direction |
 |------|-----------|
 | Private mode | Shipped for local hub — [PRIVATE-MODE.md](./PRIVATE-MODE.md) |
 | Cross-project memory | Shipped local multi-project — [CROSS-MEMORY.md](./CROSS-MEMORY.md) |
 | Enterprise tenant control plane | This document §1 |
+| Quota-aware continuity | This document §2 |
 | Hardened multi-user Hub auth | Required before enterprise expose beyond lab bind |
 
 ---
