@@ -19,7 +19,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Capability | Fact |
 |------------|------|
 | One surface | VS Code or browser chat for normal work |
-| One façade | One base URL, one API key, one model id |
+| One façade | One base URL, one gateway key; many provider keys (personal + enterprise per maker) |
 | Orchestration | Combos, pipelines, node canvas by role / tier / cost |
 | Spend control | Token saver, tier caps, `/done` → `/clear` |
 | Memory | Archive on clear; multi-project pull when enabled |
@@ -155,6 +155,7 @@ Procedure: [docs/QUICKSTART.md](./docs/QUICKSTART.md)
 | Private isolation | [docs/PRIVATE-MODE.md](./docs/PRIVATE-MODE.md) |
 | Slash hygiene | [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md) |
 | Gateway aliases | [docs/GATEWAY.md](./docs/GATEWAY.md) |
+| Multi-account keys | [docs/MULTI-KEYS.md](./docs/MULTI-KEYS.md) (personal + enterprise per provider) |
 | GPU | [docs/GPU-NVIDIA.md](./docs/GPU-NVIDIA.md) · [docs/AMD-COMPUTE.md](./docs/AMD-COMPUTE.md) · [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md) · [docs/GPU-INTEL.md](./docs/GPU-INTEL.md) |
 | Capability matrix | [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) |
 | Project engine | [project-engine/README.md](./project-engine/README.md) |

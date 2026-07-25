@@ -21,7 +21,7 @@ Policy lives in Aether (combos, pipelines, graphs, matrix). The IDE does not re-
 |------|--------|
 | Stack | `start.bat` / `./start.sh` — Docker: WebUI, LiteLLM, Redis, Hub |
 | Local GPU | Host Ollama (Metal / ROCm / CUDA). Not VS Code. |
-| Secrets | `.env`: cloud keys + `LITELLM_MASTER_KEY` |
+| Secrets | `.env`: per-provider primary / personal / enterprise keys + `LITELLM_MASTER_KEY` ([MULTI-KEYS.md](./MULTI-KEYS.md)) |
 | Discover | Hub `GET /api/discover` or `scripts/scan-system.*` |
 | Trees | Import combos, pipelines, or node graphs |
 | Limits | Token saver; stage `max_cost` / `tier`; rotate default keys before exposure |
@@ -144,6 +144,7 @@ Start stack
 | Façade quality | Bound by imported trees, live discover, and present keys |
 | Multi-agent cost | Fan-out can exceed single-call tokens; token saver + slash hygiene apply |
 | Provider caps | Daily/weekly/session limits are provider-side; Aether rotates engines by policy + availability |
+| Multi-account keys | Personal + enterprise keys coexist; select via `*-personal` / `*-enterprise` aliases |
 | Private vault | No auto-merge into common memory on release |
 | Node canvas | Native MIT graph only. No third-party node engine is vendored in this repo. |
 

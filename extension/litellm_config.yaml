@@ -175,8 +175,292 @@ model_list:
       model: mistral/pixtral-large-latest
       api_key: os.environ/MISTRAL_API_KEY
 
+  # ── Multi-account key slots (personal + enterprise) ───────────────
+  # Primary alias (no suffix) uses {PROVIDER}_API_KEY.
+  # -personal   → {PROVIDER}_API_KEY_PERSONAL   (personal / subscription)
+  # -enterprise → {PROVIDER}_API_KEY_ENTERPRISE (work / org API)
+  # Set both keys; use simultaneously via different model aliases.
+  # Regenerate: python scripts/gen-multi-key-aliases.py
+
+  - model_name: grok-personal
+    litellm_params:
+      model: xai/grok-4.5
+      api_key: os.environ/XAI_API_KEY_PERSONAL
+
+  - model_name: grok-enterprise
+    litellm_params:
+      model: xai/grok-4.5
+      api_key: os.environ/XAI_API_KEY_ENTERPRISE
+
+  - model_name: grok-4.5-personal
+    litellm_params:
+      model: xai/grok-4.5
+      api_key: os.environ/XAI_API_KEY_PERSONAL
+
+  - model_name: grok-4.5-enterprise
+    litellm_params:
+      model: xai/grok-4.5
+      api_key: os.environ/XAI_API_KEY_ENTERPRISE
+
+  - model_name: grok-4.3-personal
+    litellm_params:
+      model: xai/grok-4.3
+      api_key: os.environ/XAI_API_KEY_PERSONAL
+
+  - model_name: grok-4.3-enterprise
+    litellm_params:
+      model: xai/grok-4.3
+      api_key: os.environ/XAI_API_KEY_ENTERPRISE
+
+  - model_name: grok-4-personal
+    litellm_params:
+      model: xai/grok-4
+      api_key: os.environ/XAI_API_KEY_PERSONAL
+
+  - model_name: grok-4-enterprise
+    litellm_params:
+      model: xai/grok-4
+      api_key: os.environ/XAI_API_KEY_ENTERPRISE
+
+  - model_name: grok-4-fast-personal
+    litellm_params:
+      model: xai/grok-4-1-fast-reasoning
+      api_key: os.environ/XAI_API_KEY_PERSONAL
+
+  - model_name: grok-4-fast-enterprise
+    litellm_params:
+      model: xai/grok-4-1-fast-reasoning
+      api_key: os.environ/XAI_API_KEY_ENTERPRISE
+
+  - model_name: grok-code-personal
+    litellm_params:
+      model: xai/grok-code-fast-1
+      api_key: os.environ/XAI_API_KEY_PERSONAL
+
+  - model_name: grok-code-enterprise
+    litellm_params:
+      model: xai/grok-code-fast-1
+      api_key: os.environ/XAI_API_KEY_ENTERPRISE
+
+  - model_name: gpt-4.1-personal
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY_PERSONAL
+
+  - model_name: gpt-4.1-enterprise
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY_ENTERPRISE
+
+  - model_name: gpt-4.1-mini-personal
+    litellm_params:
+      model: openai/gpt-4.1-mini
+      api_key: os.environ/OPENAI_API_KEY_PERSONAL
+
+  - model_name: gpt-4.1-mini-enterprise
+    litellm_params:
+      model: openai/gpt-4.1-mini
+      api_key: os.environ/OPENAI_API_KEY_ENTERPRISE
+
+  - model_name: gpt-4o-personal
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY_PERSONAL
+
+  - model_name: gpt-4o-enterprise
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY_ENTERPRISE
+
+  - model_name: gpt-4o-mini-personal
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY_PERSONAL
+
+  - model_name: gpt-4o-mini-enterprise
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY_ENTERPRISE
+
+  - model_name: o3-personal
+    litellm_params:
+      model: openai/o3
+      api_key: os.environ/OPENAI_API_KEY_PERSONAL
+
+  - model_name: o3-enterprise
+    litellm_params:
+      model: openai/o3
+      api_key: os.environ/OPENAI_API_KEY_ENTERPRISE
+
+  - model_name: o4-mini-personal
+    litellm_params:
+      model: openai/o4-mini
+      api_key: os.environ/OPENAI_API_KEY_PERSONAL
+
+  - model_name: o4-mini-enterprise
+    litellm_params:
+      model: openai/o4-mini
+      api_key: os.environ/OPENAI_API_KEY_ENTERPRISE
+
+  - model_name: codex-personal
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY_PERSONAL
+
+  - model_name: codex-enterprise
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY_ENTERPRISE
+
+  - model_name: claude-personal
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY_PERSONAL
+
+  - model_name: claude-enterprise
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY_ENTERPRISE
+
+  - model_name: claude-sonnet-4-personal
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY_PERSONAL
+
+  - model_name: claude-sonnet-4-enterprise
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY_ENTERPRISE
+
+  - model_name: claude-opus-4-personal
+    litellm_params:
+      model: anthropic/claude-opus-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY_PERSONAL
+
+  - model_name: claude-opus-4-enterprise
+    litellm_params:
+      model: anthropic/claude-opus-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY_ENTERPRISE
+
+  - model_name: claude-haiku-personal
+    litellm_params:
+      model: anthropic/claude-3-5-haiku-latest
+      api_key: os.environ/ANTHROPIC_API_KEY_PERSONAL
+
+  - model_name: claude-haiku-enterprise
+    litellm_params:
+      model: anthropic/claude-3-5-haiku-latest
+      api_key: os.environ/ANTHROPIC_API_KEY_ENTERPRISE
+
+  - model_name: gemini-personal
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY_PERSONAL
+
+  - model_name: gemini-enterprise
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY_ENTERPRISE
+
+  - model_name: gemini-2.5-pro-personal
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY_PERSONAL
+
+  - model_name: gemini-2.5-pro-enterprise
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY_ENTERPRISE
+
+  - model_name: gemini-2.5-flash-personal
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY_PERSONAL
+
+  - model_name: gemini-2.5-flash-enterprise
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY_ENTERPRISE
+
+  - model_name: gemini-flash-personal
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_key: os.environ/GOOGLE_API_KEY_PERSONAL
+
+  - model_name: gemini-flash-enterprise
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_key: os.environ/GOOGLE_API_KEY_ENTERPRISE
+
+  - model_name: mistral-personal
+    litellm_params:
+      model: mistral/mistral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY_PERSONAL
+
+  - model_name: mistral-enterprise
+    litellm_params:
+      model: mistral/mistral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY_ENTERPRISE
+
+  - model_name: mistral-large-personal
+    litellm_params:
+      model: mistral/mistral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY_PERSONAL
+
+  - model_name: mistral-large-enterprise
+    litellm_params:
+      model: mistral/mistral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY_ENTERPRISE
+
+  - model_name: mistral-medium-personal
+    litellm_params:
+      model: mistral/mistral-medium-latest
+      api_key: os.environ/MISTRAL_API_KEY_PERSONAL
+
+  - model_name: mistral-medium-enterprise
+    litellm_params:
+      model: mistral/mistral-medium-latest
+      api_key: os.environ/MISTRAL_API_KEY_ENTERPRISE
+
+  - model_name: mistral-small-personal
+    litellm_params:
+      model: mistral/mistral-small-latest
+      api_key: os.environ/MISTRAL_API_KEY_PERSONAL
+
+  - model_name: mistral-small-enterprise
+    litellm_params:
+      model: mistral/mistral-small-latest
+      api_key: os.environ/MISTRAL_API_KEY_ENTERPRISE
+
+  - model_name: codestral-personal
+    litellm_params:
+      model: mistral/codestral-latest
+      api_key: os.environ/MISTRAL_API_KEY_PERSONAL
+
+  - model_name: codestral-enterprise
+    litellm_params:
+      model: mistral/codestral-latest
+      api_key: os.environ/MISTRAL_API_KEY_ENTERPRISE
+
+  - model_name: pixtral-personal
+    litellm_params:
+      model: mistral/pixtral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY_PERSONAL
+
+  - model_name: pixtral-enterprise
+    litellm_params:
+      model: mistral/pixtral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY_ENTERPRISE
+
 litellm_settings:
   drop_params: true
   set_verbose: false
   # Prefer failing with a clear auth/model error over silent wrong defaults
   # request_timeout: 600
+
+  # ── Multi-account key slots (personal + enterprise) ───────────────
+  # Primary alias (no suffix) uses {PROVIDER}_API_KEY.
+  # -personal   → {PROVIDER}_API_KEY_PERSONAL   (personal / subscription)
+  # -enterprise → {PROVIDER}_API_KEY_ENTERPRISE (work / org API)
+  # Set both keys; use simultaneously via different model aliases.
+  # Regenerate: python scripts/gen-multi-key-aliases.py
