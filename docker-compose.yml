@@ -78,6 +78,7 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
     volumes:
       - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
+      - ./aether-hub/agent_modes.yaml:/app/agent_modes.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

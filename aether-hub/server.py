@@ -14,6 +14,14 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from agents import (  # noqa: E402
+    apply_runtime_update,
+    get_runtime,
+    init_runtime_from_config,
+    load_modes_config,
+    modes_status,
+    plan_event,
+)
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
@@ -226,6 +234,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/sync":
             self._send(200, refresh_snapshot())
             return
+        if path in ("/api/modes", "/api/agent-modes"):
+            self._send(200, modes_status(get_snapshot()))
+            return
         if path.startswith("/api/memory/sessions/"):
             sid = path[len("/api/memory/sessions/") :].strip("/")
             if not sid:
@@ -245,6 +256,43 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         body = self._read_json()
 
+        if path in ("/api/modes", "/api/agent-modes"):
+            try:
+                runtime = apply_runtime_update(body or {})
+                # Persist runtime to Redis for multi-replica readers
+                r = _redis_client()
+                if r is not None:
+                    try:
+                        r.set("aether:modes:runtime", json.dumps(runtime), ex=86400 * 7)
+                    except Exception:
+                        pass
+                self._send(200, modes_status(get_snapshot()))
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path in ("/api/agents/plan", "/api/agents/event"):
+            try:
+                plan = plan_event(get_snapshot(), body or {})
+                # Store plan briefly in memory namespace for multi-agent continuity
+                if body.get("remember", True):
+                    _memory.upsert_vector(
+                        text=json.dumps(
+                            {
+                                "event_id": plan.get("event_id"),
+                                "mode": plan.get("mode"),
+                                "models": plan.get("models_in_event") or [
+                                    a.get("model") for a in plan.get("agents") or []
+                                ],
+                                "goal": (plan.get("goal") or {}).get("text", "")[:500],
+                            }
+                        ),
+                        namespace="agent-events",
+                        meta={"event_id": plan.get("event_id"), "mode": plan.get("mode")},
+                    )
+                self._send(200, plan)
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
         if path in ("/api/discover", "/api/scan"):
             hs = body.get("host_scan") or body
             if body.get("host_scan") is not None or any(
@@ -328,14 +376,13 @@ def _paths() -> list[str]:
     return [
         "GET  /api/discover          ← scan system first",
         "GET  /api/discover/text",
-        "POST /api/discover          {host_scan: {...}} from scripts/scan-system.ps1",
+        "POST /api/discover          {host_scan: {...}}",
+        "GET|POST /api/modes         ← inline|multi_agent, token_saver, role pins",
+        "POST /api/agents/plan       ← multi-LLM event plan",
         "/api/health",
         "/api/matrix",
-        "/api/matrix/table",
         "/api/route?need=code&prefer=local",
         "/api/sync",
-        "POST /api/memory/sessions/{id}/messages",
-        "GET  /api/memory/sessions/{id}",
         "POST /api/memory/vectors",
         "POST /api/memory/search",
     ]
@@ -402,10 +449,27 @@ def _index_html() -> bytes:
  <div style="margin-top:.5rem">
   <a href="/api/discover">/api/discover</a> ·
   <a href="/api/discover?refresh=1">refresh</a> ·
-  <a href="/api/discover/text">text</a> ·
+  <a href="/api/modes">/api/modes</a> ·
   <a href="/api/matrix">matrix</a> ·
   <a href="/api/route?need=code&prefer=local">route code</a> ·
   <a href="/api/health">health</a>
+ </div>
+</div>
+<div class="card" id="modesCard">
+ <b>Agent mode</b> · token saver (optional) · multi-LLM roles
+ <div class="muted" style="margin-top:.35rem" id="modesRuntime">loading…</div>
+ <div style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.35rem">
+  <button type="button" onclick="setMode('inline')">inline</button>
+  <button type="button" onclick="setMode('multi_agent')">multi-agent</button>
+  <button type="button" onclick="setSaver(true)">token saver ON</button>
+  <button type="button" onclick="setSaver(false)">token saver OFF</button>
+  <button type="button" onclick="setPreset('thrifty')">preset: thrifty</button>
+  <button type="button" onclick="setPreset('quality')">preset: quality</button>
+  <button type="button" onclick="setPreset('local_only')">preset: local_only</button>
+ </div>
+ <div class="muted" style="margin-top:.4rem">
+  Pin roles via API: mastermind / supervisor / worker by maker, tier, price, or model —
+  see <a href="https://github.com/piksliviksi/aetherstack/blob/main/docs/AGENT-MODES.md">AGENT-MODES.md</a>
  </div>
 </div>
 <div class="card">
@@ -413,6 +477,33 @@ def _index_html() -> bytes:
  <ul class="rec">{rec_html}</ul>
  <div class="muted">Host deep scan (WSL/GPU): <code>.\\scripts\\scan-system.ps1</code> or <code>./scripts/scan-system.sh</code></div>
 </div>
+<script>
+async function refreshModes(){{
+  try {{
+    const j = await fetch('/api/modes').then(r=>r.json());
+    const rt = j.runtime||{{}};
+    const res = j.resolved_now||{{}};
+    const lines = [
+      'mode='+rt.mode+' · token_saver='+rt.token_saver+(rt.preset?' · preset='+rt.preset:''),
+      'mastermind → '+(res.mastermind&&res.mastermind.model)+' ('+(res.mastermind&&res.mastermind.provider)+')',
+      'supervisor → '+(res.supervisor&&res.supervisor.model)+' ('+(res.supervisor&&res.supervisor.provider)+')',
+      'worker → '+(res.worker&&res.worker.model)+' ('+(res.worker&&res.worker.provider)+')',
+      'inline → '+(res.inline&&res.inline.model)
+    ];
+    document.getElementById('modesRuntime').textContent = lines.join(' · ');
+  }} catch(e) {{
+    document.getElementById('modesRuntime').textContent = 'modes unavailable';
+  }}
+}}
+async function postModes(body){{
+  await fetch('/api/modes',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
+  refreshModes();
+}}
+function setMode(m){{ postModes({{mode:m}}); }}
+function setSaver(v){{ postModes({{token_saver:v}}); }}
+function setPreset(p){{ postModes({{preset:p}}); }}
+refreshModes();
+</script>
 <div class="card">
  matrix live: local <b>{summary.get('local_online')}</b> · cloud <b>{summary.get('cloud_ready')}</b> · down <b>{summary.get('unavailable')}</b>
  · memory <b>{_memory.backend}</b>
@@ -430,15 +521,19 @@ def _index_html() -> bytes:
 
 
 def main() -> None:
+    print("[hub] agent modes + token saver…")
+    init_runtime_from_config()
+    print(f"[hub] mode={get_runtime().get('mode')} token_saver={get_runtime().get('token_saver')}")
     print("[hub] initial system discover…")
     refresh_snapshot()
     t = threading.Thread(target=_bg_sync, daemon=True)
     t.start()
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Aether Hub → http://{HOST}:{PORT}/")
-    print("  FIRST:  GET /api/discover   (what is available)")
-    print("  THEN:   GET /api/route?need=code&prefer=local")
-    print("  memory: POST /api/memory/vectors · search")
+    print("  FIRST:  GET /api/discover")
+    print("  MODES:  GET|POST /api/modes   (inline|multi_agent, token_saver)")
+    print("  PLAN:   POST /api/agents/plan (multi-LLM event)")
+    print("  ROUTE:  GET /api/route?need=code&prefer=local")
     print(f"  redis:  {REDIS_URL}  backend={_memory.backend}")
     try:
         httpd.serve_forever()
