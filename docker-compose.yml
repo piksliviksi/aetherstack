@@ -82,10 +82,12 @@ services:
       - AETHER_PIPELINES_CATALOG=/pipelines/catalog
       - AETHER_PIPELINES_USER=/pipelines/user
       - AETHER_PIPELINES_VOTES=/pipelines/votes.json
+      - AETHER_GRAPHS_DIR=/pipelines/graphs
     volumes:
       - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
       - ./aether-hub/agent_modes.yaml:/app/agent_modes.yaml:ro
       - ./aether-hub/bootstrap.yaml:/app/bootstrap.yaml:ro
+      - ./aether-hub/static:/app/static:ro
       - ./combos:/combos:ro
       - ./pipelines:/pipelines
     extra_hosts:
