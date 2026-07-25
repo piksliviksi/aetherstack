@@ -66,12 +66,33 @@ Relationship to current local private mode: [PRIVATE-MODE.md](./PRIVATE-MODE.md)
 | Roles | Admin (billing, budgets, scripts), member (chat/memory), reader (distilled research only) |
 | Session binding | User → seat → tenant pool; private projects bind to user vault inside tenant |
 
+### Backup and restore
+
+Enterprise account data can be **backed up to destinations controlled by the client**, not only platform-managed storage.
+
+| Destination | Examples |
+|-------------|---------|
+| Client cloud object store | **Azure** Blob / ADLS Gen2, **AWS** S3 bucket, GCS bucket |
+| Local / on-prem | Filesystem path, NAS, local encrypted volume |
+| Other client-held | S3-compatible endpoints (MinIO, etc.) under customer credentials |
+
+| Rule | Requirement |
+|------|-------------|
+| Ownership | Backup lands in **client** account/bucket/path; client holds destination credentials |
+| Contents | Tenant silo: memory pools, distilled research, orchestration scripts, seat/budget metadata as configured |
+| Encryption | Backup blobs encrypted; keys under tenant/client custody (no plaintext dump) |
+| Private vaults | Included only under admin policy; default respect private isolation until release |
+| Schedule | Manual snapshot + optional scheduled backup per tenant policy |
+| Restore | Restore into the **same** enterprise silo (or explicit admin clone); no cross-tenant restore |
+| Platform | AetherStack does not retain a second unencrypted copy outside the configured destinations |
+
 ### Out of scope for this item
 
 | Item | Note |
 |------|------|
 | Public multi-tenant free tier | Separate product decision |
 | Cross-enterprise research marketplace | Not part of siloed enterprise account |
+| Platform-only backup with no client-held copy | Optional add-on; client bucket/local remains primary control plane for DR |
 | Shipping date | Unspecified until implementation starts |
 
 ---
