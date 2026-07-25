@@ -76,26 +76,75 @@ Provider billing remains provider-side. Aether enforces routing policy only.
 
 ---
 
-## 5. Daily loop
+## 5. Continuity workflows
+
+### 5.1 Session / daily / weekly limits without product hop
+
+| Condition | Response |
+|-----------|----------|
+| Primary cloud maker unavailable, 429, or unpinned | Matrix + combo/pipeline fallbacks select next live model |
+| Other cloud keys still valid | Work continues under the **same** façade URL and session hygiene |
+| No cloud headroom | Prefer `tier: local` / `private` / cheapest local aliases via Ollama |
+| Context bloated after hours of agents | `/done` → `/compact` or `/clear` (archive first; do not re-paste into a new vendor app) |
+
+Client stays on:
+
+```text
+base_url = http://127.0.0.1:4000/v1
+api_key  = <LITELLM_MASTER_KEY>
+model    = <one alias or combo-resolved alias>
+```
+
+Provider subscription caps are enforced by the provider. Aether’s job is **not** to invent quota APIs; it is to keep the **work surface and memory continuous** while engines rotate by policy and live discover.
+
+### 5.2 Multi-stage pipeline without re-briefing
+
+| Stage role | Typical assignment |
+|------------|-------------------|
+| researcher | High reason / long context |
+| critic | Different maker; gate/ack |
+| builder | Code; may parallelize workers |
+| tester | Cheap / local |
+
+Encode once in pipeline YAML or `/graph`. Plan with Hub; execute via gateway. On complete: slash hygiene. Artifacts remain searchable in agent memory.
+
+### 5.3 Private local research segment
+
+| Requirement | Mechanism |
+|-------------|-----------|
+| No egress to cloud for a project slice | `POST /api/privacy` + local model pins |
+| No leak into shared session/xref pools | Private vault namespaces; redacted logs |
+| Finish offline when subscriptions empty | Host Ollama on Metal / ROCm CUs / CUDA |
+| Leave isolation | Explicit `POST /api/privacy/release` only |
+
+Same IDE window; different policy for the sensitive unit of work. See [PRIVATE-MODE.md](./PRIVATE-MODE.md).
+
+---
+
+## 6. Daily loop
 
 ```text
 Start stack
   → open project → chat via gateway alias
-  → structured work: pipeline/graph plan when required
+  → multi-hour agents: failover cloud → cloud → local as needed
+  → optional private local segment for sensitive research
+  → structured pipeline/graph when the job is multi-stage
   → task complete: /done all
   → /compact or /clear
-  → next unit of work (lean context; memory searchable)
+  → next unit (lean context; memory searchable)
 ```
 
 ---
 
-## 6. Hard constraints
+## 7. Hard constraints
 
 | Constraint | Fact |
 |------------|------|
 | GPU for weights | Host Ollama (or cloud). Not VS Code. Not LiteLLM container by default. |
 | Façade quality | Bound by imported trees, live discover, and present keys |
 | Multi-agent cost | Fan-out can exceed single-call tokens; token saver + slash hygiene apply |
+| Provider caps | Daily/weekly/session limits are provider-side; Aether rotates engines by policy + availability |
+| Private vault | No auto-merge into common memory on release |
 | Node canvas | Native MIT graph only. No third-party node engine is vendored in this repo. |
 
 ---

@@ -34,12 +34,75 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Product hop per task | One chat; policy selects models |
 | Manual context re-paste | Shared memory + optional cross-project index |
 | Model choice every prompt | Combos / pipelines / node graph |
+| Hard stop at one vendor’s session/day cap | Continue via next model in the pool or local GPU |
 | Unbounded context growth | Unit complete → archive → clear |
-| Split IDE / cloud / local | One gateway for IDE, WebUI, scripts |
+| Sensitive work mixed into cloud chat | Private mode / local-only path |
 
 **Loop:** start stack → open project → chat via gateway → `/done` → `/clear` or `/compact` → next unit.
 
-Operating model: [docs/OPERATING-MODEL.md](./docs/OPERATING-MODEL.md)
+---
+
+## Workflows (why the pipeline exists)
+
+### 1. Long coding day — no hard stop when one subscription hits a wall
+
+**Scene:** You code in VS Code or a local CLI for hours. Continue / Claude Code / Codex / Grok-class agents run under **one** Aether gateway endpoint. You hold one or more cloud subscriptions (Claude, Codex/OpenAI, Grok/xAI, Mistral, …) plus **host Ollama** on Metal / ROCm / CUDA.
+
+**Without Aether:** One provider hits a session, daily, or weekly limit → hard stop. You open another app, re-import chat, re-pick files, re-state goals, lose agent state.
+
+**With Aether:**
+
+| Step | What happens |
+|------|----------------|
+| Work surface | Stay in VS Code / CLI / Open WebUI. Same base URL, same master key, same façade model id. |
+| Policy | Combos / pipelines / capability matrix define **ordered fallbacks** (e.g. Sonnet → GPT → Grok → Codestral → `local-default`). |
+| Quota pressure | When a maker is unavailable, rate-limited, or pinned off, routing and role pins move work to the **next live** model that still has headroom. |
+| No cloud left | Pool falls through to **local inference** (slower, still completes the job). |
+| Continuity | Hub memory + `/done` → `/compact` or `/clear` keeps decisions; you do not rebuild the brief from zero in a new vendor UI. |
+
+You are not “switching products.” You stay in one window; the control plane switches engines under the façade.
+
+Configure: [docs/OPERATING-MODEL.md](./docs/OPERATING-MODEL.md) · [docs/AGENT-MODES.md](./docs/AGENT-MODES.md) · [combos/](./combos/) · [docs/PIPELINES.md](./docs/PIPELINES.md)
+
+### 2. Structured jobs — research → critique → build → test without re-briefing
+
+**Scene:** A feature needs research, an adversarial pass, implementation, and tests. Different tiers/makers fit different stages.
+
+| Stage | Typical bias |
+|-------|----------------|
+| Research | High-tier cloud (or local if private) |
+| Critique / ack | Different maker than research |
+| Build | Mid-tier or local workers |
+| Test | Cheap / local |
+
+Pipelines and the **node canvas** encode that tree once. Agents plan against live availability. After the unit finishes: `/done` → archive → `/clear`. Next job starts lean; search memory if old decisions matter.
+
+### 3. Private / air-gapped segments — sensitive research stays off the provider
+
+**Scene:** Part of the work must not leave the machine (security, NDA, unpublished research). Online agents must not see that material.
+
+| Control | Effect |
+|---------|--------|
+| **Private mode** | Flag project and/or model. Session and vectors go to an isolated vault. No common memory pool, no xref index, no contentful system logs. |
+| **Local-only combos** | e.g. `private_local` / `inline_fable` — stages pinned to Ollama on host GPU. |
+| **Release** | Explicit only. Vault is not merged into the shared pool on release unless you choose to re-index later. |
+
+Stay on the same IDE surface; switch policy (private + local tier) for the sensitive slice, then return to multi-cloud routing for the rest.
+
+Procedure: [docs/PRIVATE-MODE.md](./docs/PRIVATE-MODE.md) · [docs/AMD-COMPUTE.md](./docs/AMD-COMPUTE.md) / platform GPU docs for local speed.
+
+### 4. Operator loop (daily)
+
+```text
+Start stack (leave running)
+  → IDE → gateway façade (one model id)
+  → multi-hour work: cloud A → cloud B → local as limits/policy demand
+  → optional private segment for sensitive research
+  → /done → /compact or /clear
+  → next unit (memory holds archives; chat stays short)
+```
+
+Deep detail: [docs/OPERATING-MODEL.md](./docs/OPERATING-MODEL.md)
 
 ---
 
