@@ -93,6 +93,7 @@ Write-Host "  Chat UI:   http://localhost:3000" -ForegroundColor Green
 Write-Host "  LiteLLM:   http://localhost:4000/v1" -ForegroundColor Green
 Write-Host "  Redis:     localhost:6379" -ForegroundColor Green
 Write-Host "  --------------------------------" -ForegroundColor DarkGray
+Write-Host "  Hub matrix/memory: http://localhost:8766" -ForegroundColor DarkCyan
 Write-Host "  Models list (if master key empty): http://localhost:4000/v1/models" -ForegroundColor DarkCyan
 Write-Host "  With key: curl ... -H `"Authorization: Bearer YOUR_KEY`"" -ForegroundColor DarkGray
 Write-Host "  Stop: double-click stop.bat" -ForegroundColor DarkCyan

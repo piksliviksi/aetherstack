@@ -21,18 +21,27 @@ services:
     restart: unless-stopped
 
   open-webui:
+    # Keep in sync with volume schema (:main created the DB). Use TZ to reduce client loops.
     image: ghcr.io/open-webui/open-webui:main
     container_name: aether-open-webui
     ports:
       - "3000:8080"
     environment:
-      # Host Ollama from WSL/Windows Docker: host.docker.internal
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # Also expose LiteLLM multi-model gateway as OpenAI-compatible provider
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
       - WEBUI_AUTH=false
+      - TZ=Europe/Tallinn
+      - SCARF_NO_ANALYTICS=true
+      - DO_NOT_TRACK=true
+      - ANONYMIZED_TELEMETRY=false
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - open_webui_data:/app/backend/data
+    depends_on:
+      - litellm
     restart: unless-stopped
 
   redis:
@@ -42,6 +51,38 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Capability matrix sync + shared agent memory (Redis-backed)
+  aether-hub:
+    build: ./aether-hub
+    container_name: aether-hub
+    ports:
+      - "8766:8766"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - AETHER_HUB_HOST=0.0.0.0
+      - AETHER_HUB_PORT=8766
+      - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
+      - AETHER_EMBED_MODEL=${AETHER_EMBED_MODEL:-nomic-embed-text}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+    volumes:
+      - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   # Unified gateway for Grok / OpenAI / Anthropic / local Ollama
@@ -61,8 +102,13 @@ services:
       # Required by current LiteLLM for /v1/* — browsers must send Authorization header.
       # Default is for local lab only; change if you expose the port.
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

@@ -18,9 +18,10 @@
 
 | Service | Port | Role |
 |---------|------|------|
-| **Open WebUI** | [http://localhost:3000](http://localhost:3000) | Chat UI |
+| **Open WebUI** | [http://localhost:3000](http://localhost:3000) | Chat UI (Ollama + LiteLLM gateway) |
 | **LiteLLM** | [http://localhost:4000](http://localhost:4000) | One OpenAI-compatible API for local + cloud models |
-| **Redis** | `6379` | Short-term / shared working memory for agents & tools |
+| **Aether Hub** | [http://localhost:8766](http://localhost:8766) | Capability **sync matrix** + agent **memory** API |
+| **Redis** | `6379` | LiteLLM cache + hub sessions/vectors |
 | **Ollama** (optional container) | `11434` | Local models — better as a **native** install on AMD |
 
 ```
@@ -106,6 +107,7 @@ docker compose up -d
 |------|-----|
 | Chat | http://localhost:3000 |
 | Gateway | http://localhost:4000 |
+| Hub (matrix + memory) | http://localhost:8766 |
 
 ### 4. Optional: Ollama inside Docker
 
@@ -284,10 +286,29 @@ curl http://127.0.0.1:11434/
 
 Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA_ENABLE_DXG_DETECTION=1`, `OLLAMA_HOST=0.0.0.0:11434`).
 
-## Related ideas
+## Capability matrix & agent memory
 
-- Capability / routing “sync matrix” between local and cloud models  
-- Redis / vector DB as shared agent memory  
+| Doc | Topic |
+|-----|--------|
+| [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) | Local ↔ cloud routing / sync matrix |
+| [docs/AGENT-MEMORY.md](./docs/AGENT-MEMORY.md) | Redis sessions + vector search |
+| [docs/CRITIQUE.md](./docs/CRITIQUE.md) | Design critique & residual risks |
+| [`aether-hub/`](./aether-hub/) | Service source |
+
+```bash
+# Best model for coding, prefer local
+curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local"
+
+# Shared memory search
+curl -s -X POST http://127.0.0.1:8766/api/memory/search \
+  -H "Content-Type: application/json" \
+  -d "{\"query\":\"gateway port\",\"namespace\":\"default\",\"top_k\":3}"
+```
+
+Optional embed model for better recall: `ollama pull nomic-embed-text`
+
+## Related
+
 - Debian WSL workstation notes: [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md)
 
 ---
