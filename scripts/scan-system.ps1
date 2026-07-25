@@ -175,18 +175,21 @@ Write-Host "  Ollama localhost:11434: $($winTags.ok)  models: $($winModels -join
 if ($wsl.available) {
   Write-Host "  WSL $Distro IP: $($wsl.ip)  ollama=$($wsl.ollama_active)  dxg=$($wsl.dxg)  rocm_libs=$($wsl.ollama_rocm_libs)"
   Write-Host "  WSL models: $($wsl.models -join ', ')"
-  if ($wsl.rocminfo_gpu) { Write-Host "  rocminfo: $($wsl.rocminfo_gpu -replace "`n",' / ')" -ForegroundColor DarkGray }
+  if ($wsl.rocminfo_gpu) {
+    $rg = ($wsl.rocminfo_gpu -replace "[\r\n]+", " / ")
+    Write-Host "  rocminfo: $rg" -ForegroundColor DarkGray
+  }
 }
 Write-Host "  Services: webui=$($scan.services['3000_webui']) litellm_port=$($scan.services['4000_litellm']) redis=$($scan.services['6379_redis']) hub=$($scan.services['8766_hub'])"
 Write-Host ""
 if ($scan.flags.windows_ollama_and_wsl_both) {
-  Write-Host "  ! Both Windows and WSL Ollama active — pick one (prefer WSL ROCm on Radeon)." -ForegroundColor Yellow
+  Write-Host "  ! Both Windows and WSL Ollama active - prefer WSL ROCm on Radeon." -ForegroundColor Yellow
 }
 if ($scan.flags.ollama_missing_rocm_libs) {
-  Write-Host "  ! Ollama in WSL has no /rocm libs — GPU inference will stay on CPU until ROCm package is installed." -ForegroundColor Yellow
+  Write-Host "  ! Ollama in WSL has no /rocm libs - GPU stays CPU until ROCm package is installed." -ForegroundColor Yellow
 }
 if ($scan.flags.localhost_11434_broken) {
-  Write-Host "  ! localhost:11434 broken but WSL Ollama OK — run: .\scripts\ensure-wsl-ollama.ps1" -ForegroundColor Yellow
+  Write-Host "  ! localhost:11434 broken but WSL Ollama OK - run: .\scripts\ensure-wsl-ollama.ps1" -ForegroundColor Yellow
 }
 Write-Host "  Wrote $outPath" -ForegroundColor Green
 Write-Host "  Hub discover: $HubUrl/api/discover" -ForegroundColor DarkCyan
