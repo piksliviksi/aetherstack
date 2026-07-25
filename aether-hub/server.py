@@ -41,6 +41,13 @@ from combos import (  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
+from slash_commands import (  # noqa: E402
+    cmd_status,
+    execute_slash,
+    list_commands,
+    maybe_handle_message,
+    register_task,
+)
 
 try:
     import redis as redis_lib
@@ -300,6 +307,13 @@ class Handler(BaseHTTPRequestHandler):
             ns = (qs.get("namespace") or ["default"])[0]
             self._send(200, _memory.stats(ns))
             return
+        if path in ("/api/slash", "/api/commands"):
+            self._send(200, {"commands": list_commands()})
+            return
+        if path.startswith("/api/sessions/") and path.endswith("/status"):
+            sid = path[len("/api/sessions/") : -len("/status")].strip("/") or "default"
+            self._send(200, cmd_status(sid, _memory))
+            return
         self._send(404, {"error": "not found", "paths": _paths()})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -307,6 +321,30 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         body = self._read_json()
 
+        if path in ("/api/slash", "/api/commands"):
+            text = body.get("text") or body.get("command") or ""
+            sid = body.get("session_id") or body.get("session") or "default"
+            try:
+                self._send(200, execute_slash(text, _memory, session_id=sid))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path.startswith("/api/sessions/") and path.endswith("/message"):
+            sid = path[len("/api/sessions/") : -len("/message")].strip("/") or "default"
+            text = body.get("text") or body.get("content") or ""
+            try:
+                self._send(
+                    200,
+                    maybe_handle_message(
+                        text,
+                        _memory,
+                        session_id=sid,
+                        store_user=bool(body.get("store_user", True)),
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
         if path in ("/api/modes", "/api/agent-modes"):
             try:
                 runtime = apply_runtime_update(body or {})
@@ -369,6 +407,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/agents/plan", "/api/agents/event"):
             try:
                 plan = plan_event(get_snapshot(), body or {})
+                sid = body.get("session_id") or body.get("session") or "default"
                 # Store plan briefly in memory namespace for multi-agent continuity
                 if body.get("remember", True):
                     _memory.upsert_vector(
@@ -384,6 +423,21 @@ class Handler(BaseHTTPRequestHandler):
                         ),
                         namespace="agent-events",
                         meta={"event_id": plan.get("event_id"), "mode": plan.get("mode")},
+                    )
+                # Track as open task so /clear waits until /done
+                if body.get("track_task", True):
+                    goal = (plan.get("goal") or {}).get("text") or body.get("goal") or "agent event"
+                    t = register_task(
+                        f"event:{plan.get('event_id')}: {str(goal)[:80]}",
+                        session_id=sid,
+                        task_id=(plan.get("event_id") or "")[:8] or None,
+                        meta={"event_id": plan.get("event_id"), "mode": plan.get("mode")},
+                    )
+                    plan["tracked_task"] = t
+                    plan["slash_hint"] = (
+                        "When agents finish: POST /api/slash "
+                        f'{{\"session_id\":\"{sid}\",\"text\":\"/done {t.get("id")}\"}} '
+                        f'then /clear or /compact'
                     )
                 self._send(200, plan)
             except Exception as e:
@@ -482,6 +536,10 @@ def _paths() -> list[str]:
         "POST /api/combos/{id}/plan",
         "GET  /api/combos/{id}/export",
         "POST /api/combos/import",
+        "GET  /api/slash             ← list /clear /compact /save …",
+        "POST /api/slash             {session_id, text:\"/clear\"}",
+        "POST /api/sessions/{id}/message",
+        "GET  /api/sessions/{id}/status",
         "/api/health",
         "/api/matrix",
         "/api/route?need=code&prefer=local",
@@ -697,7 +755,30 @@ refreshModes();
 {table}
 </tbody>
 </table>
-<p class="muted" style="margin-top:1rem">Memory: POST /api/memory/vectors · POST /api/memory/search</p>
+<div class="card">
+ <b>Slash commands</b> (archive to memory → clear context)
+ <div class="muted">/status · /task add … · /done all · /save · /clear · /compact</div>
+ <div style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center">
+  <input id="slashIn" type="text" placeholder="/status or /clear" style="flex:1;min-width:160px;background:#0b1020;border:1px solid #243056;color:#e8eefc;padding:.3rem .5rem;border-radius:6px" />
+  <button type="button" onclick="runSlash()">run</button>
+  <button type="button" onclick="runSlashText('/done all')">/done all</button>
+  <button type="button" onclick="runSlashText('/clear')">/clear</button>
+  <button type="button" onclick="runSlashText('/compact')">/compact</button>
+ </div>
+ <pre id="slashOut" class="muted" style="white-space:pre-wrap;max-height:10rem;overflow:auto;font-size:11px"></pre>
+</div>
+<script>
+async function runSlashText(t){{
+  document.getElementById('slashIn').value = t;
+  return runSlash();
+}}
+async function runSlash(){{
+  const text = document.getElementById('slashIn').value || '/help';
+  const j = await fetch('/api/slash',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{session_id:'ui',text}})}}).then(r=>r.json());
+  document.getElementById('slashOut').textContent = JSON.stringify(j,null,2).slice(0,3000);
+}}
+</script>
+<p class="muted" style="margin-top:1rem">Memory: POST /api/memory/vectors · POST /api/memory/search · docs/SLASH-COMMANDS.md</p>
 </body></html>"""
     return html.encode("utf-8")
 
@@ -715,6 +796,7 @@ def main() -> None:
     print("  FIRST:  GET /api/discover")
     print("  MODES:  GET|POST /api/modes   (inline|multi_agent, token_saver)")
     print("  PLAN:   POST /api/agents/plan (multi-LLM event)")
+    print("  SLASH:  POST /api/slash  {\"text\":\"/clear\"}  (archive→clear)")
     print("  ROUTE:  GET /api/route?need=code&prefer=local")
     print(f"  redis:  {REDIS_URL}  backend={_memory.backend}")
     try:

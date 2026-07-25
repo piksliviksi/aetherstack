@@ -295,6 +295,7 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 | [docs/AGENT-MODES.md](./docs/AGENT-MODES.md) | Inline vs multi-agent, token saver, multi-LLM roles |
 | [docs/AUTO-INSTALL.md](./docs/AUTO-INSTALL.md) | Optional auto-install of missing packages |
 | [combos/](./combos/) | Shareable LLM tier + situation packs (export/import) |
+| [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md) | `/clear` `/compact` — archive to memory then reset context |
 | [`aether-hub/`](./aether-hub/) | Service source |
 
 ```bash
@@ -361,6 +362,19 @@ curl -s -X POST http://127.0.0.1:8766/api/combos/import \
 ```
 
 Ready-made JSON: [combos/export/](./combos/export/) · guide: [combos/README.md](./combos/README.md)
+
+### Slash commands (context hygiene)
+
+Like Claude’s `/clear`: **finish tasks → document in memory → clear working context**.
+
+```bash
+curl -s -X POST http://127.0.0.1:8766/api/slash -H "Content-Type: application/json" \
+  -d '{"session_id":"proj","text":"/done all"}'
+curl -s -X POST http://127.0.0.1:8766/api/slash -H "Content-Type: application/json" \
+  -d '{"session_id":"proj","text":"/clear"}'
+```
+
+See [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md).
 
 ### Mac ARM GPU
 
