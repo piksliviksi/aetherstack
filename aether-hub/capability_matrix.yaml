@@ -1,0 +1,245 @@
+# AetherStack capability / routing sync matrix
+# ---------------------------------------------
+# model_name values must match litellm_config.yaml aliases (what clients request).
+# Live availability is filled at runtime by aether-hub (Ollama probe + env keys).
+
+version: 1
+updated: "2026-07-25"
+
+# Capability tags used by /api/route?need=
+capabilities:
+  chat:
+    description: General multi-turn conversation
+  code:
+    description: Coding, refactor, generate patches
+  reason:
+    description: Multi-step reasoning / hard analysis
+  vision:
+    description: Image understanding
+  tools:
+    description: Function / tool calling
+  embed:
+    description: Text embeddings for RAG / memory
+  private:
+    description: Prefer on-device / no cloud egress
+  fast:
+    description: Low latency interactive use
+  cheap:
+    description: Cost-sensitive bulk work
+  long_context:
+    description: Large context windows (100k+)
+
+# Routing policy when several models match
+routing:
+  prefer_local_for: [private, cheap, fast]
+  prefer_cloud_for: [vision, reason, long_context]
+  # Ordered fallbacks when primary is offline
+  fallbacks:
+    chat: [local-default, grok-4.5, gpt-4.1, claude-sonnet-4, gemini-2.5-flash]
+    code: [local-default, grok-code, codex, claude-sonnet-4, gpt-4.1]
+    reason: [grok-4.5, o3, claude-opus-4, gemini-2.5-pro, local-default]
+    vision: [gpt-4o, gemini-2.5-pro, claude-sonnet-4]
+    embed: [local-embed, openai-embed]
+    private: [local-default, local-llama, local-tiny]
+    fast: [local-tiny, local-default, grok-4-fast, gpt-4.1-mini, gemini-flash]
+    cheap: [local-default, local-tiny, gpt-4.1-mini, gemini-flash, claude-haiku]
+    long_context: [gemini-2.5-pro, gemini-2.5-flash, claude-sonnet-4, gpt-4.1]
+  sync:
+    # How often hub refreshes Ollama + writes matrix snapshot to Redis (seconds)
+    interval_sec: 60
+    redis_key: aether:matrix:snapshot
+
+models:
+  # ── Local (Ollama) ───────────────────────────────────────────────
+  local-default:
+    tier: local
+    provider: ollama
+    backend: ollama/llama3.1:8b
+    capabilities: [chat, code, tools, private, cheap, fast]
+    context: 8192
+    cost: 0
+    latency: low
+    notes: Default local workhorse
+
+  local-llama:
+    tier: local
+    provider: ollama
+    backend: ollama/llama3.1:8b
+    capabilities: [chat, code, tools, private, cheap]
+    context: 8192
+    cost: 0
+    latency: low
+
+  local-tiny:
+    tier: local
+    provider: ollama
+    backend: ollama/tinyllama
+    capabilities: [chat, private, cheap, fast]
+    context: 2048
+    cost: 0
+    latency: very_low
+    notes: Smoke tests / constrained machines
+
+  local-embed:
+    tier: local
+    provider: ollama
+    backend: ollama/nomic-embed-text
+    capabilities: [embed, private, cheap]
+    context: 8192
+    cost: 0
+    latency: low
+    notes: Pull with ollama pull nomic-embed-text
+
+  # ── xAI / Grok ───────────────────────────────────────────────────
+  grok-4.5:
+    tier: cloud
+    provider: xai
+    backend: xai/grok-4.5
+    capabilities: [chat, code, reason, tools, long_context]
+    context: 128000
+    cost: high
+    latency: medium
+    requires_env: XAI_API_KEY
+
+  grok-4-fast:
+    tier: cloud
+    provider: xai
+    backend: xai/grok-4-1-fast-reasoning
+    capabilities: [chat, code, reason, tools, fast]
+    context: 128000
+    cost: medium
+    latency: low
+    requires_env: XAI_API_KEY
+
+  grok-code:
+    tier: cloud
+    provider: xai
+    backend: xai/grok-code-fast-1
+    capabilities: [code, chat, tools, fast]
+    context: 128000
+    cost: medium
+    latency: low
+    requires_env: XAI_API_KEY
+
+  # ── OpenAI ───────────────────────────────────────────────────────
+  gpt-4.1:
+    tier: cloud
+    provider: openai
+    backend: openai/gpt-4.1
+    capabilities: [chat, code, tools, reason, long_context]
+    context: 128000
+    cost: high
+    latency: medium
+    requires_env: OPENAI_API_KEY
+
+  gpt-4.1-mini:
+    tier: cloud
+    provider: openai
+    backend: openai/gpt-4.1-mini
+    capabilities: [chat, code, tools, cheap, fast]
+    context: 128000
+    cost: low
+    latency: low
+    requires_env: OPENAI_API_KEY
+
+  gpt-4o:
+    tier: cloud
+    provider: openai
+    backend: openai/gpt-4o
+    capabilities: [chat, code, vision, tools, reason]
+    context: 128000
+    cost: high
+    latency: medium
+    requires_env: OPENAI_API_KEY
+
+  o3:
+    tier: cloud
+    provider: openai
+    backend: openai/o3
+    capabilities: [reason, code, chat]
+    context: 200000
+    cost: very_high
+    latency: high
+    requires_env: OPENAI_API_KEY
+
+  codex:
+    tier: cloud
+    provider: openai
+    backend: openai/gpt-4.1
+    capabilities: [code, chat, tools]
+    context: 128000
+    cost: high
+    latency: medium
+    requires_env: OPENAI_API_KEY
+
+  openai-embed:
+    tier: cloud
+    provider: openai
+    backend: openai/text-embedding-3-small
+    capabilities: [embed, cheap]
+    context: 8191
+    cost: low
+    latency: low
+    requires_env: OPENAI_API_KEY
+
+  # ── Anthropic ────────────────────────────────────────────────────
+  claude-sonnet-4:
+    tier: cloud
+    provider: anthropic
+    backend: anthropic/claude-sonnet-4-20250514
+    capabilities: [chat, code, tools, reason, long_context]
+    context: 200000
+    cost: high
+    latency: medium
+    requires_env: ANTHROPIC_API_KEY
+
+  claude-opus-4:
+    tier: cloud
+    provider: anthropic
+    backend: anthropic/claude-opus-4-20250514
+    capabilities: [chat, code, reason, tools, long_context]
+    context: 200000
+    cost: very_high
+    latency: high
+    requires_env: ANTHROPIC_API_KEY
+
+  claude-haiku:
+    tier: cloud
+    provider: anthropic
+    backend: anthropic/claude-3-5-haiku-latest
+    capabilities: [chat, code, cheap, fast]
+    context: 200000
+    cost: low
+    latency: low
+    requires_env: ANTHROPIC_API_KEY
+
+  # ── Google ───────────────────────────────────────────────────────
+  gemini-2.5-pro:
+    tier: cloud
+    provider: google
+    backend: gemini/gemini-2.5-pro
+    capabilities: [chat, code, reason, vision, long_context, tools]
+    context: 1000000
+    cost: medium
+    latency: medium
+    requires_env: GOOGLE_API_KEY
+
+  gemini-2.5-flash:
+    tier: cloud
+    provider: google
+    backend: gemini/gemini-2.5-flash
+    capabilities: [chat, code, cheap, fast, long_context, vision]
+    context: 1000000
+    cost: low
+    latency: low
+    requires_env: GOOGLE_API_KEY
+
+  gemini-flash:
+    tier: cloud
+    provider: google
+    backend: gemini/gemini-2.0-flash
+    capabilities: [chat, cheap, fast]
+    context: 1000000
+    cost: low
+    latency: low
+    requires_env: GOOGLE_API_KEY
