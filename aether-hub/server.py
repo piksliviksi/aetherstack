@@ -87,6 +87,13 @@ from privacy import (  # noqa: E402
     redact_log,
     resolve_private_context,
 )
+from backup import (  # noqa: E402
+    get_backup_status,
+    list_local_backups,
+    run_auto_if_due,
+    run_backup,
+    set_auto_config,
+)
 
 try:
     import redis as redis_lib
@@ -140,9 +147,32 @@ def set_host_scan(data: dict) -> None:
         _host_scan = data or {}
 
 
+def _load_host_scan_file() -> dict:
+    """Load last host scan written by scripts/scan-system.* if present."""
+    candidates = [
+        Path("/host-aetherstack/system-scan.json"),
+        Path("/aetherstack/system-scan.json"),
+        ROOT.parent / ".aetherstack" / "system-scan.json",
+        ROOT / "data" / "system-scan.json",
+    ]
+    for p in candidates:
+        try:
+            if p.is_file():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+        except (OSError, json.JSONDecodeError):
+            continue
+    return {}
+
+
 def run_discover(host_scan: dict | None = None) -> dict:
     global _discover
     hs = host_scan if host_scan is not None else get_host_scan()
+    if not hs:
+        hs = _load_host_scan_file()
+        if hs:
+            set_host_scan(hs)
     # Flatten flags from host scan scripts into recommendation keys
     flat = dict(hs)
     if isinstance(hs.get("flags"), dict):
@@ -222,6 +252,10 @@ def _bg_sync():
             refresh_snapshot()
         except Exception as e:
             sys.stderr.write(f"[hub] sync error: {e}\n")
+        try:
+            run_auto_if_due(_memory)
+        except Exception as e:
+            sys.stderr.write(f"[hub] backup auto error: {e}\n")
         time.sleep(max(15, SYNC_INTERVAL))
 
 
@@ -292,6 +326,10 @@ class Handler(BaseHTTPRequestHandler):
                     "privacy": {
                         "private_project_count": get_privacy_state().get("private_project_count"),
                         "private_model_count": get_privacy_state().get("private_model_count"),
+                    },
+                    "backup": {
+                        "auto": get_backup_status().get("auto"),
+                        "local_dir": get_backup_status().get("default_local_dir"),
                     },
                     "matrix_ts": get_snapshot().get("ts"),
                     "discover": d.get("summary"),
@@ -455,6 +493,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/privacy", "/api/private"):
             self._send(200, get_privacy_state())
             return
+        if path in ("/api/backup", "/api/backups"):
+            self._send(200, {**get_backup_status(), **list_local_backups()})
+            return
         self._send(404, {"error": "not found", "paths": _paths()})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -462,6 +503,33 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         body = self._read_json()
 
+        if path in ("/api/backup", "/api/backups", "/api/backup/run"):
+            try:
+                dests = body.get("destinations") or body.get("dest")
+                if isinstance(dests, str):
+                    dests = [d.strip() for d in dests.split(",") if d.strip()]
+                self._send(
+                    200,
+                    run_backup(
+                        _memory,
+                        scope=str(body.get("scope") or "global"),
+                        project_id=body.get("project_id"),
+                        project_path=body.get("project_path") or body.get("path"),
+                        session_id=body.get("session_id"),
+                        include_private=body.get("include_private"),
+                        include_embeddings=body.get("include_embeddings"),
+                        destinations=dests,
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/backup/config", "/api/backups/config"):
+            try:
+                self._send(200, set_auto_config(body or {}))
+            except Exception as e:
+                self._send(400, {"error": str(e)})
+            return
         if path in ("/api/privacy", "/api/private"):
             try:
                 self._send(
@@ -1065,6 +1133,9 @@ def _paths() -> list[str]:
         "POST /api/xref/pull         {query} → prompt_block for injection",
         "GET|POST /api/privacy       ← private project/model isolation (persistent)",
         "POST /api/privacy/release   {project_id, purge_vault?}",
+        "GET  /api/backup            ← list local backups + config",
+        "POST /api/backup            {scope, destinations, project_path?}",
+        "POST /api/backup/config     auto schedule + local/aws/azure",
     ]
 
 

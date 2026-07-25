@@ -235,6 +235,74 @@ class MemoryStore:
             "backend": self.backend,
         }
 
+    def list_vector_namespaces(self, prefix: str | None = None) -> list[str]:
+        """List vector namespace names (for backup / admin)."""
+        out: set[str] = set()
+        if self._r is not None:
+            try:
+                pat = f"{PREFIX}:vec:*"
+                cursor = 0
+                while True:
+                    cursor, keys = self._r.scan(cursor=cursor, match=pat, count=200)
+                    for k in keys:
+                        ks = str(k)
+                        if ks.endswith(":ids"):
+                            continue
+                        # aether:mem:vec:{namespace}
+                        marker = f"{PREFIX}:vec:"
+                        if marker in ks:
+                            ns = ks.split(marker, 1)[-1]
+                            out.add(ns)
+                    if cursor == 0:
+                        break
+            except Exception:
+                pass
+        for ns in self._local_vectors.keys():
+            out.add(str(ns))
+        names = sorted(out)
+        if prefix:
+            names = [n for n in names if n.startswith(prefix)]
+        return names
+
+    def list_session_ids(self, prefix: str | None = None) -> list[str]:
+        out: set[str] = set()
+        if self._r is not None:
+            try:
+                pat = f"{PREFIX}:session:*"
+                cursor = 0
+                while True:
+                    cursor, keys = self._r.scan(cursor=cursor, match=pat, count=200)
+                    for k in keys:
+                        ks = str(k)
+                        marker = f"{PREFIX}:session:"
+                        if marker in ks:
+                            out.add(ks.split(marker, 1)[-1])
+                    if cursor == 0:
+                        break
+            except Exception:
+                pass
+        for sid in self._local_sessions.keys():
+            out.add(str(sid))
+        names = sorted(out)
+        if prefix:
+            names = [n for n in names if n.startswith(prefix) or prefix in n]
+        return names
+
+    def export_namespace(self, namespace: str) -> dict[str, Any]:
+        docs = self._load_vectors(namespace)
+        # strip large embeddings option handled by caller
+        return {
+            "namespace": namespace,
+            "count": len(docs),
+            "vectors": docs,
+        }
+
+    def export_session(self, session_id: str, limit: int = 500) -> dict[str, Any]:
+        return {
+            "session_id": session_id,
+            "messages": self.get_session(session_id, limit=limit),
+        }
+
 
 def cosine(a: list[float], b: list[float]) -> float:
     n = min(len(a), len(b))

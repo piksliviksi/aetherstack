@@ -87,6 +87,17 @@ services:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - MISTRAL_API_KEY_PERSONAL=${MISTRAL_API_KEY_PERSONAL:-}
       - MISTRAL_API_KEY_ENTERPRISE=${MISTRAL_API_KEY_ENTERPRISE:-}
+      - AETHER_BACKUP_DIR=${AETHER_BACKUP_DIR:-/backups}
+      - AETHER_BACKUP_CONFIG=${AETHER_BACKUP_CONFIG:-/host-aetherstack/backup.yaml}
+      - AETHER_BACKUP_S3_BUCKET=${AETHER_BACKUP_S3_BUCKET:-}
+      - AETHER_BACKUP_S3_PREFIX=${AETHER_BACKUP_S3_PREFIX:-}
+      - AETHER_BACKUP_AZURE_CONTAINER=${AETHER_BACKUP_AZURE_CONTAINER:-}
+      - AETHER_BACKUP_AUTO=${AETHER_BACKUP_AUTO:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING:-}
       - AETHER_COMBOS_CATALOG=/combos/catalog.yaml
       - AETHER_COMBOS_EXPORT=/combos/export
       - AETHER_COMBOS_IMPORT=/combos/import
@@ -101,7 +112,8 @@ services:
       - ./aether-hub/static:/app/static:ro
       - ./combos:/combos:ro
       - ./pipelines:/pipelines
-      - ./.aetherstack:/host-aetherstack:ro
+      - ./.aetherstack:/host-aetherstack
+      - ./.aetherstack/backups:/backups
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

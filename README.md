@@ -25,6 +25,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Spend control | Token saver, tier caps, `/done` → `/clear` |
 | Continuity | Fail over cloud → other key/slot → local GPU when limits hit |
 | Memory | Archive on clear; multi-project pull when enabled |
+| **Backup** | **Project or global** export of memory/research/sessions — **manual or scheduled** — to **local PC folders** and/or pre-configured **AWS S3 / Azure** buckets. [docs/BACKUP.md](./docs/BACKUP.md) |
 | Private mode | Project/model flag → isolated vault; no common pool/logs until release |
 | Hardware | Host Ollama on Metal / ROCm CUs / CUDA; Docker = control plane |
 | Portability | Export/import combos, pipelines, graphs |
@@ -159,6 +160,7 @@ Procedure: [docs/QUICKSTART.md](./docs/QUICKSTART.md)
 | Slash hygiene | [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md) |
 | Gateway aliases | [docs/GATEWAY.md](./docs/GATEWAY.md) |
 | Multi-account keys | [docs/MULTI-KEYS.md](./docs/MULTI-KEYS.md) (personal + enterprise per provider) |
+| Backup (local / AWS / Azure) | [docs/BACKUP.md](./docs/BACKUP.md) |
 | GPU | [docs/GPU-NVIDIA.md](./docs/GPU-NVIDIA.md) · [docs/AMD-COMPUTE.md](./docs/AMD-COMPUTE.md) · [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md) · [docs/GPU-INTEL.md](./docs/GPU-INTEL.md) |
 | Capability matrix | [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) |
 | Project engine | [project-engine/README.md](./project-engine/README.md) |
