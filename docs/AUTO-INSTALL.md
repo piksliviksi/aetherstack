@@ -14,13 +14,13 @@ Aether can **detect** missing pieces (scan) and optionally **install** them.
 
 ## What it can install
 
-| Category | Examples | Safe auto? |
-|----------|----------|------------|
+| Category | Examples | Safe without elevation |
+|----------|----------|------------------------|
 | **python_pip** | `redis`, `PyYAML`, `psutil` | Yes |
-| **ollama_models** | `tinyllama`, `nomic-embed-text` | Yes (if Ollama up) |
+| **ollama_models** | `tinyllama`, `nomic-embed-text` | Yes (Ollama running) |
 | **docker_compose_services** | redis, litellm, hub, open-webui | Yes |
-| **docker_images** | pull base images | Yes (optional) |
-| **host_tools** | WSL ROCm Ollama package, portproxy, stop dual Ollama | **No** — needs `-IncludeElevated` / host script |
+| **docker_images** | pull base images | Yes |
+| **host_tools** | WSL ROCm Ollama, portproxy, dual-Ollama stop | No — `-IncludeElevated` / host script |
 
 ---
 

@@ -34,7 +34,7 @@ Source: [`integrations/vscode/`](../integrations/vscode/)
 | Field | Value |
 |-------|--------|
 | Name | `vsce-aetherstack` |
-| Organization | **All accessible organizations** (recommended) |
+| Organization | All accessible organizations |
 | Expiration | 30–90 days (or custom) |
 | Scopes | **Custom defined** → expand **Marketplace** → check **Manage** |
 
@@ -90,7 +90,7 @@ Or pass the token once:
 vsce publish -p YOUR_PAT_HERE
 ```
 
-### Bump version on later releases
+### Version bump
 
 ```powershell
 vsce publish patch   # 0.1.0 → 0.1.1
@@ -139,7 +139,7 @@ Help for users: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md)
 - Never commit the PAT to git or put it in the repo.  
 - Prefer env `VSCE_PAT` in a private shell, then unset.  
 - Rotate the PAT after publish if the shell history is shared.  
-- Repo secrets for CI: store PAT as GitHub Actions secret `VSCE_PAT` if you automate later.
+- CI: store PAT as GitHub Actions secret `VSCE_PAT` when publishing from Actions.
 
 ---
 

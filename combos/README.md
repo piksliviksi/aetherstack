@@ -23,8 +23,8 @@ Shareable **tier presets** and **situation packs** (coding, research, testing, â
 
 ## Situations (multi-agent combos)
 
-| Id | Use when |
-|----|----------|
+| Id | Intent |
+|----|--------|
 | `coding` | Implement / refactor (Sonnet + GPT + local workers) |
 | `research` | Deep analysis (Opus + Grok + Gemini) |
 | `testing` | Cheap smoke loops (Fable / mini) |

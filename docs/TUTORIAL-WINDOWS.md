@@ -3,7 +3,7 @@
 ## One-click start
 
 1. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) and start it once so it finishes setup.
-2. (Recommended) Install [Ollama for Windows](https://ollama.com/download) for local models / GPU.
+2. Install [Ollama for Windows](https://ollama.com/download) for local models / GPU.
 3. Clone or download this repo.
 4. Double-click **`start.bat`**.
 

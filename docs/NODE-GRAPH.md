@@ -1,53 +1,53 @@
-# Node-based pipeline canvas
+# Node graph canvas
 
-Visual FX–style **node graph** for AetherStack agent/pipeline scripting: place **Master / Worker / Analyser (critic)** nodes, set tiers and makers, draw wires — or let Aether **auto-connect** using best practices.
+Visual node graph for agent/pipeline scripting. Place **Master / Worker / Analyser / Tester** nodes, set tier and maker, connect edges. Auto-connect applies a fixed best-practice layout.
 
 | | |
 |--|--|
 | Canvas UI | http://127.0.0.1:8766/graph |
-| Graph schema | `aetherstack.graph.v1` |
+| Schema | `aetherstack.graph.v1` |
 | API | `/api/graphs` |
+| License | Native implementation, MIT with this repo |
 
----
-
-## ActionForge license (why we did not vendor it)
-
-[Actionforge](https://github.com/actionforge) is a polished node system for CI/CD. Its public repos use license **“Other” / Actionforge EULA** — free for solo/non-profit, **commercial use requires their permission**.  
-
-AetherStack is **MIT**. **We do not embed or redistribute ActionForge code** in this repo. Optional future: users may run ActionForge side-by-side for GitHub Actions; Aether’s LLM graph remains native.
+**Not in tree:** third-party node engines (e.g. ActionForge). This canvas is independent.
 
 ---
 
 ## Node types
 
-| Type | Role in graph | Settings |
-|------|----------------|----------|
-| **goal** | Entry prompt / event | text |
-| **master** | Orchestrator (mastermind) | tier, maker, model, max_cost, strategy |
-| **worker** | Bulk implementer | same + parallel |
-| **analyser** | Critic / ack / QA gate | same + `gate` |
-| **tester** | Test stage | prefer cheap/local |
-| **memory** | Save/search context | namespace |
-| **slash** | Hygiene node | `/done`, `/clear`, `/compact` |
-| **output** | Sink / export | — |
+| Type | Role | Settings |
+|------|------|----------|
+| `goal` | Entry prompt / event | text |
+| `master` | Orchestrator | tier, maker, model, max_cost, strategy |
+| `worker` | Implementation | same + parallel |
+| `analyser` | Critic / QA gate | same + `gate` |
+| `tester` | Tests | prefer cheap/local |
+| `memory` | Save/search context | namespace |
+| `slash` | Hygiene | `/done`, `/clear`, `/compact` |
+| `output` | Sink | — |
 
 ---
 
 ## Edges
 
-- **Manual:** drag from output port → input port on canvas  
-- **Auto:** `POST /api/graphs/auto-connect` or UI **Auto layout**  
-  Best practices:
-  1. `goal` → `master`  
-  2. `master` → `analyser` (critique gate)  
-  3. `analyser` → `worker` (only if ack path — modeled as sequential wire)  
-  4. `worker` → `tester`  
-  5. `tester` → `slash` (`/done all` + `/compact`) → `output`  
-  6. Prefer **different makers** on master vs analyser when both cloud  
+| Method | How |
+|--------|-----|
+| Manual | Drag output port → input port |
+| Auto | `POST /api/graphs/auto-connect` or UI **Auto layout** |
+
+Auto-connect order:
+
+1. `goal` → `master`  
+2. `master` → `analyser`  
+3. `analyser` → `worker`  
+4. `worker` → `tester`  
+5. `tester` → `slash` (`/done all` + `/compact`) → `output`  
+
+When master and analyser both use cloud, assign different makers when both are available.
 
 ---
 
-## Graph JSON (export/import)
+## Graph JSON
 
 ```json
 {
@@ -55,7 +55,7 @@ AetherStack is **MIT**. **We do not embed or redistribute ActionForge code** in 
   "id": "my-graph",
   "nodes": [
     {"id": "n1", "type": "goal", "x": 40, "y": 120, "data": {"text": "Add OAuth"}},
-    {"id": "n2", "type": "master", "x": 220, "y": 100, "data": {"role": "mastermind", "tier": null, "maker": "anthropic", "model": "claude-sonnet-4", "max_cost": "high"}},
+    {"id": "n2", "type": "master", "x": 220, "y": 100, "data": {"role": "mastermind", "maker": "anthropic", "model": "claude-sonnet-4", "max_cost": "high"}},
     {"id": "n3", "type": "analyser", "x": 420, "y": 100, "data": {"role": "critic", "maker": "openai", "gate": true}},
     {"id": "n4", "type": "worker", "x": 620, "y": 80, "data": {"role": "builder", "strategy": "cheapest", "tier": "local", "parallel": 2}},
     {"id": "n5", "type": "tester", "x": 820, "y": 100, "data": {"role": "tester", "strategy": "cheapest"}},
@@ -73,8 +73,10 @@ AetherStack is **MIT**. **We do not embed or redistribute ActionForge code** in 
 }
 ```
 
-Convert to pipeline: `POST /api/graphs/to-pipeline`  
-Load pipeline as graph: `POST /api/graphs/from-pipeline` `{ "pipeline_id": "research-code-test" }`
+| Operation | Endpoint |
+|-----------|----------|
+| Graph → pipeline | `POST /api/graphs/to-pipeline` |
+| Pipeline → graph | `POST /api/graphs/from-pipeline` `{"pipeline_id":"research-code-test"}` |
 
 ---
 
@@ -95,6 +97,6 @@ Load pipeline as graph: `POST /api/graphs/from-pipeline` `{ "pipeline_id": "rese
 
 ## Related
 
-- Linear pipeline scripts: [PIPELINES.md](./PIPELINES.md)  
-- Combos: [combos/README.md](../combos/README.md)  
-- Slash hygiene: [SLASH-COMMANDS.md](./SLASH-COMMANDS.md)  
+- [PIPELINES.md](./PIPELINES.md)  
+- [combos/README.md](../combos/README.md)  
+- [SLASH-COMMANDS.md](./SLASH-COMMANDS.md)  

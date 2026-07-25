@@ -97,7 +97,7 @@ curl -s -X POST http://127.0.0.1:8766/api/pipelines/research-code-test/vote \
 | `hw_flag` | `low` · `medium` · `high` · `extreme` — perceived GPU/RAM load |
 | `voter` | Stable id (local username, etc.) |
 
-Scores are **local** (`pipelines/votes.json`). A public registry can aggregate later; format stays the same.
+Scores are local (`pipelines/votes.json`).
 
 ---
 
@@ -121,19 +121,23 @@ POST /api/pipelines/{id}/plan
   → /compact or /clear   (memory first)
 ```
 
-`on_complete.slash` in the script recommends which slash commands to run.
+`on_complete.slash` lists slash commands to run after stages complete.
 
 ---
 
 ## Combos vs pipelines vs node graph
 
-| | Combos | Pipelines | **Node canvas** |
-|--|--------|-----------|-----------------|
-| Focus | Role pins | Ordered stages | **Visual FX–style graph** |
+| | Combos | Pipelines | Node canvas |
+|--|--------|-----------|-------------|
+| Focus | Role pins | Ordered stages | Visual graph |
 | Format | `.aether-combo.json` | `.aether-pipeline.yaml` | `.aether-graph.json` |
-| UI | Hub buttons | Hub plan | **http://127.0.0.1:8766/graph** |
+| UI | Hub buttons | Hub plan | http://127.0.0.1:8766/graph |
 | Voting | — | Yes | Export → pipeline → vote |
 
-Use **combos** for quick packs; **pipelines** for YAML programs; **node canvas** to draw Master/Worker/Analyser and auto-wire best practices. See [NODE-GRAPH.md](./NODE-GRAPH.md).
+| Artifact | Use |
+|----------|-----|
+| Combos | Quick multi-role packs |
+| Pipelines | Ordered YAML/JSON stage programs |
+| Node canvas | Graph edit + auto-connect; export to pipeline |
 
-**ActionForge:** not vendored (proprietary EULA). Aether canvas is MIT-native.
+See [NODE-GRAPH.md](./NODE-GRAPH.md).

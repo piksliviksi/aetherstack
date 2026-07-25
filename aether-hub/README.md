@@ -1,6 +1,6 @@
 # Aether Hub
 
-Capability / routing **sync matrix** (local ↔ cloud) and **shared agent memory** on Redis.
+Hub service: capability matrix, discover, combos, pipelines, graphs, slash, agent memory (Redis).
 
 | | |
 |--|--|

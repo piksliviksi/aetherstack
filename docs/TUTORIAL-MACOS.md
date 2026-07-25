@@ -9,9 +9,9 @@ The control plane (Open WebUI, LiteLLM, Redis) runs in Docker. Local models run 
 | Tool | Install |
 |------|---------|
 | **Docker Desktop for Mac** | [docs.docker.com/desktop/setup/install/mac-install](https://docs.docker.com/desktop/setup/install/mac-install/) |
-| **Ollama** (recommended) | [ollama.com/download](https://ollama.com/download) → macOS |
+| **Ollama** (local GPU) | [ollama.com/download](https://ollama.com/download) → macOS |
 | **Git** | Xcode CLT or [git-scm.com](https://git-scm.com) |
-| **VS Code** (optional) | [code.visualstudio.com](https://code.visualstudio.com) + [AetherStack extension](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
+| **VS Code** | [code.visualstudio.com](https://code.visualstudio.com) + [AetherStack extension](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
 
 1. Install Docker Desktop and **start it** (whale icon in the menu bar).  
 2. Wait until Docker reports **Running**.  
@@ -27,7 +27,7 @@ ollama pull llama3.1:8b
 git clone https://github.com/piksliviksi/aetherstack.git
 cd aetherstack
 cp .env.example .env
-# Optional: edit .env — OPENAI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, LITELLM_MASTER_KEY
+# Edit .env — LITELLM_MASTER_KEY and provider keys in use
 
 chmod +x start.sh stop.sh
 ./start.sh
@@ -58,16 +58,16 @@ docker compose down
 
 ## Apple Silicon (ARM64) + Metal GPU
 
-**Yes — local GPU works on Mac ARM**, via **Apple Metal**, not CUDA/ROCm.
+Local GPU on Mac ARM uses **Apple Metal** (not CUDA/ROCm).
 
-| Layer | GPU? |
-|-------|------|
-| **Host Ollama** (Apple Silicon) | **Yes — Metal** (check Activity Monitor → GPU, or `ollama ps` after a run) |
-| **Docker containers** (LiteLLM, WebUI, Hub) | No — control plane only |
-| **VS Code extension** | No — HTTP client only |
-| **ROCm / CUDA compose overlays** | **Not for Mac** |
+| Layer | Local GPU for LLMs |
+|-------|--------------------|
+| Host Ollama (Apple Silicon) | Yes — Metal (`ollama ps` after a run) |
+| Docker (LiteLLM, WebUI, Hub) | No — control plane only |
+| VS Code extension | No — HTTP client only |
+| ROCm / CUDA compose overlays | Not applicable on Mac |
 
-### Recommended Mac ARM path
+### Procedure
 
 ```bash
 # 1) Ollama for macOS (Apple Silicon build from ollama.com)
