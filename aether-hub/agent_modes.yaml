@@ -50,7 +50,7 @@ roles:
       strategy: best_score   # best_score | cheapest | by_maker | by_model | by_tier
       # Optional hard pins (examples — leave null for auto):
       model: null            # e.g. grok-4.5
-      maker: null            # ollama | openai | anthropic | xai | google
+      maker: null            # ollama | openai | anthropic | xai | google | mistral
       tier: null             # local | cloud
       max_cost: high         # 0 | low | medium | high | very_high
     max_workers: 4

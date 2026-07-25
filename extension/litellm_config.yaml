@@ -144,6 +144,37 @@ model_list:
       model: gemini/gemini-2.0-flash
       api_key: os.environ/GOOGLE_API_KEY
 
+  # ── Mistral AI ────────────────────────────────────────────────────
+  - model_name: mistral
+    litellm_params:
+      model: mistral/mistral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  - model_name: mistral-large
+    litellm_params:
+      model: mistral/mistral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  - model_name: mistral-medium
+    litellm_params:
+      model: mistral/mistral-medium-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  - model_name: mistral-small
+    litellm_params:
+      model: mistral/mistral-small-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  - model_name: codestral
+    litellm_params:
+      model: mistral/codestral-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  - model_name: pixtral
+    litellm_params:
+      model: mistral/pixtral-large-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
 litellm_settings:
   drop_params: true
   set_verbose: false

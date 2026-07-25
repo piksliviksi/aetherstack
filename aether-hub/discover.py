@@ -200,11 +200,21 @@ def discover_cloud_keys() -> dict[str, Any]:
         "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
         "XAI_API_KEY": bool(os.environ.get("XAI_API_KEY", "").strip()),
         "GOOGLE_API_KEY": bool(os.environ.get("GOOGLE_API_KEY", "").strip()),
+        "MISTRAL_API_KEY": bool(os.environ.get("MISTRAL_API_KEY", "").strip()),
         "LITELLM_MASTER_KEY": bool(os.environ.get("LITELLM_MASTER_KEY", "").strip()),
     }
     return {
         "present": keys,
-        "any_cloud": any(keys[k] for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY", "GOOGLE_API_KEY")),
+        "any_cloud": any(
+            keys[k]
+            for k in (
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "XAI_API_KEY",
+                "GOOGLE_API_KEY",
+                "MISTRAL_API_KEY",
+            )
+        ),
     }
 
 
@@ -341,7 +351,7 @@ def build_recommendations(report: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "severity": "info",
                 "code": "no_cloud_keys",
-                "action": "Set OPENAI_/XAI_/ANTHROPIC_/GOOGLE_API_KEY in .env for cloud models",
+                "action": "Set OPENAI_/XAI_/ANTHROPIC_/GOOGLE_/MISTRAL_API_KEY in .env for cloud models",
                 "detail": "Local-only mode is fine if Ollama has models.",
             }
         )
