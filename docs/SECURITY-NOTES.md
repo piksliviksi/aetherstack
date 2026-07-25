@@ -1,4 +1,4 @@
-# Security notes (validated findings)
+# Security notes
 
 This page records security review notes for AetherStack and mitigations applied.
 
