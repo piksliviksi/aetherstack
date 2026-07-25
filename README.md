@@ -295,10 +295,15 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 | [`aether-hub/`](./aether-hub/) | Service source |
 
 ```bash
-# Best model for coding, prefer local
+# 1) What is available? (always first)
+curl -s http://127.0.0.1:8766/api/discover | jq .summary
+# Windows deep scan (WSL/GPU/ports):  .\scripts\scan-system.ps1
+# Linux/macOS:                        ./scripts/scan-system.sh
+
+# 2) Best model for coding, prefer local
 curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local"
 
-# Shared memory search
+# 3) Shared memory search
 curl -s -X POST http://127.0.0.1:8766/api/memory/search \
   -H "Content-Type: application/json" \
   -d "{\"query\":\"gateway port\",\"namespace\":\"default\",\"top_k\":3}"

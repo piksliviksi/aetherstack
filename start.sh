@@ -28,6 +28,12 @@ if [[ ! -f .env ]]; then
   yellow "  Created .env from .env.example — add API keys when ready."
 fi
 
+# Scan host before bring-up (Ollama / Docker / ports)
+if [[ -x "$ROOT/scripts/scan-system.sh" ]] || [[ -f "$ROOT/scripts/scan-system.sh" ]]; then
+  cyan "  Scanning system…"
+  bash "$ROOT/scripts/scan-system.sh" || yellow "  Scan script warning (continuing)."
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   red "  ERROR: Docker not found."
   if [[ "$OS_NAME" == "Darwin" ]]; then
@@ -95,10 +101,15 @@ echo ""
 green "  --------------------------------"
 green "  Chat UI:   http://localhost:3000"
 green "  LiteLLM:   http://localhost:4000"
-green "  Hub:       http://localhost:8766  (matrix + memory)"
+green "  Hub/scan:  http://localhost:8766  (discover first)"
 green "  Redis:     localhost:6379"
 green "  --------------------------------"
+cyan "  Scan API:  http://localhost:8766/api/discover"
 cyan "  Stop: ./stop.sh"
+# Post-up scan so hub receives host facts
+if [[ -f "$ROOT/scripts/scan-system.sh" ]]; then
+  bash "$ROOT/scripts/scan-system.sh" >/dev/null 2>&1 || true
+fi
 if [[ "$OS_NAME" == "Darwin" ]]; then
   cyan "  Guide: docs/TUTORIAL-MACOS.md"
 fi

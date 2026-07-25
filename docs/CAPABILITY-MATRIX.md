@@ -31,16 +31,30 @@ Without a matrix, clients pick opaque aliases (`local-default`, `grok-4.5`) with
 | `fast` / `cheap` | Latency / cost |
 | `long_context` | Large context windows |
 
+## Scan first, then route
+
+Do **not** assume models exist. Hub runs **system discovery** first:
+
+```bash
+# What is up? (Ollama endpoints, pulled models, LiteLLM, Redis, API keys)
+curl -s http://127.0.0.1:8766/api/discover | jq .
+# Host deep scan (Windows + WSL Radeon / dual Ollama):
+#   .\scripts\scan-system.ps1
+```
+
+Recommendations (e.g. “pull tinyllama”, “ROCm libs missing”, “two Ollamas fighting”) appear on http://127.0.0.1:8766/ and in `discover.recommendations`.
+
 ## Live sync
 
 Every `AETHER_MATRIX_SYNC_SEC` (default 60s) the hub:
 
-1. Loads `capability_matrix.yaml`  
-2. Probes Ollama `/api/tags` for pulled local models  
-3. Checks whether cloud `requires_env` keys are set in the container env  
+1. Runs `/api/discover` (Ollama multi-endpoint probe + services + keys)  
+2. Loads `capability_matrix.yaml`  
+3. Marks each alias available only if the **backend model is actually pulled** / key present  
 4. Writes annotated snapshot to Redis + serves `/api/matrix`  
 
 ```bash
+curl -s http://127.0.0.1:8766/api/discover | jq .summary
 curl -s http://127.0.0.1:8766/api/sync | jq .summary
 curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local" | jq .primary
 ```

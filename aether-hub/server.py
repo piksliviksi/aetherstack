@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aether Hub — capability matrix sync + shared agent memory API."""
+"""Aether Hub — system discover, capability matrix, shared agent memory."""
 from __future__ import annotations
 
 import json
@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
 
@@ -30,6 +31,8 @@ SYNC_INTERVAL = int(os.environ.get("AETHER_MATRIX_SYNC_SEC", "60"))
 _state_lock = threading.Lock()
 _snapshot: dict = {}
 _matrix_raw: dict = {}
+_discover: dict = {}
+_host_scan: dict = {}
 _memory = MemoryStore(REDIS_URL)
 
 
@@ -44,19 +47,72 @@ def _redis_client():
         return None
 
 
+def get_host_scan() -> dict:
+    with _state_lock:
+        return dict(_host_scan)
+
+
+def set_host_scan(data: dict) -> None:
+    global _host_scan
+    with _state_lock:
+        _host_scan = data or {}
+
+
+def run_discover(host_scan: dict | None = None) -> dict:
+    global _discover
+    hs = host_scan if host_scan is not None else get_host_scan()
+    # Flatten flags from host scan scripts into recommendation keys
+    flat = dict(hs)
+    if isinstance(hs.get("flags"), dict):
+        flat.update(hs["flags"])
+    # Also accept nested windows-style payload
+    for k in (
+        "windows_ollama_and_wsl_both",
+        "ollama_missing_rocm_libs",
+        "localhost_11434_broken",
+        "wsl_ollama_ip",
+        "radeon_visible_to_rocminfo",
+    ):
+        if k in hs:
+            flat[k] = hs[k]
+    report = full_discover(host_scan=flat)
+    with _state_lock:
+        _discover = report
+    r = _redis_client()
+    if r is not None:
+        try:
+            r.set("aether:discover:latest", json.dumps(report, default=str), ex=SYNC_INTERVAL * 10)
+        except Exception:
+            pass
+    return report
+
+
 def refresh_snapshot() -> dict:
+    """Discover first, then annotate capability matrix against live Ollama models."""
     global _snapshot, _matrix_raw
+    disc = run_discover()
     raw = load_matrix()
-    snap = annotate_availability(raw)
+    # Prefer primary reachable Ollama from discover
+    ollama_info = None
+    primary = (disc.get("ollama") or {}).get("primary")
+    if primary and primary.get("reachable"):
+        names = set((disc.get("ollama") or {}).get("all_model_names") or [])
+        ollama_info = {
+            "base": primary.get("base"),
+            "ok": True,
+            "models": sorted(names),
+            "inference_hint": primary.get("inference_hint"),
+        }
+    snap = annotate_availability(raw, ollama=ollama_info)
+    snap["discover_summary"] = disc.get("summary")
+    snap["recommendations"] = disc.get("recommendations")
     with _state_lock:
         _matrix_raw = raw
         _snapshot = snap
-    # Persist to Redis for other agents / multi-process readers
     r = _redis_client()
     if r is not None:
         key = ((raw.get("routing") or {}).get("sync") or {}).get("redis_key") or "aether:matrix:snapshot"
         try:
-            # Drop huge ollama list duplication is fine
             r.set(key, json.dumps(snap, default=str), ex=SYNC_INTERVAL * 5)
             r.set("aether:matrix:ts", str(snap.get("ts")), ex=SYNC_INTERVAL * 5)
         except Exception:
@@ -69,6 +125,13 @@ def get_snapshot() -> dict:
         if _snapshot:
             return _snapshot
     return refresh_snapshot()
+
+
+def get_discover() -> dict:
+    with _state_lock:
+        if _discover:
+            return _discover
+    return run_discover()
 
 
 def _bg_sync():
@@ -125,6 +188,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, _index_html(), "text/html; charset=utf-8")
             return
         if path == "/api/health":
+            d = get_discover()
             self._send(
                 200,
                 {
@@ -132,8 +196,19 @@ class Handler(BaseHTTPRequestHandler):
                     "service": "aether-hub",
                     "memory": _memory.health(),
                     "matrix_ts": get_snapshot().get("ts"),
+                    "discover": d.get("summary"),
                 },
             )
+            return
+        if path in ("/api/discover", "/api/scan"):
+            force = (qs.get("refresh") or ["0"])[0] in ("1", "true", "yes")
+            if force:
+                self._send(200, run_discover())
+            else:
+                self._send(200, get_discover())
+            return
+        if path == "/api/discover/text":
+            self._send(200, print_report_text(get_discover()), "text/plain; charset=utf-8")
             return
         if path == "/api/matrix":
             self._send(200, get_snapshot())
@@ -170,6 +245,20 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         body = self._read_json()
 
+        if path in ("/api/discover", "/api/scan"):
+            hs = body.get("host_scan") or body
+            if body.get("host_scan") is not None or any(
+                k in body
+                for k in (
+                    "windows_ollama_and_wsl_both",
+                    "ollama_missing_rocm_libs",
+                    "wsl_ollama_ip",
+                    "flags",
+                )
+            ):
+                set_host_scan(hs if body.get("host_scan") is not None else body)
+            self._send(200, run_discover(get_host_scan()))
+            return
         if path == "/api/sync":
             self._send(200, refresh_snapshot())
             return
@@ -187,7 +276,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "content required"})
                 return
             msg = _memory.append_message(sid, role, content, body.get("meta"))
-            # Optionally also index into vector memory
             if body.get("index", True):
                 _memory.upsert_vector(
                     text=f"{role}: {content}",
@@ -238,6 +326,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def _paths() -> list[str]:
     return [
+        "GET  /api/discover          ← scan system first",
+        "GET  /api/discover/text",
+        "POST /api/discover          {host_scan: {...}} from scripts/scan-system.ps1",
         "/api/health",
         "/api/matrix",
         "/api/matrix/table",
@@ -252,9 +343,11 @@ def _paths() -> list[str]:
 
 def _index_html() -> bytes:
     snap = get_snapshot()
+    disc = get_discover()
     summary = snap.get("summary") or {}
+    dsum = disc.get("summary") or {}
+    recs = disc.get("recommendations") or []
     rows = matrix_table(snap)
-    # compact HTML table
     caps = [c for c in (snap.get("capabilities") or {}).keys()]
     head = "".join(f"<th>{c}</th>" for c in caps)
     body_rows = []
@@ -268,52 +361,85 @@ def _index_html() -> bytes:
             f"<td>{r.get('tier')}</td><td>{av}</td>{cells}</tr>"
         )
     table = "\n".join(body_rows)
+    rec_html = "".join(
+        f"<li class='sev-{r.get('severity')}'><b>{r.get('severity')}</b> — {r.get('action')}"
+        f"<div class='muted'>{r.get('detail') or ''}</div></li>"
+        for r in recs[:8]
+    )
+    ollama_eps = disc.get("ollama") or {}
+    ep_html = ""
+    for ep in ollama_eps.get("endpoints") or []:
+        st = "up" if ep.get("reachable") else "dn"
+        models = ", ".join(m.get("name", "") for m in (ep.get("models") or [])[:5]) or "—"
+        ep_html += f"<div class='ep {st}'><code>{ep.get('label')}</code> {ep.get('base')} → {models}</div>"
+
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/>
-<title>Aether Hub — matrix & memory</title>
+<title>Aether Hub — discover · matrix · memory</title>
 <style>
  body{{font-family:ui-monospace,Consolas,monospace;background:#0b1020;color:#e8eefc;margin:1rem;font-size:13px}}
- h1{{font-size:1.1rem;color:#7dd3a7}} a{{color:#7aa2f7}}
- table{{border-collapse:collapse;width:100%;margin-top:.75rem}}
+ h1{{font-size:1.1rem;color:#7dd3a7}} h2{{font-size:.85rem;color:#9db0d0;margin:1rem 0 .4rem}}
+ a{{color:#7aa2f7}}
+ table{{border-collapse:collapse;width:100%;margin-top:.5rem}}
  th,td{{border:1px solid #243056;padding:.25rem .4rem;text-align:center}}
  th{{color:#9db0d0;font-weight:600}} td:first-child{{text-align:left}}
  tr.off{{opacity:.45}} .y{{color:#4ade80}} .n{{color:#334155}}
  .card{{background:#141b2f;border:1px solid #243056;border-radius:8px;padding:.75rem;margin:.5rem 0}}
- code{{color:#5ccfe6}}
+ code{{color:#5ccfe6}} .muted{{color:#9db0d0;font-size:12px}}
+ ul.rec{{margin:.3rem 0;padding-left:1.1rem}}
+ .sev-high{{color:#f87171}} .sev-medium{{color:#fbbf24}} .sev-ok{{color:#4ade80}} .sev-info{{color:#9db0d0}}
+ .ep{{margin:.2rem 0}} .ep.up{{color:#4ade80}} .ep.dn{{color:#64748b}}
 </style></head><body>
-<h1>Aether Hub · capability sync matrix</h1>
+<h1>Aether Hub · scan first, then route</h1>
 <div class="card">
- local online: <b>{summary.get('local_online')}</b> ·
- cloud ready: <b>{summary.get('cloud_ready')}</b> ·
- unavailable: <b>{summary.get('unavailable')}</b> ·
- memory: <b>{_memory.backend}</b>
- <div style="margin-top:.4rem">
-  <a href="/api/matrix">/api/matrix</a> ·
-  <a href="/api/route?need=code&prefer=local">/api/route?need=code</a> ·
-  <a href="/api/sync">/api/sync</a> ·
-  <a href="/api/health">/api/health</a>
+ <b>System scan</b> —
+ Ollama: <b>{"OK" if dsum.get("ollama_ok") else "DOWN"}</b>
+ ({dsum.get("ollama_models") or 0} models) ·
+ LiteLLM: <b>{"OK" if dsum.get("litellm_ok") else "DOWN"}</b> ·
+ Redis: <b>{"OK" if dsum.get("redis_ok") else "DOWN"}</b> ·
+ cloud keys: <b>{"yes" if dsum.get("cloud_keys") else "no"}</b>
+ <div class="muted" style="margin-top:.35rem">{ep_html or "No Ollama endpoints probed yet — open /api/discover"}</div>
+ <div style="margin-top:.5rem">
+  <a href="/api/discover">/api/discover</a> ·
+  <a href="/api/discover?refresh=1">refresh</a> ·
+  <a href="/api/discover/text">text</a> ·
+  <a href="/api/matrix">matrix</a> ·
+  <a href="/api/route?need=code&prefer=local">route code</a> ·
+  <a href="/api/health">health</a>
  </div>
 </div>
+<div class="card">
+ <b>Do this next</b>
+ <ul class="rec">{rec_html}</ul>
+ <div class="muted">Host deep scan (WSL/GPU): <code>.\\scripts\\scan-system.ps1</code> or <code>./scripts/scan-system.sh</code></div>
+</div>
+<div class="card">
+ matrix live: local <b>{summary.get('local_online')}</b> · cloud <b>{summary.get('cloud_ready')}</b> · down <b>{summary.get('unavailable')}</b>
+ · memory <b>{_memory.backend}</b>
+</div>
+<h2>Capability matrix (live availability)</h2>
 <table>
 <thead><tr><th>model</th><th>tier</th><th>live</th>{head}</tr></thead>
 <tbody>
 {table}
 </tbody>
 </table>
-<p style="color:#9db0d0;margin-top:1rem">Shared agent memory: POST /api/memory/vectors · POST /api/memory/search · sessions under /api/memory/sessions/&lt;id&gt;</p>
+<p class="muted" style="margin-top:1rem">Memory: POST /api/memory/vectors · POST /api/memory/search</p>
 </body></html>"""
     return html.encode("utf-8")
 
 
 def main() -> None:
+    print("[hub] initial system discover…")
     refresh_snapshot()
     t = threading.Thread(target=_bg_sync, daemon=True)
     t.start()
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Aether Hub → http://{HOST}:{PORT}/")
-    print("  matrix:  GET /api/matrix  GET /api/route?need=code&prefer=local")
-    print("  memory:  POST /api/memory/vectors  POST /api/memory/search")
-    print(f"  redis:   {REDIS_URL}  backend={_memory.backend}")
+    print("  FIRST:  GET /api/discover   (what is available)")
+    print("  THEN:   GET /api/route?need=code&prefer=local")
+    print("  memory: POST /api/memory/vectors · search")
+    print(f"  redis:  {REDIS_URL}  backend={_memory.backend}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

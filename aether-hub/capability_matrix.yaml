@@ -54,21 +54,21 @@ models:
   local-default:
     tier: local
     provider: ollama
-    backend: ollama/llama3.1:8b
+    backend: ollama/tinyllama
     capabilities: [chat, code, tools, private, cheap, fast]
-    context: 8192
+    context: 2048
     cost: 0
-    latency: low
-    notes: Default local workhorse
+    latency: very_low
+    notes: Default local (WSL ROCm-friendly; pull larger models when RAM allows)
 
   local-llama:
     tier: local
     provider: ollama
-    backend: ollama/llama3.1:8b
+    backend: ollama/tinyllama
     capabilities: [chat, code, tools, private, cheap]
-    context: 8192
+    context: 2048
     cost: 0
-    latency: low
+    latency: very_low
 
   local-tiny:
     tier: local
@@ -79,6 +79,16 @@ models:
     cost: 0
     latency: very_low
     notes: Smoke tests / constrained machines
+
+  local-llama31-8b:
+    tier: local
+    provider: ollama
+    backend: ollama/llama3.1:8b
+    capabilities: [chat, code, tools, private]
+    context: 8192
+    cost: 0
+    latency: medium
+    notes: Requires ollama pull + WSL memory headroom
 
   local-embed:
     tier: local
