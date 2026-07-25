@@ -19,9 +19,11 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Capability | Fact |
 |------------|------|
 | One surface | VS Code or browser chat for normal work |
-| One façade | One base URL, one gateway key; many provider keys (personal + enterprise per maker) |
+| One façade | One base URL + one gateway master key; many models underneath |
+| **Multi-key per provider** | **Subscription/personal + enterprise API keys simultaneously** for every cloud maker (Anthropic, OpenAI, xAI, Google, Mistral). Aliases: `*-personal` / `*-enterprise` — no key swap restarts. [docs/MULTI-KEYS.md](./docs/MULTI-KEYS.md) |
 | Orchestration | Combos, pipelines, node canvas by role / tier / cost |
 | Spend control | Token saver, tier caps, `/done` → `/clear` |
+| Continuity | Fail over cloud → other key/slot → local GPU when limits hit |
 | Memory | Archive on clear; multi-project pull when enabled |
 | Private mode | Project/model flag → isolated vault; no common pool/logs until release |
 | Hardware | Host Ollama on Metal / ROCm CUs / CUDA; Docker = control plane |
@@ -35,6 +37,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Manual context re-paste | Shared memory + optional cross-project index |
 | Model choice every prompt | Combos / pipelines / node graph |
 | Hard stop at one vendor’s session/day cap | Continue via next model in the pool or local GPU |
+| One API key per provider (personal vs work fight) | Personal/subscription + enterprise keys both live; pick via alias |
 | Unbounded context growth | Unit complete → archive → clear |
 | Sensitive work mixed into cloud chat | Private mode / local-only path |
 
@@ -56,7 +59,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 |------|----------------|
 | Work surface | Stay in VS Code / CLI / Open WebUI. Same base URL, same master key, same façade model id. |
 | Policy | Combos / pipelines / capability matrix define **ordered fallbacks** (e.g. Sonnet → GPT → Grok → Codestral → `local-default`). |
-| Quota pressure | When a maker is unavailable, rate-limited, or pinned off, routing and role pins move work to the **next live** model that still has headroom. |
+| Quota pressure | When a maker is unavailable, rate-limited, or pinned off, routing moves to the **next live** model — including the same maker on another **key slot** (`*-personal` vs `*-enterprise`) if that account still has headroom. |
 | No cloud left | Pool falls through to **local inference** (slower, still completes the job). |
 | Continuity | Hub memory + `/done` → `/compact` or `/clear` keeps decisions; you do not rebuild the brief from zero in a new vendor UI. |
 
