@@ -19,4 +19,8 @@ if [[ -n "${AETHERSTACK_ENGINE_TOKEN:-}" ]]; then
   echo "Auth token: enabled (X-Aether-Token)"
 fi
 echo "Starting Project Engine on http://127.0.0.1:$PORT"
+# Works on macOS, Linux, and WSL (python3 + optional psutil)
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  echo "Platform: macOS — open http://127.0.0.1:$PORT in your browser if it does not open."
+fi
 exec python3 "${ARGS[@]}"

@@ -7,7 +7,7 @@ Advanced (but practical) engine for **disk optimization**, **project → PC impa
 | OS | Command |
 |----|---------|
 | Windows | `.\project-engine\start-engine.ps1 -Project C:\path\to\app` |
-| Ubuntu | `./project-engine/start-engine.sh /path/to/app` |
+| macOS / Ubuntu / Linux | `./project-engine/start-engine.sh /path/to/app` |
 | Any | `cd project-engine && python server.py --project /path` |
 
 Dashboard: **http://127.0.0.1:8765**

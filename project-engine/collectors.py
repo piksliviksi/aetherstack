@@ -257,6 +257,37 @@ def _gpu_snapshot() -> list[dict[str, Any]]:
                 )
         except Exception:
             pass
+    # macOS — GPU name via system_profiler (Metal; util % not exposed here)
+    if sys.platform == "darwin" and not gpus:
+        sp = _run(
+            ["system_profiler", "SPDisplaysDataType", "-json"],
+            timeout=8,
+        )
+        try:
+            data = json.loads(sp)
+            for gpu in data.get("SPDisplaysDataType") or []:
+                name = gpu.get("sppci_model") or gpu.get("_name") or "Mac GPU"
+                vram = gpu.get("spdisplays_vram") or gpu.get("spdisplays_vram_shared")
+                gpus.append(
+                    {
+                        "vendor": "apple" if "Apple" in str(name) else "other",
+                        "name": name,
+                        "util_percent": None,
+                        "detail": str(vram) if vram else None,
+                        "note": "Metal — run local models via host Ollama on macOS",
+                    }
+                )
+        except Exception:
+            chip = _run(["sysctl", "-n", "machdep.cpu.brand_string"], timeout=3).strip()
+            if chip:
+                gpus.append(
+                    {
+                        "vendor": "apple",
+                        "name": chip,
+                        "note": "macOS — prefer host Ollama (Metal) for inference",
+                    }
+                )
+
     # WSL rocminfo hint (name only if wsl present)
     if sys.platform == "win32":
         roc = _run(

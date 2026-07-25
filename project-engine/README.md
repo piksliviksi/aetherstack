@@ -26,7 +26,7 @@ $env:AETHERSTACK_ENGINE_TOKEN = "your-secret"
 .\project-engine\start-engine.ps1 -Project D:\code\myapp
 ```
 
-Ubuntu:
+macOS / Ubuntu / Linux:
 
 ```bash
 chmod +x project-engine/start-engine.sh
@@ -35,6 +35,8 @@ chmod +x project-engine/start-engine.sh
 export AETHERSTACK_ENGINE_TOKEN=your-secret
 ./project-engine/start-engine.sh /path/to/project
 ```
+
+On **macOS**, use system Python 3 or Homebrew (`brew install python`). Install `psutil` if prompted (`pip3 install --user psutil`).
 
 ## What it shows
 

@@ -1,7 +1,7 @@
 {
   "name": "aetherstack",
   "displayName": "AetherStack",
-  "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama).",
+  "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama). Windows, macOS, and Linux.",
   "version": "0.1.2",
   "publisher": "AetherStack",
   "license": "MIT",
@@ -25,7 +25,10 @@
     "continue",
     "litellm",
     "openai",
-    "multi-model"
+    "multi-model",
+    "macos",
+    "osx",
+    "apple-silicon"
   ],
   "activationEvents": [
     "onStartupFinished"

@@ -35,9 +35,15 @@ Sidebar: **AetherStack → Project AI Overview**.
 2. Optional: [Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue) for in-editor chat.
 3. Optional: host or WSL Ollama for `local-*` models.
 
-### Windows 11 + AMD GPU
+### Local GPU (all platforms)
 
-VS Code does **not** run LLMs on the Radeon. Point Continue/Cline at `http://127.0.0.1:4000/v1` and run inference in **WSL Ollama** (ROCm/DXG) or host Ollama.
+VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http://127.0.0.1:4000/v1` and run inference in **host Ollama**:
+
+| OS | Local inference |
+|----|-----------------|
+| **macOS** | Ollama + **Metal** (Apple Silicon / supported Intel) |
+| **Windows + AMD** | WSL Ollama (ROCm/DXG) or host Ollama |
+| **Linux** | Host Ollama (ROCm / CUDA as available) |
 
 ## Settings
 

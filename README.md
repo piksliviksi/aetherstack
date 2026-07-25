@@ -9,7 +9,8 @@
 | **Repo** | [github.com/piksliviksi/aetherstack](https://github.com/piksliviksi/aetherstack) |
 | **VS Code** | [Marketplace: AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
 | **Who it’s for** | Anyone who wants a small, shareable stack without installing a full “AI distro” |
-| **GPU note** | Prefer **host Ollama** for AMD GPUs; containers handle UI + gateway |
+| **Platforms** | **Windows 11**, **macOS** (Intel / Apple Silicon), **Ubuntu/Linux** |
+| **GPU note** | Host Ollama: Metal (Mac), ROCm/CUDA (Linux/Win as available); containers handle UI + gateway |
 
 ---
 
@@ -53,7 +54,23 @@
 
 Full walkthrough: [docs/TUTORIAL-WINDOWS.md](./docs/TUTORIAL-WINDOWS.md)
 
-### Ubuntu (native)
+### macOS (OSX)
+
+1. Install [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/) and start it.  
+2. (Recommended) Install [Ollama for Mac](https://ollama.com/download) — **Metal** on Apple Silicon.  
+3. Clone and start:
+
+```bash
+git clone https://github.com/piksliviksi/aetherstack.git
+cd aetherstack
+chmod +x start.sh stop.sh
+./start.sh          # starts Docker; opens browser via `open`
+./stop.sh
+```
+
+Full walkthrough: [docs/TUTORIAL-MACOS.md](./docs/TUTORIAL-MACOS.md)
+
+### Ubuntu / Linux (native)
 
 ```bash
 git clone https://github.com/piksliviksi/aetherstack.git
@@ -67,8 +84,8 @@ Full walkthrough: [docs/TUTORIAL-UBUNTU.md](./docs/TUTORIAL-UBUNTU.md)
 
 ### Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) (Desktop on Windows, Engine on Ubuntu)  
-- [Ollama](https://ollama.com) **on the host** (recommended for GPU)
+- [Docker](https://docs.docker.com/get-docker/) (Desktop on **Windows/macOS**, Engine on Ubuntu)  
+- [Ollama](https://ollama.com) **on the host** (recommended for GPU / Metal)
 
 ```bash
 ollama pull llama3.1:8b
@@ -193,7 +210,8 @@ code --install-extension integrations/vscode
 # Command Palette → AetherStack: Wire Continue.dev to AetherStack
 ```
 
-**Win11 + AMD:** VS Code does **not** drive the Radeon for LLMs — only Ollama (e.g. WSL ROCm) does. See [docs/VSCODE.md](./docs/VSCODE.md).
+**Win11 + AMD:** VS Code does **not** drive the Radeon for LLMs — only Ollama (e.g. WSL ROCm) does.  
+**macOS:** VS Code does **not** use Metal for LLMs either — only host Ollama does. See [docs/VSCODE.md](./docs/VSCODE.md).
 
 ## Project Data Management Engine
 
@@ -206,7 +224,7 @@ Live **CPU / RAM / disk I/O / GPU**, per-project **disk impact**, **safe cleanup
 ```
 
 ```bash
-# Ubuntu
+# macOS / Ubuntu / Linux
 ./project-engine/start-engine.sh /path/to/project
 ```
 
@@ -214,10 +232,11 @@ Details: [`project-engine/README.md`](./project-engine/README.md)
 
 ---
 
-## Why host Ollama on AMD?
+## Why host Ollama?
 
 | Platform | Recommendation |
 |----------|----------------|
+| **macOS (Apple Silicon / Intel)** | **Host Ollama** (Metal) — not ROCm/CUDA containers |
 | **NVIDIA** | Container GPU passthrough is mature |
 | **AMD on Linux** | `ollama/ollama:rocm` *or* native Ollama |
 | **Windows / WSL** | **Native Ollama** (or WSL binary); Docker GPU for AMD is often flaky |
