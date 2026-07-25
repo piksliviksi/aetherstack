@@ -76,6 +76,14 @@ Code: [aether-amd/](../aether-amd/), `scripts/scan-system.*`, `scripts/auto-inst
 
 ---
 
+## Roadmap
+
+| Doc | Contents |
+|-----|----------|
+| [FUTURE.md](./FUTURE.md) | Planned work (enterprise shared account, silos, token pool) |
+
+---
+
 ## Reading order
 
 1. Root README  
