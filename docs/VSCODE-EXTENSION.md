@@ -57,8 +57,7 @@ Then: **Developer: Reload Window** (`Ctrl+Shift+P`).
 
 If you once installed a local build, you may have **two** extensions:
 
-- `AetherStack.aetherstack` ← keep this  
-- `piksliviksi.aetherstack` ← uninstall/disable  
+- `AetherStack.aetherstack` ← keep 
 
 Duplicates can hide the Activity Bar icon or confuse settings.
 
