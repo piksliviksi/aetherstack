@@ -232,9 +232,9 @@ def build_install_plan(discover: dict[str, Any], cfg: dict[str, Any] | None = No
                 "safe": False,
                 "elevated": True,
                 "where": "wsl",
-                "title": "Install Ollama ROCm package in Debian WSL",
-                "script": "wsl -d Debian -- bash -lc 'curl -fsSL https://ollama.com/install.sh | sh'",
-                "reason": "Radeon visible to rocminfo but Ollama has no /rocm libs",
+                "title": "Install Ollama ROCm package (AMD compute engines / CUs)",
+                "script": "wsl -d Debian -- bash -lc 'sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh'",
+                "reason": "WSL exposes GPU via DXG/rocminfo, not lspci — force ollama-linux-amd64-rocm so HIP uses CUs",
             }
         )
     if host.get("localhost_11434_broken") or host.get("flags", {}).get("localhost_11434_broken"):

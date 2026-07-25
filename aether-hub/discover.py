@@ -219,10 +219,11 @@ def discover_runtime() -> dict[str, Any]:
 
 
 def discover_gpu_hints() -> dict[str, Any]:
-    """Best-effort GPU hints from inside hub process (limited in containers)."""
+    """Best-effort GPU / AMD compute-engine hints (limited inside containers)."""
     hints: dict[str, Any] = {
         "nvidia_smi": None,
         "rocminfo": None,
+        "amd_compute_engines": [],
         "notes": [],
     }
     if shutil.which("nvidia-smi"):
@@ -233,13 +234,47 @@ def discover_gpu_hints() -> dict[str, Any]:
         out = _run(["rocminfo"], timeout=8)
         names = [ln.strip() for ln in out.splitlines() if "Marketing Name:" in ln]
         hints["rocminfo"] = names[:8]
-        if any("Radeon" in n or "AMD" in n for n in names):
+        # Parse GPU agents → compute units (engines)
+        engines: list[dict[str, Any]] = []
+        cur: dict[str, Any] = {}
+        for ln in out.splitlines():
+            s = ln.strip()
+            if s.startswith("Agent "):
+                if cur.get("device_type") == "GPU":
+                    engines.append(cur)
+                cur = {"agent": s}
+            elif "Marketing Name:" in s:
+                cur["name"] = s.split(":", 1)[-1].strip()
+            elif "Device Type:" in s:
+                cur["device_type"] = s.split(":", 1)[-1].strip()
+            elif "Compute Unit:" in s:
+                try:
+                    cur["compute_units"] = int(s.split(":", 1)[-1].strip().split("(")[0].strip())
+                except ValueError:
+                    cur["compute_units"] = s.split(":", 1)[-1].strip()
+            elif "Name:" in s and "gfx" in s.lower():
+                cur["gfx"] = s.split(":", 1)[-1].strip()
+        if cur.get("device_type") == "GPU":
+            engines.append(cur)
+        hints["amd_compute_engines"] = engines
+        if engines:
+            total_cu = sum(
+                int(e["compute_units"])
+                for e in engines
+                if isinstance(e.get("compute_units"), int)
+            )
+            hints["amd_total_compute_units"] = total_cu or None
+            hints["notes"].append(
+                f"AMD compute engines: {len(engines)} GPU agent(s), ~{total_cu or '?'} CUs — "
+                "inference needs Ollama ROCm package (not CUDA-only install)"
+            )
+        elif any("Radeon" in n or "AMD" in n for n in names):
             hints["notes"].append("rocminfo sees AMD GPU — Ollama still needs ROCm *libs* in its package")
+    # Host scan can enrich with WSL facts
     if os.environ.get("HSA_OVERRIDE_GFX_VERSION"):
         hints["HSA_OVERRIDE_GFX_VERSION"] = os.environ["HSA_OVERRIDE_GFX_VERSION"]
     if os.environ.get("HSA_ENABLE_DXG_DETECTION"):
         hints["HSA_ENABLE_DXG_DETECTION"] = os.environ["HSA_ENABLE_DXG_DETECTION"]
-    # Host scan can POST richer data under host_scan
     return hints
 
 
@@ -326,8 +361,25 @@ def build_recommendations(report: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "severity": "high",
                 "code": "no_rocm_libs",
-                "action": "Reinstall Ollama with ROCm tarball (ollama-linux-amd64-rocm) in Debian WSL",
-                "detail": "rocminfo can see Radeon while Ollama only ships cuda/vulkan/cpu libs.",
+                "action": "sudo bash scripts/install-ollama-rocm-wsl.sh  # force AMD compute (ROCm) package",
+                "detail": "AMD CUs visible via rocminfo/DXG but Ollama has no /rocm runner — stock install skips ROCm when lspci has no amdgpu (typical WSL).",
+            }
+        )
+    engines = (report.get("gpu_hints") or {}).get("amd_compute_engines") or host.get(
+        "amd_compute_engines"
+    )
+    if engines and host.get("ollama_missing_rocm_libs"):
+        cu = sum(
+            int(e.get("compute_units") or 0)
+            for e in engines
+            if str(e.get("compute_units", "")).isdigit() or isinstance(e.get("compute_units"), int)
+        )
+        recs.append(
+            {
+                "severity": "high",
+                "code": "amd_compute_idle",
+                "action": "Install ROCm Ollama + restart; verify ollama ps shows GPU",
+                "detail": f"AMD compute engines detected (~{cu or '?'} CUs) but not used for LLM until ROCm runners load.",
             }
         )
     if host.get("localhost_11434_broken") and host.get("wsl_ollama_ip"):

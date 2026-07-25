@@ -45,14 +45,21 @@ rocminfo | grep -A5 "Agent 2"
 4. **Debian + Ubuntu ROCm packages** — mixed repos; pin AMD `rocminfo` if Debian’s package shadows `/opt/rocm/bin`.
 5. **Ollama** — needs ROCm-capable build/env; host Ollama on Windows may be separate from WSL Ollama.
 
-## Next steps for full LLM GPU use
+## Use the AMD compute engines (required for real GPU LLM)
+
+Seeing the card in `rocminfo` is **not** enough. Ollama must load the **ROCm/HIP** runner so kernels run on the GPU’s **compute units** (e.g. 32 CUs on RX 6600 XT).
 
 ```bash
-# After GPU shows in rocminfo:
-ollama serve   # with env from profile.d
+# Force ROCm package (stock install skips it on WSL — no lspci amdgpu)
+sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh
+bash /mnt/d/llm/stack/scripts/amd-compute-status.sh
+
 ollama run tinyllama "hi"
-# Watch Windows Task Manager → GPU → Compute for activity
+ollama ps   # must NOT be 100% CPU
+# Windows Task Manager → GPU → Compute_* activity
 ```
+
+Full write-up: [AMD-COMPUTE.md](./AMD-COMPUTE.md).
 
 Optional: upgrade Adrenalin to **26.2.2+**, then retest.
 

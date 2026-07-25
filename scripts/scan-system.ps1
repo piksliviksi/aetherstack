@@ -91,6 +91,8 @@ try {
     $wsl.rocminfo_gpu = (wsl -d $Distro -- bash -lc "rocminfo 2>/dev/null | grep -E 'Marketing Name:.*Radeon|Device Type:.*GPU' | head -6 || true").Trim()
     $wsl.ollama_rocm_libs = (wsl -d $Distro -- bash -lc "test -d /usr/local/lib/ollama/rocm && echo yes || echo no").Trim()
     $wsl.ollama_lib_dirs = (wsl -d $Distro -- bash -lc "ls /usr/local/lib/ollama 2>/dev/null | tr '\n' ' '").Trim()
+    $wsl.amd_compute_units = (wsl -d $Distro -- bash -lc "export HSA_ENABLE_DXG_DETECTION=1 HSA_OVERRIDE_GFX_VERSION=10.3.0 LD_LIBRARY_PATH=/opt/rocm/lib:/usr/lib/wsl/lib; rocminfo 2>/dev/null | awk '/Device Type:.*GPU/{g=1} g&&/Compute Unit:/{print; exit}'").Trim()
+    $wsl.amd_gpu_name = (wsl -d $Distro -- bash -lc "export HSA_ENABLE_DXG_DETECTION=1 LD_LIBRARY_PATH=/opt/rocm/lib:/usr/lib/wsl/lib; rocminfo 2>/dev/null | awk '/Device Type:.*GPU/{g=1} g&&/Marketing Name:/{print; exit}'").Trim()
     if ($wsl.ip) {
       $wslTags = Test-Url "http://$($wsl.ip):11434/api/tags" 3
       $wsl.direct_tags = $wslTags
@@ -175,9 +177,15 @@ Write-Host "  Ollama localhost:11434: $($winTags.ok)  models: $($winModels -join
 if ($wsl.available) {
   Write-Host "  WSL $Distro IP: $($wsl.ip)  ollama=$($wsl.ollama_active)  dxg=$($wsl.dxg)  rocm_libs=$($wsl.ollama_rocm_libs)"
   Write-Host "  WSL models: $($wsl.models -join ', ')"
+  if ($wsl.amd_gpu_name -or $wsl.amd_compute_units) {
+    Write-Host "  AMD compute: $($wsl.amd_gpu_name) $($wsl.amd_compute_units)" -ForegroundColor Cyan
+  }
   if ($wsl.rocminfo_gpu) {
     $rg = ($wsl.rocminfo_gpu -replace "[\r\n]+", " / ")
     Write-Host "  rocminfo: $rg" -ForegroundColor DarkGray
+  }
+  if ($wsl.ollama_rocm_libs -eq "no" -and $wsl.dxg -eq "yes") {
+    Write-Host "  ! AMD CUs visible but Ollama has no ROCm runners — install-ollama-rocm-wsl.sh" -ForegroundColor Yellow
   }
 }
 Write-Host "  Services: webui=$($scan.services['3000_webui']) litellm_port=$($scan.services['4000_litellm']) redis=$($scan.services['6379_redis']) hub=$($scan.services['8766_hub'])"
