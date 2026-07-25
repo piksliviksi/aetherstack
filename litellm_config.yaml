@@ -4,20 +4,27 @@
 # Set API keys in .env — unused providers are simply not called.
 
 model_list:
-  # ── Local (host Ollama; WSL ROCm recommended on AMD) ──────────────
+  # ── Local (WSL Ollama + ROCm/DXG on AMD; keep tiny as default for 6GB WSL) ──
+  # Prefer models that are actually pulled. Override by pulling + editing here.
   - model_name: local-default
     litellm_params:
-      model: ollama/llama3.1:8b
+      model: ollama/tinyllama
       api_base: http://host.docker.internal:11434
 
   - model_name: local-llama
     litellm_params:
-      model: ollama/llama3.1:8b
+      model: ollama/tinyllama
       api_base: http://host.docker.internal:11434
 
   - model_name: local-tiny
     litellm_params:
       model: ollama/tinyllama
+      api_base: http://host.docker.internal:11434
+
+  # Optional larger local models (pull first: ollama pull llama3.1:8b)
+  - model_name: local-llama31-8b
+    litellm_params:
+      model: ollama/llama3.1:8b
       api_base: http://host.docker.internal:11434
 
   # ── xAI / Grok (latest first) ─────────────────────────────────────

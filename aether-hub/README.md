@@ -8,14 +8,31 @@ Capability / routing **sync matrix** (local ↔ cloud) and **shared agent memory
 | UI | http://127.0.0.1:8766/ |
 | Redis | same stack Redis (`6379`) |
 
+## Scan first
+
+Hub **discovers** the system before routing:
+
+```bash
+curl -s http://127.0.0.1:8766/api/discover | jq .summary
+curl -s http://127.0.0.1:8766/api/discover/text
+# Host-side deep scan (WSL / Radeon / dual-Ollama):
+# Windows:  .\scripts\scan-system.ps1
+# Linux/mac: ./scripts/scan-system.sh
+```
+
+Writes `.aetherstack/system-scan.json` and feeds recommendations into the hub UI.
+
 ## APIs
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| GET | `/api/discover` | **System scan** — Ollama endpoints, models, LiteLLM, Redis, keys, recommendations |
+| GET | `/api/discover/text` | Human-readable scan |
+| POST | `/api/discover` | Merge host_scan from `scan-system.ps1` |
 | GET | `/api/matrix` | Full matrix + live availability |
 | GET | `/api/matrix/table` | Flat capability table |
 | GET | `/api/route?need=code,tools&prefer=local` | Pick best model |
-| POST | `/api/sync` | Re-probe Ollama + rewrite Redis snapshot |
+| POST | `/api/sync` | Re-discover + rewrite Redis snapshot |
 | POST | `/api/memory/sessions/{id}/messages` | Append working-memory message |
 | GET | `/api/memory/sessions/{id}` | Read session |
 | POST | `/api/memory/vectors` | Upsert text (+ embedding) |
