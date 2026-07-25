@@ -5,7 +5,7 @@
 After AetherStack is set up once (Docker + keys + imported pipelines/graphs + limits), you talk to a **single gateway model** in VS Code (via Continue or similar) — same habit as Grok or Claude. Routing, multi-agent roles, tier/cost limits, and memory hygiene run in the background.
 
 How the system operates (full story):  
-**[Operating model](https://github.com/piksliviksi/aetherstack/blob/main/docs/OPERATING-MODEL.md)** · **[README modus operandi](https://github.com/piksliviksi/aetherstack/blob/main/README.md#how-aetherstack-operates-modus-operandi)**
+**[What you get](https://github.com/piksliviksi/aetherstack/blob/main/README.md)** · **[Operating model](https://github.com/piksliviksi/aetherstack/blob/main/docs/OPERATING-MODEL.md)** · **[Docs index](https://github.com/piksliviksi/aetherstack/blob/main/docs/README.md)**
 
 Install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack):
 
