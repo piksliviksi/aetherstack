@@ -1,5 +1,11 @@
 # AetherStack — Windows 11 start script (double-click start.bat)
 # Requires: Docker Desktop. Optional: host Ollama for local models.
+# Optional: -AutoInstall  to install missing safe packages after start
+
+param(
+  [switch]$AutoInstall,
+  [switch]$AutoInstallElevated
+)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -103,6 +109,16 @@ if (-not (Test-Ollama)) {
 # Re-scan after stack is up so hub gets host_scan + live services
 Invoke-SystemScan
 
+if ($AutoInstall -or $AutoInstallElevated) {
+  Write-Host "  Auto-install missing packages…" -ForegroundColor Cyan
+  $ai = Join-Path $Root "scripts\auto-install.ps1"
+  if (Test-Path $ai) {
+    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ai, "-Enable", "-Yes")
+    if ($AutoInstallElevated) { $args += "-IncludeElevated" }
+    & powershell @args
+  }
+}
+
 Write-Host ""
 Write-Host "  --------------------------------" -ForegroundColor DarkGray
 Write-Host "  Chat UI:   http://localhost:3000" -ForegroundColor Green
@@ -112,6 +128,7 @@ Write-Host "  Redis:     localhost:6379" -ForegroundColor Green
 Write-Host "  --------------------------------" -ForegroundColor DarkGray
 Write-Host "  System scan JSON: .aetherstack\system-scan.json" -ForegroundColor DarkCyan
 Write-Host "  Discover API:     http://localhost:8766/api/discover" -ForegroundColor DarkCyan
+Write-Host "  Auto-install:     .\scripts\auto-install.ps1 -Enable -Yes" -ForegroundColor DarkCyan
 Write-Host "  With key: curl ... -H `"Authorization: Bearer YOUR_KEY`"" -ForegroundColor DarkGray
 Write-Host "  Stop: double-click stop.bat" -ForegroundColor DarkCyan
 Write-Host ""

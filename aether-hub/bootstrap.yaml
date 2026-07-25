@@ -1,0 +1,71 @@
+# Auto-install of missing packages (OPTIONAL — off by default)
+# Enable: POST /api/bootstrap {"enabled": true}  or env AETHER_AUTO_INSTALL=1
+# Apply:  POST /api/bootstrap/run {"confirm": true}  or  .\scripts\auto-install.ps1 -Yes
+
+version: 1
+
+defaults:
+  enabled: false
+  # If true, bootstrap/run may execute without extra confirm (still requires enabled)
+  auto_apply: false
+  # Prefer small models when RAM unknown
+  prefer_small_models: true
+
+# What may be installed automatically
+categories:
+  python_pip:
+    description: Python packages for hub / project-engine
+    safe: true
+    packages:
+      - redis
+      - PyYAML
+      - psutil
+
+  ollama_models:
+    description: Pull Ollama models if Ollama is reachable and model missing
+    safe: true
+    # Ordered preference; first missing essential is pulled
+    essential:
+      - tinyllama
+    optional:
+      - nomic-embed-text
+    # Only if host reports enough free RAM (GB) via host_scan
+    large:
+      - llama3.1:8b
+
+  docker_images:
+    description: Ensure compose base images exist (pull only, no run)
+    safe: true
+    images:
+      - redis:7-alpine
+      - ghcr.io/berriai/litellm:main-latest
+      - ghcr.io/open-webui/open-webui:main
+
+  docker_compose_services:
+    description: docker compose up -d for core services if down
+    safe: true
+    services:
+      - redis
+      - litellm
+      - aether-hub
+      - open-webui
+
+  # Host-only (scripts/auto-install.ps1 / .sh) — hub only recommends
+  host_tools:
+    description: Host/WSL tooling (Ollama CLI, ROCm Ollama package, portproxy)
+    safe: false
+    elevated: true
+    items:
+      - id: ollama_cli_windows
+        when: windows and ollama missing
+      - id: ollama_rocm_wsl
+        when: wsl and rocm libs missing
+      - id: wsl_portproxy
+        when: localhost 11434 broken but WSL Ollama up
+      - id: ensure_wsl_ollama
+        when: wsl ollama inactive
+
+limits:
+  max_ollama_pulls_per_run: 2
+  max_pip_packages_per_run: 10
+  skip_large_models_if_ram_gb_below: 10

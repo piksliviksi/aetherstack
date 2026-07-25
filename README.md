@@ -293,6 +293,7 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 | [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) | Local ↔ cloud routing / sync matrix |
 | [docs/AGENT-MEMORY.md](./docs/AGENT-MEMORY.md) | Redis sessions + vector search |
 | [docs/AGENT-MODES.md](./docs/AGENT-MODES.md) | Inline vs multi-agent, token saver, multi-LLM roles |
+| [docs/AUTO-INSTALL.md](./docs/AUTO-INSTALL.md) | Optional auto-install of missing packages |
 | [`aether-hub/`](./aether-hub/) | Service source |
 
 ```bash
@@ -315,6 +316,29 @@ curl -s -X POST http://127.0.0.1:8766/api/memory/search \
 ```
 
 Optional embed model for better recall: `ollama pull nomic-embed-text`
+
+### Optional auto-install (missing packages)
+
+```powershell
+# Dry-run: show what would be installed
+.\scripts\auto-install.ps1
+
+# Enable + install safe gaps (pip, ollama models, compose services)
+.\scripts\auto-install.ps1 -Enable -Yes
+
+# Also fix WSL ROCm Ollama / portproxy (elevated host steps)
+.\scripts\auto-install.ps1 -Yes -IncludeElevated
+
+# Or with start:
+.\start.ps1 -AutoInstall
+```
+
+```bash
+./scripts/auto-install.sh            # dry-run
+./scripts/auto-install.sh --enable --yes
+```
+
+Off by default — see [docs/AUTO-INSTALL.md](./docs/AUTO-INSTALL.md).
 
 ## Related
 
