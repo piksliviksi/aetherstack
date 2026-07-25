@@ -38,6 +38,7 @@ Add any keys you need:
 | `OPENAI_API_KEY` | GPT / Codex |
 | `ANTHROPIC_API_KEY` | Claude |
 | `GOOGLE_API_KEY` | Gemini |
+| `MISTRAL_API_KEY` | Mistral / Codestral / Pixtral |
 
 Then:
 
