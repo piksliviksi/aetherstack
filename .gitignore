@@ -12,3 +12,7 @@ __pycache__/
 *.pyc
 .aetherstack/
 
+
+# Local-only (do not publish)
+docs/VSCODE-PUBLISH.md
+

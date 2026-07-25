@@ -23,7 +23,6 @@ This tree holds procedures, APIs, and platform facts.
 |-----|----------|
 | [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md) | Extension install and commands |
 | [VSCODE.md](./VSCODE.md) | IDE vs GPU architecture |
-| [VSCODE-PUBLISH.md](./VSCODE-PUBLISH.md) | Marketplace publish procedure |
 | [DOCKER-EXTENSION.md](./DOCKER-EXTENSION.md) | Docker Desktop extension scaffold |
 | [GATEWAY.md](./GATEWAY.md) | LiteLLM aliases, keys, 401 |
 | [MULTI-KEYS.md](./MULTI-KEYS.md) | Personal + enterprise keys per provider |
