@@ -194,27 +194,58 @@ def discover_services() -> dict[str, Any]:
     }
 
 
+# Primary + multi-account slots (personal / subscription vs enterprise API)
+_PROVIDER_KEY_ROOTS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "XAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "MISTRAL_API_KEY",
+)
+_KEY_SLOTS = ("", "_PERSONAL", "_ENTERPRISE")
+
+
 def discover_cloud_keys() -> dict[str, Any]:
-    keys = {
-        "OPENAI_API_KEY": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
-        "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
-        "XAI_API_KEY": bool(os.environ.get("XAI_API_KEY", "").strip()),
-        "GOOGLE_API_KEY": bool(os.environ.get("GOOGLE_API_KEY", "").strip()),
-        "MISTRAL_API_KEY": bool(os.environ.get("MISTRAL_API_KEY", "").strip()),
+    """
+    Report which cloud keys are set.
+
+    Per provider:
+      {P}_API_KEY              primary (default model aliases)
+      {P}_API_KEY_PERSONAL     personal / subscription account
+      {P}_API_KEY_ENTERPRISE   work / org API account
+
+    Both personal and enterprise can be set; use model aliases
+    *-personal / *-enterprise simultaneously (e.g. claude-sonnet-4-personal
+    and claude-sonnet-4-enterprise).
+    """
+    keys: dict[str, bool] = {
         "LITELLM_MASTER_KEY": bool(os.environ.get("LITELLM_MASTER_KEY", "").strip()),
+    }
+    by_provider: dict[str, dict[str, bool]] = {}
+    for root in _PROVIDER_KEY_ROOTS:
+        prov = root.replace("_API_KEY", "").lower()
+        slots: dict[str, bool] = {}
+        for suf in _KEY_SLOTS:
+            name = f"{root}{suf}" if suf else root
+            present = bool(os.environ.get(name, "").strip())
+            keys[name] = present
+            slot = "primary" if not suf else suf.lstrip("_").lower()
+            slots[slot] = present
+        by_provider[prov] = slots
+
+    any_cloud = any(keys.get(r) or keys.get(f"{r}_PERSONAL") or keys.get(f"{r}_ENTERPRISE") for r in _PROVIDER_KEY_ROOTS)
+    multi = {
+        p: s
+        for p, s in by_provider.items()
+        if sum(1 for v in s.values() if v) >= 2
     }
     return {
         "present": keys,
-        "any_cloud": any(
-            keys[k]
-            for k in (
-                "OPENAI_API_KEY",
-                "ANTHROPIC_API_KEY",
-                "XAI_API_KEY",
-                "GOOGLE_API_KEY",
-                "MISTRAL_API_KEY",
-            )
-        ),
+        "by_provider": by_provider,
+        "multi_account_providers": multi,
+        "any_cloud": any_cloud,
+        "slots": ["primary", "personal", "enterprise"],
+        "note": "Use alias suffixes -personal / -enterprise to call two accounts at once.",
     }
 
 
@@ -319,10 +350,24 @@ def build_recommendations(report: dict[str, Any]) -> list[dict[str, str]]:
         if primary.get("inference_hint") == "cpu":
             recs.append(
                 {
-                    "severity": "medium",
+                    "severity": "high",
                     "code": "cpu_inference",
-                    "action": "Install Ollama ROCm package in WSL; ensure ollama ps shows GPU",
-                    "detail": "Loaded runner reported CPU — Radeon may be invisible to this Ollama build.",
+                    "action": "sudo bash aether-amd/ensure-backend.sh  # ROCm runners; then ollama ps must show GPU",
+                    "detail": "Loaded runner reported CPU — AMD CUs idle until Ollama ROCm package is installed (WSL often ships CUDA/CPU only).",
+                }
+            )
+        # No loaded model yet, but reachable: still flag likely CPU-only stack when host scan says so
+        if (
+            not primary.get("inference_hint")
+            and host.get("ollama_missing_rocm_libs")
+            and (host.get("radeon_visible_to_rocminfo") or host.get("amd_compute_engines"))
+        ):
+            recs.append(
+                {
+                    "severity": "high",
+                    "code": "likely_cpu_ollama",
+                    "action": "sudo bash aether-amd/ensure-backend.sh",
+                    "detail": "Host scan: ROCm runner libs missing under /usr/local/lib/ollama/rocm while Radeon is visible.",
                 }
             )
 
@@ -351,8 +396,8 @@ def build_recommendations(report: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "severity": "info",
                 "code": "no_cloud_keys",
-                "action": "Set OPENAI_/XAI_/ANTHROPIC_/GOOGLE_/MISTRAL_API_KEY in .env for cloud models",
-                "detail": "Local-only mode is fine if Ollama has models.",
+                "action": "Set {PROVIDER}_API_KEY and/or _PERSONAL / _ENTERPRISE in .env (docs/MULTI-KEYS.md)",
+                "detail": "Local-only mode is fine if Ollama has models. Multi-account slots can be set together.",
             }
         )
 

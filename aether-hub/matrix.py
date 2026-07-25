@@ -21,7 +21,46 @@ def load_matrix(path: Path | None = None) -> dict[str, Any]:
         data = yaml.safe_load(f)
     if not isinstance(data, dict) or "models" not in data:
         raise ValueError(f"invalid matrix file: {p}")
-    return data
+    return expand_multi_key_models(data)
+
+
+def expand_multi_key_models(matrix: dict[str, Any]) -> dict[str, Any]:
+    """
+    Synthesize -personal / -enterprise aliases for every cloud model that has
+    requires_env like ANTHROPIC_API_KEY → ANTHROPIC_API_KEY_PERSONAL / _ENTERPRISE.
+    Primary alias keeps {PROVIDER}_API_KEY. Both keys can be live at once.
+    """
+    models = dict(matrix.get("models") or {})
+    extra: dict[str, Any] = {}
+    for name, meta in list(models.items()):
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("tier") == "local":
+            continue
+        if meta.get("key_slot"):
+            continue  # already a slot variant
+        req = meta.get("requires_env")
+        if not req or not str(req).endswith("_API_KEY"):
+            continue
+        base_env = str(req)
+        for slot, suf in (("personal", "_PERSONAL"), ("enterprise", "_ENTERPRISE")):
+            alias = f"{name}-{slot}"
+            if alias in models or alias in extra:
+                continue
+            m = dict(meta)
+            m["requires_env"] = base_env + suf
+            m["key_slot"] = slot
+            m["parent_alias"] = name
+            m["notes"] = (
+                (m.get("notes") or "")
+                + f" Key slot={slot} ({base_env}{suf})."
+            ).strip()
+            extra[alias] = m
+    if extra:
+        models.update(extra)
+        matrix = dict(matrix)
+        matrix["models"] = models
+    return matrix
 
 
 def _http_json(url: str, timeout: float = 3.0, headers: dict | None = None) -> Any | None:
@@ -50,10 +89,13 @@ def probe_ollama(base: str | None = None) -> dict[str, Any]:
     return {"base": base, "ok": tags is not None, "models": sorted(names)}
 
 
-def env_key_present(name: str | None) -> bool:
+def env_key_present(name: str | list[str] | None) -> bool:
+    """True if env var is set, or any of a list (requires_any_env style)."""
     if not name:
         return True
-    v = os.environ.get(name, "").strip()
+    if isinstance(name, (list, tuple)):
+        return any(env_key_present(n) for n in name)
+    v = os.environ.get(str(name), "").strip()
     return bool(v)
 
 

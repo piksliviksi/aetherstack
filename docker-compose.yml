@@ -73,10 +73,20 @@ services:
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
       - AETHER_EMBED_MODEL=${AETHER_EMBED_MODEL:-nomic-embed-text}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_API_KEY_PERSONAL=${OPENAI_API_KEY_PERSONAL:-}
+      - OPENAI_API_KEY_ENTERPRISE=${OPENAI_API_KEY_ENTERPRISE:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_API_KEY_PERSONAL=${ANTHROPIC_API_KEY_PERSONAL:-}
+      - ANTHROPIC_API_KEY_ENTERPRISE=${ANTHROPIC_API_KEY_ENTERPRISE:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
+      - XAI_API_KEY_PERSONAL=${XAI_API_KEY_PERSONAL:-}
+      - XAI_API_KEY_ENTERPRISE=${XAI_API_KEY_ENTERPRISE:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_API_KEY_PERSONAL=${GOOGLE_API_KEY_PERSONAL:-}
+      - GOOGLE_API_KEY_ENTERPRISE=${GOOGLE_API_KEY_ENTERPRISE:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - MISTRAL_API_KEY_PERSONAL=${MISTRAL_API_KEY_PERSONAL:-}
+      - MISTRAL_API_KEY_ENTERPRISE=${MISTRAL_API_KEY_ENTERPRISE:-}
       - AETHER_COMBOS_CATALOG=/combos/catalog.yaml
       - AETHER_COMBOS_EXPORT=/combos/export
       - AETHER_COMBOS_IMPORT=/combos/import
@@ -91,6 +101,7 @@ services:
       - ./aether-hub/static:/app/static:ro
       - ./combos:/combos:ro
       - ./pipelines:/pipelines
+      - ./.aetherstack:/host-aetherstack:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -109,10 +120,20 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_API_KEY_PERSONAL=${OPENAI_API_KEY_PERSONAL:-}
+      - OPENAI_API_KEY_ENTERPRISE=${OPENAI_API_KEY_ENTERPRISE:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_API_KEY_PERSONAL=${ANTHROPIC_API_KEY_PERSONAL:-}
+      - ANTHROPIC_API_KEY_ENTERPRISE=${ANTHROPIC_API_KEY_ENTERPRISE:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
+      - XAI_API_KEY_PERSONAL=${XAI_API_KEY_PERSONAL:-}
+      - XAI_API_KEY_ENTERPRISE=${XAI_API_KEY_ENTERPRISE:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_API_KEY_PERSONAL=${GOOGLE_API_KEY_PERSONAL:-}
+      - GOOGLE_API_KEY_ENTERPRISE=${GOOGLE_API_KEY_ENTERPRISE:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - MISTRAL_API_KEY_PERSONAL=${MISTRAL_API_KEY_PERSONAL:-}
+      - MISTRAL_API_KEY_ENTERPRISE=${MISTRAL_API_KEY_ENTERPRISE:-}
       # Required by current LiteLLM for /v1/* — browsers must send Authorization header.
       # Default is for local lab only; change if you expose the port.
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}

@@ -17,8 +17,9 @@ Config file: [`litellm_config.yaml`](../litellm_config.yaml).
 
 | Alias | Backend |
 |-------|---------|
-| `local-default` / `local-llama` | Host Ollama (`llama3.1:8b`) |
+| `local-default` / `local-llama` | Host Ollama (default: `tinyllama` — see `litellm_config.yaml`) |
 | `local-tiny` | Host Ollama (`tinyllama`) |
+| `local-llama31-8b` | Host Ollama (`llama3.1:8b` — pull required) |
 | `grok` / `grok-4.5` | xAI Grok 4.5 |
 | `grok-4.3` / `grok-4` / `grok-4-fast` / `grok-code` | xAI Grok 4.x |
 | `grok-3` | xAI Grok 3 |
@@ -34,16 +35,21 @@ Config file: [`litellm_config.yaml`](../litellm_config.yaml).
 
 ## Environment keys
 
-| Variable | Provider |
-|----------|----------|
-| `XAI_API_KEY` | xAI |
-| `OPENAI_API_KEY` | OpenAI |
-| `ANTHROPIC_API_KEY` | Anthropic |
-| `GOOGLE_API_KEY` | Gemini |
-| `MISTRAL_API_KEY` | Mistral AI |
+| Variable | Provider / slot |
+|----------|-----------------|
+| `XAI_API_KEY` | xAI **primary** |
+| `XAI_API_KEY_PERSONAL` / `_ENTERPRISE` | xAI personal / work |
+| `OPENAI_API_KEY` (+ `_PERSONAL` / `_ENTERPRISE`) | OpenAI / Codex |
+| `ANTHROPIC_API_KEY` (+ `_PERSONAL` / `_ENTERPRISE`) | Claude |
+| `GOOGLE_API_KEY` (+ `_PERSONAL` / `_ENTERPRISE`) | Gemini |
+| `MISTRAL_API_KEY` (+ `_PERSONAL` / `_ENTERPRISE`) | Mistral |
 | `LITELLM_MASTER_KEY` | Gateway client auth |
 
-Set only keys for providers in use. Local Ollama does not require a cloud key.
+**Multi-account:** set personal + enterprise keys together. Call  
+`claude-sonnet-4-personal` and `claude-sonnet-4-enterprise` (same pattern for all cloud aliases).  
+Guide: [MULTI-KEYS.md](./MULTI-KEYS.md).
+
+Set only keys for providers and slots in use. Local Ollama does not require a cloud key.
 
 ---
 
