@@ -164,4 +164,3 @@ Start stack
 | [CROSS-MEMORY.md](./CROSS-MEMORY.md) | Multi-project index |
 | [AGENT-MODES.md](./AGENT-MODES.md) | Inline / multi-agent |
 | [AMD-COMPUTE.md](./AMD-COMPUTE.md) | Radeon CUs |
-| [FUTURE.md](./FUTURE.md) | Planned enterprise shared account / silos |
