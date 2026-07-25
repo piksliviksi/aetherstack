@@ -93,6 +93,7 @@ Identical completions within TTL are served from Redis.
 | Exposure | Do not publish `:8766` or `:6379` publicly |
 | Content | Vectors store whatever text is upserted — treat as sensitive |
 | Shared host | Put Hub behind authenticated reverse proxy |
+| Private mode | Isolated vault; no common pool — [PRIVATE-MODE.md](./PRIVATE-MODE.md) |
 
 ---
 

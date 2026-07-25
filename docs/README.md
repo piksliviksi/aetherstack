@@ -36,6 +36,7 @@ This tree holds procedures, APIs, and platform facts.
 | [AGENT-MODES.md](./AGENT-MODES.md) | Inline / multi-agent, token saver |
 | [AGENT-MEMORY.md](./AGENT-MEMORY.md) | Redis sessions + vectors |
 | [CROSS-MEMORY.md](./CROSS-MEMORY.md) | Multi-project scan / pull |
+| [PRIVATE-MODE.md](./PRIVATE-MODE.md) | Private project/model vault isolation |
 | [SLASH-COMMANDS.md](./SLASH-COMMANDS.md) | `/done`, `/clear`, `/compact` |
 | [PIPELINES.md](./PIPELINES.md) | Multi-stage scripts + votes |
 | [NODE-GRAPH.md](./NODE-GRAPH.md) | Canvas `/graph` |

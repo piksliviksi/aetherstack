@@ -15,6 +15,16 @@ import uuid
 from typing import Any, Callable
 
 from memory import MemoryStore
+from privacy import (
+    is_session_private,
+    private_archive_ns,
+    private_session_key,
+    redact_log,
+    resolve_private_context,
+    set_project_private,
+    get_privacy_state,
+    release_project,
+)
 
 # In-process open tasks (also mirrored to Redis via MemoryStore sessions)
 _open_tasks: dict[str, dict[str, Any]] = {}
@@ -29,6 +39,7 @@ COMMANDS = {
     "/done": "Mark a task or all tasks complete  |  /done [task_id|all]",
     "/task": "Register or list tasks  |  /task add <title>  |  /task list",
     "/context": "Show working context blob (truncated)",
+    "/private": "Private mode  |  /private on [path]  |  /private status  |  /private release <project_id>",
 }
 
 
@@ -183,43 +194,79 @@ def archive_to_memory(
     namespace: str | None = None,
     extra: dict | None = None,
 ) -> dict[str, Any]:
-    """Persist full context into vector + session meta before clear."""
-    ns = namespace or f"archive:{session_id}"
-    doc = _build_archive_document(session_id, mem, reason=reason, extra=extra)
-    # durable vector for later /search
+    """Persist full context into vector + session meta before clear.
+
+    Private sessions: vault-only archive. No conversation-index sticky. No content in logs.
+    """
+    ctx = resolve_private_context(session_id=session_id)
+    private = bool(ctx.get("private"))
+    store_sid = private_session_key(session_id, ctx.get("project_id")) if private else session_id
+
+    if private:
+        ns = namespace if (namespace and str(namespace).startswith("private:")) else private_archive_ns(
+            session_id, ctx.get("project_id")
+        )
+    else:
+        ns = namespace or f"archive:{session_id}"
+
+    # Build archive from the correct store session id
+    doc = _build_archive_document(store_sid if private else session_id, mem, reason=reason, extra=extra)
+    # Also include logical session messages if they were stored under original id pre-bind
+    if private and store_sid != session_id:
+        extra_msgs = mem.get_session(session_id, limit=50)
+        if extra_msgs and "### " not in doc[-500:]:
+            doc += "\n## Additional\n(private vault primary)\n"
+
+    meta = {
+        "kind": "conversation_archive",
+        "session_id": session_id,
+        "reason": reason,
+        "ts": time.time(),
+        "private": private,
+        "project_id": ctx.get("project_id"),
+    }
     vec = mem.upsert_vector(
-        text=doc[:12000],
+        text=doc[:12000] if not private else doc[:12000],
         namespace=ns,
-        meta={
-            "kind": "conversation_archive",
-            "session_id": session_id,
-            "reason": reason,
-            "ts": time.time(),
-        },
+        meta=meta,
     )
-    # also a short sticky note in default memory for recall
-    summary = get_working(session_id).get("summary") or ""
-    if not summary and doc:
-        # first 500 chars of archive as breadcrumb
-        summary = f"Archive {reason} @ {time.strftime('%Y-%m-%d %H:%M')} session={session_id}"
-    sticky = mem.upsert_vector(
-        text=summary or f"Cleared session {session_id} ({reason})",
-        namespace="conversation-index",
-        meta={"session_id": session_id, "reason": reason, "archive_ns": ns, "archive_id": vec.get("id")},
+
+    sticky = None
+    if not private:
+        summary = get_working(session_id).get("summary") or ""
+        if not summary and doc:
+            summary = f"Archive {reason} @ {time.strftime('%Y-%m-%d %H:%M')} session={session_id}"
+        sticky = mem.upsert_vector(
+            text=summary or f"Cleared session {session_id} ({reason})",
+            namespace="conversation-index",
+            meta={
+                "session_id": session_id,
+                "reason": reason,
+                "archive_ns": ns,
+                "archive_id": vec.get("id"),
+            },
+        )
+
+    # session stream: redacted when private
+    log_line = (
+        redact_log("archive", ctx, reason=reason, archive_id=vec.get("id"), chars=len(doc))
+        if private
+        else f"[archive] reason={reason} archive_id={vec.get('id')} chars={len(doc)}"
     )
-    # log event on session stream
     mem.append_message(
-        session_id,
+        store_sid if private else session_id,
         "system",
-        f"[archive] reason={reason} archive_id={vec.get('id')} chars={len(doc)}",
-        meta={"kind": "archive", "archive_id": vec.get("id")},
+        log_line,
+        meta={"kind": "archive", "archive_id": vec.get("id"), "private": private},
     )
     return {
         "archive_id": vec.get("id"),
         "namespace": ns,
-        "index_id": sticky.get("id"),
+        "index_id": sticky.get("id") if sticky else None,
         "chars": len(doc),
         "backend": mem.backend,
+        "private": private,
+        "common_pool": False if private else True,
     }
 
 
@@ -248,34 +295,51 @@ def cmd_clear(
             "hint": "POST /api/slash {\"text\":\"/done all\"} then /clear",
         }
 
+    ctx = resolve_private_context(session_id=session_id)
+    private = bool(ctx.get("private"))
+    store_sid = private_session_key(session_id, ctx.get("project_id")) if private else session_id
+
     archive = archive_to_memory(session_id, mem, reason="clear" if not keep_summary else "compact")
     prev_summary = get_working(session_id).get("summary") or ""
-    mem.clear_session(session_id)
+    mem.clear_session(store_sid)
+    if private and store_sid != session_id:
+        mem.clear_session(session_id)  # wipe any pre-private residual
 
     # reset working context
+    if private:
+        summary_line = "[private] context cleared; vault archive only (not in common pool)"
+        if keep_summary and prev_summary:
+            summary_line = "[private] " + prev_summary[:200]
+    else:
+        summary_line = (
+            (prev_summary[:400] if keep_summary and prev_summary else "")
+            or f"Context cleared; full history in memory archive {archive.get('archive_id')}"
+        )
     new_working = {
         "session_id": session_id,
         "notes": [],
-        "summary": (
-            (prev_summary[:400] if keep_summary and prev_summary else "")
-            or f"Context cleared; full history in memory archive {archive.get('archive_id')}"
-        ),
+        "summary": summary_line,
         "last_clear_at": time.time(),
-        "last_archive_id": archive.get("archive_id"),
-        "last_archive_ns": archive.get("namespace"),
+        "last_archive_id": archive.get("archive_id") if not private else None,
+        "last_archive_ns": archive.get("namespace") if not private else archive.get("namespace"),
+        "private": private,
     }
     _working[_working_key(session_id)] = new_working
 
-    # seed session with system marker for clients
-    mem.append_message(
-        session_id,
-        "system",
-        (
+    seed = (
+        redact_log("clear", ctx, archive_id=archive.get("archive_id"))
+        if private
+        else (
             "[/clear] Working context reset. Prior work is stored in agent memory "
             f"(archive={archive.get('archive_id')}, ns={archive.get('namespace')}). "
             "Recall via POST /api/memory/search namespace=conversation-index or archive ns."
-        ),
-        meta={"kind": "clear", "archive": archive},
+        )
+    )
+    mem.append_message(
+        store_sid,
+        "system",
+        seed,
+        meta={"kind": "clear", "archive_id": archive.get("archive_id"), "private": private},
     )
 
     return {
@@ -285,7 +349,12 @@ def cmd_clear(
         "archived": archive,
         "working": new_working,
         "context_optimal": True,
-        "message": "Documented in memory and cleared working context.",
+        "private": private,
+        "message": (
+            "Private vault archived; working context cleared; common pool untouched."
+            if private
+            else "Documented in memory and cleared working context."
+        ),
     }
 
 
@@ -303,7 +372,9 @@ def cmd_save(session_id: str, mem: MemoryStore, note: str = "") -> dict[str, Any
 
 
 def cmd_status(session_id: str, mem: MemoryStore) -> dict[str, Any]:
-    msgs = mem.get_session(session_id, limit=500)
+    ctx = resolve_private_context(session_id=session_id)
+    store_sid = private_session_key(session_id, ctx.get("project_id")) if ctx.get("private") else session_id
+    msgs = mem.get_session(store_sid, limit=500)
     working = get_working(session_id)
     return {
         "ok": True,
@@ -314,6 +385,8 @@ def cmd_status(session_id: str, mem: MemoryStore) -> dict[str, Any]:
         "working": working,
         "memory": mem.health(),
         "can_clear": len(open_tasks(session_id)) == 0,
+        "private": ctx.get("private"),
+        "privacy": ctx,
     }
 
 
@@ -411,9 +484,66 @@ def execute_slash(
         if sub == "add":
             title = parts[1] if len(parts) > 1 else "untitled"
             t = register_task(title, session_id=session_id)
-            mem.append_message(session_id, "system", f"[task] opened {t['id']}: {title}", meta={"task": t})
-            return {"ok": True, "command": "/task", "added": t}
+            ctx = resolve_private_context(session_id=session_id)
+            store_sid = (
+                private_session_key(session_id, ctx.get("project_id")) if ctx.get("private") else session_id
+            )
+            note = redact_log("task_open", ctx, task_id=t["id"]) if ctx.get("private") else f"[task] opened {t['id']}: {title}"
+            mem.append_message(store_sid, "system", note, meta={"task": {"id": t["id"]} if ctx.get("private") else t})
+            return {"ok": True, "command": "/task", "added": t, "private": ctx.get("private")}
         return {"ok": False, "command": "/task", "error": "usage: /task list | /task add <title>"}
+
+    if cmd == "/private":
+        parts = args.split(maxsplit=1)
+        sub = (parts[0] if parts else "status").lower()
+        if sub in ("status", "ls", "list", ""):
+            st = get_privacy_state()
+            ctx = resolve_private_context(session_id=session_id)
+            return {
+                "ok": True,
+                "command": "/private",
+                "session": ctx,
+                "state": st,
+            }
+        if sub in ("on", "enable", "true", "1"):
+            path = parts[1].strip() if len(parts) > 1 else None
+            r = set_project_private(
+                path=path,
+                name=path or f"session-{session_id}",
+                private=True,
+                session_id=session_id,
+            )
+            return {
+                "ok": True,
+                "command": "/private",
+                "private": True,
+                "result": r,
+                "message": "Session bound to private project. No common memory pool writes.",
+            }
+        if sub in ("release", "off", "disable"):
+            rest = parts[1].strip() if len(parts) > 1 else ""
+            pid = rest.split()[0] if rest else resolve_private_context(session_id=session_id).get("project_id")
+            if not pid:
+                return {
+                    "ok": False,
+                    "command": "/private",
+                    "error": "usage: /private release <project_id>",
+                }
+            try:
+                r = release_project(str(pid), purge_vault=True, mem=mem)
+            except ValueError as e:
+                return {"ok": False, "command": "/private", "error": str(e)}
+            return {
+                "ok": True,
+                "command": "/private",
+                "private": False,
+                "result": r,
+            }
+        return {
+            "ok": False,
+            "command": "/private",
+            "error": "usage: /private on [path] | /private status | /private release <project_id>",
+        }
 
     return {
         "ok": False,
@@ -433,29 +563,50 @@ def maybe_handle_message(
     """
     If text is a slash command, execute it (optionally still log user line).
     If not, append as normal user message to session working memory.
+    Private sessions store only in private vault session keys; redacted system logs.
     """
+    ctx = resolve_private_context(session_id=session_id)
+    private = bool(ctx.get("private"))
+    store_sid = private_session_key(session_id, ctx.get("project_id")) if private else session_id
+
     cmd, _ = parse_slash(text)
     if cmd:
         if store_user:
-            mem.append_message(session_id, "user", text, meta={"slash": True})
+            if private:
+                mem.append_message(store_sid, "user", text, meta={"slash": True, "private": True})
+            else:
+                mem.append_message(session_id, "user", text, meta={"slash": True})
         result = execute_slash(text, mem, session_id=session_id)
-        # log system reply for slash outcome
-        mem.append_message(
-            session_id,
-            "system",
-            json.dumps(
-                {
-                    "slash_result": result.get("command") or cmd,
-                    "ok": result.get("ok"),
-                    "message": result.get("message") or result.get("error"),
-                },
-                default=str,
-            )[:2000],
-            meta={"slash_result": True},
-        )
+        # system reply — redacted when private
+        if private:
+            mem.append_message(
+                store_sid,
+                "system",
+                redact_log("slash", ctx, command=result.get("command") or cmd, ok=result.get("ok")),
+                meta={"slash_result": True, "private": True},
+            )
+        else:
+            mem.append_message(
+                session_id,
+                "system",
+                json.dumps(
+                    {
+                        "slash_result": result.get("command") or cmd,
+                        "ok": result.get("ok"),
+                        "message": result.get("message") or result.get("error"),
+                    },
+                    default=str,
+                )[:2000],
+                meta={"slash_result": True},
+            )
+        result["private"] = private
         return result
 
     if store_user and text:
-        mem.append_message(session_id, "user", text)
-        append_working_note(session_id, text[:200])
-    return {"ok": True, "not_a_command": True, "stored": bool(text)}
+        mem.append_message(store_sid, "user", text, meta={"private": private} if private else None)
+        if not private:
+            append_working_note(session_id, text[:200])
+        else:
+            # working notes: no content snapshot in private mode
+            append_working_note(session_id, "[private] note redacted")
+    return {"ok": True, "not_a_command": True, "stored": bool(text), "private": private}

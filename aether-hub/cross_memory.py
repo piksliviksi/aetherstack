@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from memory import MemoryStore
+from privacy import is_project_private
 
 # Known LLM-native / agent artifact locations (relative to project root)
 LLM_NATIVE_DIRS = [
@@ -128,6 +129,17 @@ def scan_project_tree(
         return {"error": f"not a directory: {root}", "path": str(root)}
 
     pid = _project_id(str(root))
+    if is_project_private(project_id=pid, path=str(root)):
+        return {
+            "error": "project_private",
+            "message": "Project is in private state; excluded from cross-project index.",
+            "path": str(root),
+            "project_id": pid,
+            "chunk_count": 0,
+            "chunks": [],
+            "sources": [],
+            "private": True,
+        }
     chunks: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
     file_count = 0
@@ -249,6 +261,15 @@ def index_scan(
 ) -> dict[str, Any]:
     """Index scan chunks into xref vector memory."""
     pid = scan.get("project_id") or _project_id(scan.get("path") or "unknown")
+    if is_project_private(project_id=pid, path=scan.get("path")):
+        return {
+            "ok": False,
+            "error": "project_private",
+            "message": "Private projects are never written to the common xref pool.",
+            "project_id": pid,
+            "indexed": 0,
+            "private": True,
+        }
     chunks = scan.get("chunks") or []
     indexed = 0
     kinds: dict[str, int] = {}

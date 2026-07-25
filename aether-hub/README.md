@@ -42,8 +42,10 @@ Writes `.aetherstack/system-scan.json` and feeds recommendations into the hub UI
 | POST | `/api/xref/index` | Index host-built scan payload |
 | POST | `/api/xref/search` | Search sessions/code/research across projects |
 | POST | `/api/xref/pull` | Auto-build `prompt_block` of tested concepts/code |
+| GET\|POST | `/api/privacy` | Private project/model isolation (persistent until release) |
+| POST | `/api/privacy/release` | Leave private state; no merge into common pool |
 
-Guide: [docs/CROSS-MEMORY.md](../docs/CROSS-MEMORY.md) · host scan: `scripts/scan-cross-projects.ps1`
+Guides: [docs/CROSS-MEMORY.md](../docs/CROSS-MEMORY.md) · [docs/PRIVATE-MODE.md](../docs/PRIVATE-MODE.md)
 
 ### Route example
 
