@@ -68,6 +68,14 @@ from slash_commands import (  # noqa: E402
     maybe_handle_message,
     register_task,
 )
+from cross_memory import (  # noqa: E402
+    cross_search,
+    get_xref_state,
+    index_scan,
+    pull_context,
+    scan_and_index_paths,
+    set_xref_state,
+)
 
 try:
     import redis as redis_lib
@@ -91,7 +99,12 @@ def _redis_client():
     if redis_lib is None:
         return None
     try:
-        r = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
+        r = redis_lib.Redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=1.5,
+            socket_timeout=3,
+        )
         r.ping()
         return r
     except Exception:
@@ -253,6 +266,11 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "service": "aether-hub",
                     "memory": _memory.health(),
+                    "xref": {
+                        "multi_project": get_xref_state().get("multi_project"),
+                        "project_count": get_xref_state().get("project_count"),
+                        "auto_pull": get_xref_state().get("auto_pull"),
+                    },
                     "matrix_ts": get_snapshot().get("ts"),
                     "discover": d.get("summary"),
                 },
@@ -386,6 +404,9 @@ class Handler(BaseHTTPRequestHandler):
             sid = path[len("/api/sessions/") : -len("/status")].strip("/") or "default"
             self._send(200, cmd_status(sid, _memory))
             return
+        if path in ("/api/xref", "/api/cross-memory"):
+            self._send(200, get_xref_state())
+            return
         self._send(404, {"error": "not found", "paths": _paths()})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -393,6 +414,88 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         body = self._read_json()
 
+        if path in ("/api/xref", "/api/cross-memory"):
+            try:
+                self._send(200, set_xref_state(body or {}))
+            except Exception as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path in ("/api/xref/scan", "/api/cross-memory/scan"):
+            paths = body.get("paths") or body.get("path") or []
+            if isinstance(paths, str):
+                paths = [paths]
+            if not paths:
+                self._send(400, {"error": "paths required (list of project roots)"})
+                return
+            try:
+                self._send(
+                    200,
+                    scan_and_index_paths(
+                        _memory,
+                        [str(p) for p in paths],
+                        max_files=int(body.get("max_files") or 80),
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/xref/index", "/api/cross-memory/index"):
+            # Host-side scan payload: {scan: {...}} or raw scan dict with chunks
+            scan = body.get("scan") if isinstance(body.get("scan"), dict) else body
+            if not isinstance(scan, dict) or not (scan.get("chunks") or scan.get("project_id") or scan.get("path")):
+                self._send(400, {"error": "scan payload required (chunks + path/project_id)"})
+                return
+            try:
+                self._send(
+                    200,
+                    index_scan(
+                        _memory,
+                        scan,
+                        replace_project=bool(body.get("replace_project", True)),
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/xref/search", "/api/cross-memory/search"):
+            q = (body.get("query") or body.get("q") or "").strip()
+            if not q:
+                self._send(400, {"error": "query required"})
+                return
+            try:
+                self._send(
+                    200,
+                    cross_search(
+                        _memory,
+                        q,
+                        kinds=body.get("kinds"),
+                        project_ids=body.get("project_ids") or body.get("projects"),
+                        top_k=int(body.get("top_k") or 10),
+                        require_multi=bool(body.get("require_multi", True)),
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/xref/pull", "/api/cross-memory/pull"):
+            q = (body.get("query") or body.get("q") or body.get("goal") or "").strip()
+            if not q:
+                self._send(400, {"error": "query required"})
+                return
+            try:
+                self._send(
+                    200,
+                    pull_context(
+                        _memory,
+                        q,
+                        kinds=body.get("kinds"),
+                        top_k=body.get("top_k") or body.get("max_pull"),
+                        as_prompt_block=bool(body.get("as_prompt_block", True)),
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
         if path in ("/api/slash", "/api/commands"):
             text = body.get("text") or body.get("command") or ""
             sid = body.get("session_id") or body.get("session") or "default"
@@ -569,6 +672,44 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 plan = plan_event(get_snapshot(), body or {})
                 sid = body.get("session_id") or body.get("session") or "default"
+                # Auto-pull cross-project concepts/code/research when multi-project is on
+                xref = get_xref_state()
+                want_pull = body.get("xref_pull")
+                if want_pull is None:
+                    want_pull = bool(xref.get("multi_project") and xref.get("auto_pull", True))
+                if want_pull:
+                    goal_text = (
+                        (plan.get("goal") or {}).get("text")
+                        or body.get("goal")
+                        or body.get("query")
+                        or ""
+                    )
+                    if goal_text:
+                        try:
+                            pulled = pull_context(
+                                _memory,
+                                str(goal_text)[:500],
+                                kinds=body.get("xref_kinds"),
+                                top_k=body.get("xref_max") or xref.get("max_pull"),
+                            )
+                            plan["xref_pull"] = {
+                                "ok": pulled.get("ok"),
+                                "hit_count": pulled.get("hit_count") or len(pulled.get("hits") or []),
+                                "message": pulled.get("message"),
+                                "prompt_block": pulled.get("prompt_block") or "",
+                                "hits": (pulled.get("hits") or [])[:5],
+                            }
+                            if pulled.get("prompt_block") and body.get("remember", True):
+                                _memory.upsert_vector(
+                                    text=pulled["prompt_block"][:6000],
+                                    namespace=f"session-context:{sid}",
+                                    meta={
+                                        "kind": "xref_pull",
+                                        "query": str(goal_text)[:200],
+                                    },
+                                )
+                        except Exception as xe:
+                            plan["xref_pull"] = {"ok": False, "error": str(xe)}
                 # Store plan briefly in memory namespace for multi-agent continuity
                 if body.get("remember", True):
                     _memory.upsert_vector(
@@ -716,6 +857,11 @@ def _paths() -> list[str]:
         "/api/sync",
         "POST /api/memory/vectors",
         "POST /api/memory/search",
+        "GET|POST /api/xref          ← multi-project cross memory (off by default)",
+        "POST /api/xref/scan         {paths:[...]}  (if hub can read paths)",
+        "POST /api/xref/index        host scan payload {chunks, path, …}",
+        "POST /api/xref/search       {query, kinds?}",
+        "POST /api/xref/pull         {query} → prompt_block for injection",
     ]
 
 
@@ -783,11 +929,59 @@ def _index_html() -> bytes:
   <a href="/api/modes">/api/modes</a> ·
   <a href="/api/combos">/api/combos</a> ·
   <a href="/api/pipelines">/api/pipelines</a> ·
+  <a href="/api/xref">/api/xref</a> ·
   <a href="/graph"><b>node canvas</b></a> ·
   <a href="/api/matrix">matrix</a> ·
   <a href="/api/health">health</a>
  </div>
 </div>
+<div class="card" id="xrefCard">
+ <b>Cross-project memory</b> — scan LLM-native folders (.claude, .continue, .cursor, …) · multi-project pull
+ <div class="muted" id="xrefState">…</div>
+ <div style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center">
+  <button type="button" onclick="xrefMulti(true)">multi-project ON</button>
+  <button type="button" onclick="xrefMulti(false)">OFF</button>
+  <button type="button" onclick="xrefAuto(true)">auto-pull ON</button>
+  <button type="button" onclick="xrefAuto(false)">auto-pull OFF</button>
+  <input id="xrefQ" type="text" placeholder="search or pull query" style="flex:1;min-width:140px;background:#0b1020;border:1px solid #243056;color:#e8eefc;padding:.3rem .5rem;border-radius:6px" />
+  <button type="button" onclick="xrefSearch()">search</button>
+  <button type="button" onclick="xrefPull()">pull</button>
+ </div>
+ <pre id="xrefOut" class="muted" style="white-space:pre-wrap;max-height:10rem;overflow:auto;font-size:11px"></pre>
+ <div class="muted">Host index (Docker cannot see Windows paths): <code>.\\scripts\\scan-cross-projects.ps1 -Paths D:\\code\\app -EnableMultiProject</code> · docs/CROSS-MEMORY.md</div>
+</div>
+<script>
+async function refreshXref(){{
+  try {{
+    const j = await fetch('/api/xref').then(r=>r.json());
+    const projs = Object.keys(j.projects||{{}});
+    document.getElementById('xrefState').textContent =
+      'multi_project='+j.multi_project+' · auto_pull='+j.auto_pull+' · projects='+(j.project_count||0)+
+      (projs.length?(' · '+projs.slice(0,6).join(', ')):'');
+  }} catch(e) {{
+    document.getElementById('xrefState').textContent = 'xref unavailable';
+  }}
+}}
+async function xrefMulti(v){{
+  await fetch('/api/xref',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{multi_project:v}})}});
+  refreshXref();
+}}
+async function xrefAuto(v){{
+  await fetch('/api/xref',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{auto_pull:v}})}});
+  refreshXref();
+}}
+async function xrefSearch(){{
+  const q = document.getElementById('xrefQ').value || 'tested concept';
+  const j = await fetch('/api/xref/search',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{query:q,top_k:8}})}}).then(r=>r.json());
+  document.getElementById('xrefOut').textContent = JSON.stringify(j,null,2).slice(0,3500);
+}}
+async function xrefPull(){{
+  const q = document.getElementById('xrefQ').value || 'tested concept';
+  const j = await fetch('/api/xref/pull',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{query:q}})}}).then(r=>r.json());
+  document.getElementById('xrefOut').textContent = (j.prompt_block||JSON.stringify(j,null,2)).slice(0,4000);
+}}
+refreshXref();
+</script>
 <div class="card" id="pipeCard">
  <b>Pipeline scripts</b> — research → critique → build → test (tier/cost per stage)
  <div class="muted" id="pipeList">…</div>
@@ -1014,6 +1208,7 @@ def main() -> None:
     print("  MODES:  GET|POST /api/modes   (inline|multi_agent, token_saver)")
     print("  PLAN:   POST /api/agents/plan (multi-LLM event)")
     print("  SLASH:  POST /api/slash  {\"text\":\"/clear\"}  (archive→clear)")
+    print("  XREF:   GET|POST /api/xref  (multi-project memory; off by default)")
     print("  GRAPH:  http://{HOST}:{PORT}/graph  (node canvas)".format(HOST=HOST, PORT=PORT))
     print("  ROUTE:  GET /api/route?need=code&prefer=local")
     print(f"  redis:  {REDIS_URL}  backend={_memory.backend}")

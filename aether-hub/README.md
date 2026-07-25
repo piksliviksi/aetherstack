@@ -37,6 +37,13 @@ Writes `.aetherstack/system-scan.json` and feeds recommendations into the hub UI
 | GET | `/api/memory/sessions/{id}` | Read session |
 | POST | `/api/memory/vectors` | Upsert text (+ embedding) |
 | POST | `/api/memory/search` | Vector similarity search |
+| GET\|POST | `/api/xref` | Multi-project cross memory state (off by default) |
+| POST | `/api/xref/scan` | Scan project paths (if readable) + index |
+| POST | `/api/xref/index` | Index host-built scan payload |
+| POST | `/api/xref/search` | Search sessions/code/research across projects |
+| POST | `/api/xref/pull` | Auto-build `prompt_block` of tested concepts/code |
+
+Guide: [docs/CROSS-MEMORY.md](../docs/CROSS-MEMORY.md) · host scan: `scripts/scan-cross-projects.ps1`
 
 ### Route example
 
