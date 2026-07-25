@@ -107,3 +107,5 @@ Survives hub restart until release.
 - [AGENT-MEMORY.md](./AGENT-MEMORY.md)  
 - [CROSS-MEMORY.md](./CROSS-MEMORY.md)  
 - [SLASH-COMMANDS.md](./SLASH-COMMANDS.md)  
+- Enterprise multi-user silo (planned): [FUTURE.md](./FUTURE.md)  
+
