@@ -1,0 +1,31 @@
+{
+  "schema": "aetherstack.combo.v1",
+  "id": "research",
+  "label": "Research",
+  "description": "Deep analysis — high-tier mastermind + supervisor, medium workers",
+  "exported_at": "2026-07-25T00:00:00Z",
+  "source": "aetherstack/combos",
+  "mode": "multi_agent",
+  "token_saver": false,
+  "workers": 3,
+  "roles": {
+    "mastermind": {
+      "model": "claude-opus-4",
+      "maker": "anthropic",
+      "fallbacks": ["o3", "grok-4.5"]
+    },
+    "supervisor": {
+      "model": "grok-4.5",
+      "maker": "xai",
+      "fallbacks": ["gpt-4.1", "claude-sonnet-4"]
+    },
+    "worker": {
+      "model": "gemini-2.5-pro",
+      "maker": "google",
+      "fallbacks": ["claude-sonnet-4", "gpt-4.1"]
+    }
+  },
+  "good_for": ["surveys", "architecture", "long_context"],
+  "requires_keys": ["ANTHROPIC_API_KEY", "XAI_API_KEY", "GOOGLE_API_KEY"],
+  "optional_keys": ["OPENAI_API_KEY"]
+}

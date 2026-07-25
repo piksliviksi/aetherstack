@@ -1,0 +1,20 @@
+{
+  "schema": "aetherstack.combo.v1",
+  "id": "inline_fable",
+  "label": "Inline Fable Low",
+  "description": "Single local model — free & private (Metal on Mac ARM, ROCm on AMD, CUDA on NVIDIA)",
+  "exported_at": "2026-07-25T00:00:00Z",
+  "source": "aetherstack/combos",
+  "mode": "inline",
+  "token_saver": true,
+  "roles": {
+    "inline": {
+      "model": "local-default",
+      "tier": "local",
+      "fallbacks": ["local-tiny"]
+    }
+  },
+  "good_for": ["offline", "mac_arm", "budget", "private"],
+  "requires_keys": [],
+  "local_models": ["tinyllama"]
+}

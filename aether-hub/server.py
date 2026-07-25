@@ -29,6 +29,15 @@ from bootstrap import (  # noqa: E402
     plan_and_maybe_apply,
     set_bootstrap_state,
 )
+from combos import (  # noqa: E402
+    export_combo,
+    get_combo,
+    guide_table,
+    import_combo,
+    launch_combo,
+    list_combos,
+    plan_with_combo,
+)
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
@@ -256,6 +265,29 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if path in ("/api/combos", "/api/combo"):
+            self._send(200, list_combos())
+            return
+        if path == "/api/combos/guide":
+            self._send(200, guide_table())
+            return
+        if path.startswith("/api/combos/") and path.endswith("/export"):
+            cid = path[len("/api/combos/") : -len("/export")].strip("/")
+            try:
+                write = (qs.get("write") or ["0"])[0] in ("1", "true", "yes")
+                self._send(200, export_combo(cid, write_file=write))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            return
+        if path.startswith("/api/combos/") and not path.endswith("/launch") and not path.endswith("/plan"):
+            cid = path[len("/api/combos/") :].strip("/")
+            if cid and cid not in ("import", "guide"):
+                c = get_combo(cid)
+                if c:
+                    self._send(200, c)
+                else:
+                    self._send(404, {"error": f"unknown combo: {cid}"})
+                return
         if path.startswith("/api/memory/sessions/"):
             sid = path[len("/api/memory/sessions/") :].strip("/")
             if not sid:
@@ -310,6 +342,29 @@ class Handler(BaseHTTPRequestHandler):
                 dry_run=dry,
             )
             self._send(200, {"plan": plan, "run": run, "state": get_bootstrap_state()})
+            return
+        if path in ("/api/combos/import", "/api/combo/import"):
+            try:
+                raw = body.get("combo") if isinstance(body.get("combo"), dict) else body
+                self._send(200, import_combo(raw, persist=bool(body.get("persist", True))))
+            except (ValueError, json.JSONDecodeError) as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path.startswith("/api/combos/") and path.endswith("/launch"):
+            cid = path[len("/api/combos/") : -len("/launch")].strip("/")
+            try:
+                self._send(200, launch_combo(cid, get_snapshot()))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            return
+        if path.startswith("/api/combos/") and path.endswith("/plan"):
+            cid = path[len("/api/combos/") : -len("/plan")].strip("/")
+            try:
+                self._send(200, plan_with_combo(cid, get_snapshot(), body or {}))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
             return
         if path in ("/api/agents/plan", "/api/agents/event"):
             try:
@@ -422,6 +477,11 @@ def _paths() -> list[str]:
         "POST /api/agents/plan       ← multi-LLM event plan",
         "GET|POST /api/bootstrap     ← optional auto-install plan (off by default)",
         "POST /api/bootstrap/run     ← {confirm, dry_run, only_safe}",
+        "GET  /api/combos            ← tiers + situation packs",
+        "POST /api/combos/{id}/launch",
+        "POST /api/combos/{id}/plan",
+        "GET  /api/combos/{id}/export",
+        "POST /api/combos/import",
         "/api/health",
         "/api/matrix",
         "/api/route?need=code&prefer=local",
@@ -493,11 +553,46 @@ def _index_html() -> bytes:
   <a href="/api/discover">/api/discover</a> ·
   <a href="/api/discover?refresh=1">refresh</a> ·
   <a href="/api/modes">/api/modes</a> ·
+  <a href="/api/combos">/api/combos</a> ·
+  <a href="/api/combos/guide">guide</a> ·
   <a href="/api/matrix">matrix</a> ·
-  <a href="/api/route?need=code&prefer=local">route code</a> ·
   <a href="/api/health">health</a>
  </div>
 </div>
+<div class="card" id="combosCard">
+ <b>Combos</b> — Fable low / Sonnet / Opus / GPT · situations (coding, research, testing)
+ <div class="muted" id="combosList">…</div>
+ <div style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.35rem" id="comboBtns"></div>
+ <div class="muted">Export JSON from GitHub <code>combos/export/*.aether-combo.json</code> · import via POST /api/combos/import</div>
+</div>
+<script>
+async function refreshCombos(){{
+  try {{
+    const j = await fetch('/api/combos').then(r=>r.json());
+    const sits = Object.keys(j.situations||{{}});
+    const tiers = Object.keys(j.tiers||{{}});
+    document.getElementById('combosList').textContent =
+      'situations: '+sits.join(', ')+' · tiers: '+tiers.slice(0,6).join(', ')+'…';
+    const box = document.getElementById('comboBtns');
+    box.innerHTML = '';
+    for (const id of sits.slice(0,8)) {{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = id;
+      b.onclick = () => launchCombo(id);
+      box.appendChild(b);
+    }}
+  }} catch(e) {{
+    document.getElementById('combosList').textContent = 'combos unavailable';
+  }}
+}}
+async function launchCombo(id){{
+  const j = await fetch('/api/combos/'+encodeURIComponent(id)+'/launch',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:'{{}}'}}).then(r=>r.json());
+  alert('Launched '+id+' · mode='+(j.runtime&&j.runtime.mode)+' · token_saver='+(j.runtime&&j.runtime.token_saver));
+  if (typeof refreshModes==='function') refreshModes();
+}}
+refreshCombos();
+</script>
 <div class="card" id="modesCard">
  <b>Agent mode</b> · token saver (optional) · multi-LLM roles
  <div class="muted" style="margin-top:.35rem" id="modesRuntime">loading…</div>
