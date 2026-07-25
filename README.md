@@ -23,6 +23,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Orchestration | Combos, pipelines, node canvas by role / tier / cost |
 | Spend control | Token saver, tier caps, `/done` → `/clear` |
 | Memory | Archive on clear; multi-project pull when enabled |
+| Private mode | Project/model flag → isolated vault; no common pool/logs until release |
 | Hardware | Host Ollama on Metal / ROCm CUs / CUDA; Docker = control plane |
 | Portability | Export/import combos, pipelines, graphs |
 
@@ -88,6 +89,7 @@ Procedure: [docs/QUICKSTART.md](./docs/QUICKSTART.md)
 | Combos / pipelines / graph | [combos/](./combos/) · [docs/PIPELINES.md](./docs/PIPELINES.md) · [docs/NODE-GRAPH.md](./docs/NODE-GRAPH.md) |
 | Agent modes | [docs/AGENT-MODES.md](./docs/AGENT-MODES.md) |
 | Memory / multi-project | [docs/AGENT-MEMORY.md](./docs/AGENT-MEMORY.md) · [docs/CROSS-MEMORY.md](./docs/CROSS-MEMORY.md) |
+| Private isolation | [docs/PRIVATE-MODE.md](./docs/PRIVATE-MODE.md) |
 | Slash hygiene | [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md) |
 | Gateway aliases | [docs/GATEWAY.md](./docs/GATEWAY.md) |
 | GPU | [docs/GPU-NVIDIA.md](./docs/GPU-NVIDIA.md) · [docs/AMD-COMPUTE.md](./docs/AMD-COMPUTE.md) · [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md) · [docs/GPU-INTEL.md](./docs/GPU-INTEL.md) |

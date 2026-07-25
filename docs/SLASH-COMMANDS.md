@@ -17,6 +17,7 @@ Hub session commands. Order of operations is fixed:
 | `/clear force` | Archive then clear with open tasks |
 | `/compact` | Archive then clear; keep short summary line |
 | `/context` | Working summary + recent messages |
+| `/private` | Private vault  ·  `/private on [path]`  ·  `/private status`  ·  `/private release <id>` |
 
 ---
 

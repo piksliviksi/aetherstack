@@ -76,6 +76,17 @@ from cross_memory import (  # noqa: E402
     scan_and_index_paths,
     set_xref_state,
 )
+from privacy import (  # noqa: E402
+    apply_privacy_patch,
+    force_private_namespace,
+    get_privacy_state,
+    is_common_namespace,
+    is_session_private,
+    load_from_redis as privacy_load_redis,
+    private_session_key,
+    redact_log,
+    resolve_private_context,
+)
 
 try:
     import redis as redis_lib
@@ -109,6 +120,13 @@ def _redis_client():
         return r
     except Exception:
         return None
+
+
+# Restore privacy registry from Redis (after helper is defined)
+try:
+    privacy_load_redis(_redis_client())
+except Exception:
+    pass
 
 
 def get_host_scan() -> dict:
@@ -271,6 +289,10 @@ class Handler(BaseHTTPRequestHandler):
                         "project_count": get_xref_state().get("project_count"),
                         "auto_pull": get_xref_state().get("auto_pull"),
                     },
+                    "privacy": {
+                        "private_project_count": get_privacy_state().get("private_project_count"),
+                        "private_model_count": get_privacy_state().get("private_model_count"),
+                    },
                     "matrix_ts": get_snapshot().get("ts"),
                     "discover": d.get("summary"),
                 },
@@ -346,10 +368,33 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "session id required"})
                 return
             limit = int((qs.get("limit") or ["50"])[0])
-            self._send(200, {"session_id": sid, "messages": _memory.get_session(sid, limit=limit)})
+            ctx = resolve_private_context(session_id=sid)
+            store_sid = (
+                private_session_key(sid, ctx.get("project_id")) if ctx.get("private") else sid
+            )
+            self._send(
+                200,
+                {
+                    "session_id": sid,
+                    "store_session": store_sid,
+                    "private": ctx.get("private"),
+                    "messages": _memory.get_session(store_sid, limit=limit),
+                },
+            )
             return
         if path == "/api/memory/stats":
             ns = (qs.get("namespace") or ["default"])[0]
+            # Never report private vault stats via bare common stats without context
+            if str(ns).startswith("private:") and not (qs.get("private") or ["0"])[0] in (
+                "1",
+                "true",
+                "yes",
+            ):
+                self._send(
+                    403,
+                    {"error": "private_vault_stats_require_private=1", "namespace": ns},
+                )
+                return
             self._send(200, _memory.stats(ns))
             return
         if path in ("/api/slash", "/api/commands"):
@@ -407,6 +452,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/xref", "/api/cross-memory"):
             self._send(200, get_xref_state())
             return
+        if path in ("/api/privacy", "/api/private"):
+            self._send(200, get_privacy_state())
+            return
         self._send(404, {"error": "not found", "paths": _paths()})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -414,6 +462,34 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         body = self._read_json()
 
+        if path in ("/api/privacy", "/api/private"):
+            try:
+                self._send(
+                    200,
+                    apply_privacy_patch(
+                        body or {},
+                        redis_client=_redis_client(),
+                        mem=_memory,
+                    ),
+                )
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/privacy/release", "/api/private/release"):
+            try:
+                patch = dict(body or {})
+                patch["release"] = True
+                self._send(
+                    200,
+                    apply_privacy_patch(patch, redis_client=_redis_client(), mem=_memory),
+                )
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
         if path in ("/api/xref", "/api/cross-memory"):
             try:
                 self._send(200, set_xref_state(body or {}))
@@ -672,11 +748,32 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 plan = plan_event(get_snapshot(), body or {})
                 sid = body.get("session_id") or body.get("session") or "default"
+                # Privacy: private sessions/models never hit common xref or agent-events
+                priv = resolve_private_context(
+                    session_id=sid,
+                    project_id=body.get("project_id"),
+                    path=body.get("path"),
+                    model=body.get("model")
+                    or ((plan.get("models_in_event") or [None])[0] if plan else None),
+                    private_flag=body.get("private"),
+                )
+                plan["privacy"] = {
+                    "private": priv.get("private"),
+                    "reasons": priv.get("reasons"),
+                    "project_id": priv.get("project_id"),
+                }
                 # Auto-pull cross-project concepts/code/research when multi-project is on
                 xref = get_xref_state()
                 want_pull = body.get("xref_pull")
                 if want_pull is None:
                     want_pull = bool(xref.get("multi_project") and xref.get("auto_pull", True))
+                if priv.get("private"):
+                    want_pull = False
+                    plan["xref_pull"] = {
+                        "ok": False,
+                        "skipped": "private_mode",
+                        "message": "Cross-project pull disabled for private sessions/models.",
+                    }
                 if want_pull:
                     goal_text = (
                         (plan.get("goal") or {}).get("text")
@@ -699,7 +796,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "prompt_block": pulled.get("prompt_block") or "",
                                 "hits": (pulled.get("hits") or [])[:5],
                             }
-                            if pulled.get("prompt_block") and body.get("remember", True):
+                            if pulled.get("prompt_block") and body.get("remember", True) and not priv.get("private"):
                                 _memory.upsert_vector(
                                     text=pulled["prompt_block"][:6000],
                                     namespace=f"session-context:{sid}",
@@ -710,22 +807,39 @@ class Handler(BaseHTTPRequestHandler):
                                 )
                         except Exception as xe:
                             plan["xref_pull"] = {"ok": False, "error": str(xe)}
-                # Store plan briefly in memory namespace for multi-agent continuity
+                # Store plan briefly — private: vault only, redacted goal
                 if body.get("remember", True):
-                    _memory.upsert_vector(
-                        text=json.dumps(
-                            {
+                    if priv.get("private"):
+                        vault_ns = force_private_namespace("agent-events", priv)
+                        _memory.upsert_vector(
+                            text=redact_log(
+                                "agent_plan",
+                                priv,
+                                event_id=plan.get("event_id"),
+                                mode=plan.get("mode"),
+                            ),
+                            namespace=vault_ns,
+                            meta={
                                 "event_id": plan.get("event_id"),
                                 "mode": plan.get("mode"),
-                                "models": plan.get("models_in_event") or [
-                                    a.get("model") for a in plan.get("agents") or []
-                                ],
-                                "goal": (plan.get("goal") or {}).get("text", "")[:500],
-                            }
-                        ),
-                        namespace="agent-events",
-                        meta={"event_id": plan.get("event_id"), "mode": plan.get("mode")},
-                    )
+                                "private": True,
+                            },
+                        )
+                    else:
+                        _memory.upsert_vector(
+                            text=json.dumps(
+                                {
+                                    "event_id": plan.get("event_id"),
+                                    "mode": plan.get("mode"),
+                                    "models": plan.get("models_in_event") or [
+                                        a.get("model") for a in plan.get("agents") or []
+                                    ],
+                                    "goal": (plan.get("goal") or {}).get("text", "")[:500],
+                                }
+                            ),
+                            namespace="agent-events",
+                            meta={"event_id": plan.get("event_id"), "mode": plan.get("mode")},
+                        )
                 # Track as open task so /clear waits until /done
                 if body.get("track_task", True):
                     goal = (plan.get("goal") or {}).get("text") or body.get("goal") or "agent event"
@@ -775,27 +889,92 @@ class Handler(BaseHTTPRequestHandler):
             if not content:
                 self._send(400, {"error": "content required"})
                 return
-            msg = _memory.append_message(sid, role, content, body.get("meta"))
-            if body.get("index", True):
+            ctx = resolve_private_context(
+                session_id=sid,
+                project_id=body.get("project_id"),
+                path=body.get("path"),
+                model=body.get("model"),
+                private_flag=body.get("private"),
+            )
+            store_sid = (
+                private_session_key(sid, ctx.get("project_id")) if ctx.get("private") else sid
+            )
+            meta = dict(body.get("meta") or {})
+            meta["private"] = bool(ctx.get("private"))
+            msg = _memory.append_message(store_sid, role, content, meta)
+            # Index into common pool only when not private
+            if body.get("index", True) and not ctx.get("private"):
                 _memory.upsert_vector(
                     text=f"{role}: {content}",
                     namespace=body.get("namespace") or f"session:{sid}",
-                    meta={"session_id": sid, "role": role, **(body.get("meta") or {})},
+                    meta={"session_id": sid, "role": role, **meta},
                 )
-            self._send(200, {"ok": True, "message": msg})
+            elif body.get("index", True) and ctx.get("private"):
+                ns = force_private_namespace(
+                    body.get("namespace") or f"session:{sid}", ctx
+                )
+                _memory.upsert_vector(
+                    text=f"{role}: {content}",
+                    namespace=ns,
+                    meta={"session_id": sid, "role": role, **meta},
+                )
+            out_msg = msg
+            if ctx.get("private"):
+                # Do not echo full content in API response logs path — keep message but flag
+                out_msg = {**msg, "private": True}
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "message": out_msg,
+                    "private": ctx.get("private"),
+                    "store_session": store_sid if ctx.get("private") else sid,
+                    "common_pool": not ctx.get("private"),
+                },
+            )
             return
         if path == "/api/memory/vectors":
             text = body.get("text") or ""
             if not text:
                 self._send(400, {"error": "text required"})
                 return
+            ctx = resolve_private_context(
+                session_id=body.get("session_id"),
+                project_id=body.get("project_id"),
+                path=body.get("path"),
+                model=body.get("model"),
+                private_flag=body.get("private"),
+            )
+            ns = body.get("namespace") or "default"
+            if ctx.get("private"):
+                ns = force_private_namespace(ns, ctx)
+            elif body.get("private") is True:
+                self._send(400, {"error": "private=true requires project_id, session_id, or model"})
+                return
+            # Block accidental common write when private
+            if ctx.get("private") and is_common_namespace(ns) and not str(ns).startswith("private:"):
+                self._send(
+                    403,
+                    {
+                        "error": "private_mode_blocks_common_namespace",
+                        "namespace": ns,
+                        "log": redact_log("vector_upsert_blocked", ctx, namespace=ns),
+                    },
+                )
+                return
             res = _memory.upsert_vector(
                 text=text,
-                namespace=body.get("namespace") or "default",
-                meta=body.get("meta"),
+                namespace=ns,
+                meta={
+                    **(body.get("meta") or {}),
+                    "private": bool(ctx.get("private")),
+                    "project_id": ctx.get("project_id"),
+                },
                 id=body.get("id"),
                 embedding=body.get("embedding"),
             )
+            res["private"] = bool(ctx.get("private"))
+            res["common_pool"] = not ctx.get("private")
             self._send(200, res)
             return
         if path == "/api/memory/search":
@@ -803,12 +982,34 @@ class Handler(BaseHTTPRequestHandler):
             if not q:
                 self._send(400, {"error": "query required"})
                 return
+            ctx = resolve_private_context(
+                session_id=body.get("session_id"),
+                project_id=body.get("project_id"),
+                path=body.get("path"),
+                model=body.get("model"),
+                private_flag=body.get("private"),
+            )
+            ns = body.get("namespace") or "default"
+            # Private clients may only search their vault unless they explicitly leave private
+            if ctx.get("private"):
+                ns = force_private_namespace(ns, ctx)
+            # Common search never scans private: namespaces (isolation)
+            if not ctx.get("private") and str(ns).startswith("private:"):
+                self._send(
+                    403,
+                    {
+                        "error": "private_vault_not_readable_from_common",
+                        "message": "Release project or pass matching private session/project context.",
+                    },
+                )
+                return
             res = _memory.search(
                 query=q,
-                namespace=body.get("namespace") or "default",
+                namespace=ns,
                 top_k=int(body.get("top_k") or 5),
                 embedding=body.get("embedding"),
             )
+            res["private"] = bool(ctx.get("private"))
             self._send(200, res)
             return
         self._send(404, {"error": "not found"})
@@ -862,6 +1063,8 @@ def _paths() -> list[str]:
         "POST /api/xref/index        host scan payload {chunks, path, …}",
         "POST /api/xref/search       {query, kinds?}",
         "POST /api/xref/pull         {query} → prompt_block for injection",
+        "GET|POST /api/privacy       ← private project/model isolation (persistent)",
+        "POST /api/privacy/release   {project_id, purge_vault?}",
     ]
 
 
@@ -930,11 +1133,63 @@ def _index_html() -> bytes:
   <a href="/api/combos">/api/combos</a> ·
   <a href="/api/pipelines">/api/pipelines</a> ·
   <a href="/api/xref">/api/xref</a> ·
+  <a href="/api/privacy">/api/privacy</a> ·
   <a href="/graph"><b>node canvas</b></a> ·
   <a href="/api/matrix">matrix</a> ·
   <a href="/api/health">health</a>
  </div>
 </div>
+<div class="card" id="privCard">
+ <b>Private mode</b> — isolated vault; no common session/xref/index/logs content
+ <div class="muted" id="privState">…</div>
+ <div style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center">
+  <input id="privPath" type="text" placeholder="project path or name" style="flex:1;min-width:140px;background:#0b1020;border:1px solid #243056;color:#e8eefc;padding:.3rem .5rem;border-radius:6px" />
+  <input id="privModel" type="text" placeholder="model alias (optional)" style="min-width:120px;background:#0b1020;border:1px solid #243056;color:#e8eefc;padding:.3rem .5rem;border-radius:6px" />
+  <button type="button" onclick="privOn()">set private</button>
+  <button type="button" onclick="privRelease()">release</button>
+  <button type="button" onclick="refreshPriv()">refresh</button>
+ </div>
+ <pre id="privOut" class="muted" style="white-space:pre-wrap;max-height:8rem;overflow:auto;font-size:11px"></pre>
+ <div class="muted">Persists until release. Release does not merge vault into common pool. docs/PRIVATE-MODE.md</div>
+</div>
+<script>
+async function refreshPriv(){{
+  try {{
+    const j = await fetch('/api/privacy').then(r=>r.json());
+    document.getElementById('privState').textContent =
+      'projects='+(j.private_project_count||0)+' · models='+(j.private_model_count||0);
+    document.getElementById('privOut').textContent = JSON.stringify(j,null,2).slice(0,2500);
+  }} catch(e) {{
+    document.getElementById('privState').textContent = 'privacy unavailable';
+  }}
+}}
+async function privOn(){{
+  const path = document.getElementById('privPath').value;
+  const model = document.getElementById('privModel').value;
+  const body = {{private:true, session_id:'ui'}};
+  if (path) body.path = path;
+  if (model) body.model = model;
+  if (!path && !model) body.path = 'ui-private-session';
+  const j = await fetch('/api/privacy',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}}).then(r=>r.json());
+  document.getElementById('privOut').textContent = JSON.stringify(j,null,2).slice(0,2500);
+  refreshPriv();
+}}
+async function privRelease(){{
+  const path = document.getElementById('privPath').value;
+  let st = await fetch('/api/privacy').then(r=>r.json());
+  let pid = Object.keys(st.projects||{{}})[0];
+  if (path && st.projects) {{
+    for (const [id,p] of Object.entries(st.projects)) {{
+      if ((p.path||'').includes(path) || (p.name||'')===path || id===path) pid = id;
+    }}
+  }}
+  if (!pid) {{ document.getElementById('privOut').textContent = 'no private project to release'; return; }}
+  const j = await fetch('/api/privacy/release',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:pid,purge_vault:true}})}}).then(r=>r.json());
+  document.getElementById('privOut').textContent = JSON.stringify(j,null,2).slice(0,2500);
+  refreshPriv();
+}}
+refreshPriv();
+</script>
 <div class="card" id="xrefCard">
  <b>Cross-project memory</b> — scan LLM-native folders (.claude, .continue, .cursor, …) · multi-project pull
  <div class="muted" id="xrefState">…</div>
@@ -1209,6 +1464,7 @@ def main() -> None:
     print("  PLAN:   POST /api/agents/plan (multi-LLM event)")
     print("  SLASH:  POST /api/slash  {\"text\":\"/clear\"}  (archive→clear)")
     print("  XREF:   GET|POST /api/xref  (multi-project memory; off by default)")
+    print("  PRIV:   GET|POST /api/privacy  (private project/model vault; until release)")
     print("  GRAPH:  http://{HOST}:{PORT}/graph  (node canvas)".format(HOST=HOST, PORT=PORT))
     print("  ROUTE:  GET /api/route?need=code&prefer=local")
     print(f"  redis:  {REDIS_URL}  backend={_memory.backend}")
