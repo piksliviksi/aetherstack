@@ -35,15 +35,15 @@ routing:
   prefer_cloud_for: [vision, reason, long_context]
   # Ordered fallbacks when primary is offline
   fallbacks:
-    chat: [local-default, grok-4.5, gpt-4.1, claude-sonnet-4, gemini-2.5-flash]
-    code: [local-default, grok-code, codex, claude-sonnet-4, gpt-4.1]
-    reason: [grok-4.5, o3, claude-opus-4, gemini-2.5-pro, local-default]
-    vision: [gpt-4o, gemini-2.5-pro, claude-sonnet-4]
+    chat: [local-default, grok-4.5, gpt-4.1, claude-sonnet-4, mistral-large, gemini-2.5-flash]
+    code: [local-default, grok-code, codestral, codex, claude-sonnet-4, gpt-4.1]
+    reason: [grok-4.5, o3, claude-opus-4, mistral-large, gemini-2.5-pro, local-default]
+    vision: [gpt-4o, gemini-2.5-pro, pixtral, claude-sonnet-4]
     embed: [local-embed, openai-embed]
     private: [local-default, local-llama, local-tiny]
-    fast: [local-tiny, local-default, grok-4-fast, gpt-4.1-mini, gemini-flash]
-    cheap: [local-default, local-tiny, gpt-4.1-mini, gemini-flash, claude-haiku]
-    long_context: [gemini-2.5-pro, gemini-2.5-flash, claude-sonnet-4, gpt-4.1]
+    fast: [local-tiny, local-default, mistral-small, grok-4-fast, gpt-4.1-mini, gemini-flash]
+    cheap: [local-default, local-tiny, mistral-small, gpt-4.1-mini, gemini-flash, claude-haiku]
+    long_context: [gemini-2.5-pro, gemini-2.5-flash, claude-sonnet-4, mistral-large, gpt-4.1]
   sync:
     # How often hub refreshes Ollama + writes matrix snapshot to Redis (seconds)
     interval_sec: 60
@@ -253,3 +253,64 @@ models:
     cost: low
     latency: low
     requires_env: GOOGLE_API_KEY
+
+  # ── Mistral AI ───────────────────────────────────────────────────
+  mistral:
+    tier: cloud
+    provider: mistral
+    backend: mistral/mistral-large-latest
+    capabilities: [chat, code, tools, reason, long_context]
+    context: 128000
+    cost: high
+    latency: medium
+    requires_env: MISTRAL_API_KEY
+
+  mistral-large:
+    tier: cloud
+    provider: mistral
+    backend: mistral/mistral-large-latest
+    capabilities: [chat, code, tools, reason, long_context]
+    context: 128000
+    cost: high
+    latency: medium
+    requires_env: MISTRAL_API_KEY
+
+  mistral-medium:
+    tier: cloud
+    provider: mistral
+    backend: mistral/mistral-medium-latest
+    capabilities: [chat, code, tools, reason]
+    context: 128000
+    cost: medium
+    latency: medium
+    requires_env: MISTRAL_API_KEY
+
+  mistral-small:
+    tier: cloud
+    provider: mistral
+    backend: mistral/mistral-small-latest
+    capabilities: [chat, code, cheap, fast, tools]
+    context: 128000
+    cost: low
+    latency: low
+    requires_env: MISTRAL_API_KEY
+
+  codestral:
+    tier: cloud
+    provider: mistral
+    backend: mistral/codestral-latest
+    capabilities: [code, chat, tools, cheap]
+    context: 256000
+    cost: medium
+    latency: low
+    requires_env: MISTRAL_API_KEY
+
+  pixtral:
+    tier: cloud
+    provider: mistral
+    backend: mistral/pixtral-large-latest
+    capabilities: [chat, vision, code, tools]
+    context: 128000
+    cost: high
+    latency: medium
+    requires_env: MISTRAL_API_KEY

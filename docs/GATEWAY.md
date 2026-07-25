@@ -26,6 +26,9 @@ Config file: [`litellm_config.yaml`](../litellm_config.yaml).
 | `codex` / `openai-default` | OpenAI GPT-4.1 |
 | `claude` / `claude-sonnet-4` / `claude-opus-4` / `claude-haiku` | Anthropic |
 | `gemini` / `gemini-2.5-pro` / `gemini-2.5-flash` | Google Gemini |
+| `mistral` / `mistral-large` / `mistral-medium` / `mistral-small` | Mistral AI |
+| `codestral` | Mistral Codestral (code) |
+| `pixtral` | Mistral Pixtral (vision) |
 
 ---
 
@@ -37,6 +40,7 @@ Config file: [`litellm_config.yaml`](../litellm_config.yaml).
 | `OPENAI_API_KEY` | OpenAI |
 | `ANTHROPIC_API_KEY` | Anthropic |
 | `GOOGLE_API_KEY` | Gemini |
+| `MISTRAL_API_KEY` | Mistral AI |
 | `LITELLM_MASTER_KEY` | Gateway client auth |
 
 Set only keys for providers in use. Local Ollama does not require a cloud key.

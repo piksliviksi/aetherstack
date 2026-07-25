@@ -76,6 +76,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - AETHER_COMBOS_CATALOG=/combos/catalog.yaml
       - AETHER_COMBOS_EXPORT=/combos/export
       - AETHER_COMBOS_IMPORT=/combos/import
@@ -97,7 +98,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Unified gateway for Grok / OpenAI / Anthropic / local Ollama
+  # Unified gateway for Grok / OpenAI / Anthropic / Gemini / Mistral / local Ollama
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: aether-litellm
@@ -111,6 +112,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       # Required by current LiteLLM for /v1/* — browsers must send Authorization header.
       # Default is for local lab only; change if you expose the port.
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}

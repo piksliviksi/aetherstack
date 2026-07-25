@@ -17,6 +17,9 @@ Shareable **tier presets** and **situation packs** (coding, research, testing, â
 | `medium_sonnet` | Sonnet | `claude-sonnet-4` |
 | `medium_gpt` | GPT-4.1 (flagship track) | `gpt-4.1` |
 | `medium_grok` | Grok 4.5 | `grok-4.5` |
+| `medium_mistral` | Mistral Large | `mistral-large` |
+| `low_mistral` | Mistral Small | `mistral-small` |
+| `codestral_code` | Codestral | `codestral` |
 | `high_opus` | Opus | `claude-opus-4` |
 | `high_o3` | o3 | `o3` |
 | `high_gemini` | Gemini 2.5 Pro | `gemini-2.5-pro` |

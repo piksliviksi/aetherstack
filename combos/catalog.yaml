@@ -91,6 +91,36 @@ tiers:
     fallbacks: [gemini-2.5-flash, claude-sonnet-4]
     cost: medium
 
+  medium_mistral:
+    label: "Mistral Large (medium-high)"
+    tier: medium
+    description: "Mistral AI generalist — chat, code, tools"
+    good_for: [coding, research, chat, tools]
+    model: mistral-large
+    maker: mistral
+    fallbacks: [mistral-medium, codestral, claude-sonnet-4, gpt-4.1]
+    cost: medium_high
+
+  low_mistral:
+    label: "Mistral Small (low)"
+    tier: low
+    description: "Mistral small — fast bulk / cheap cloud"
+    good_for: [bulk, testing, chat]
+    model: mistral-small
+    maker: mistral
+    fallbacks: [mistral-medium, gpt-4.1-mini, local-default]
+    cost: low
+
+  codestral_code:
+    label: "Codestral (code)"
+    tier: medium
+    description: "Mistral Codestral — code-focused"
+    good_for: [coding, refactor, patches]
+    model: codestral
+    maker: mistral
+    fallbacks: [mistral-large, grok-code, claude-sonnet-4, local-default]
+    cost: medium
+
 # Situation combos = multi-agent role lineup for a use case
 situations:
   coding:
@@ -111,7 +141,7 @@ situations:
         model: local-default
         strategy: cheapest
         tier: local
-        fallbacks: [gpt-4.1-mini, claude-haiku, grok-code]
+        fallbacks: [codestral, gpt-4.1-mini, claude-haiku, grok-code]
     workers: 3
     good_for: [implement, refactor, tests]
 
@@ -124,15 +154,15 @@ situations:
       mastermind:
         model: claude-opus-4
         maker: anthropic
-        fallbacks: [o3, grok-4.5]
+        fallbacks: [o3, grok-4.5, mistral-large]
       supervisor:
         model: grok-4.5
         maker: xai
-        fallbacks: [gpt-4.1, claude-sonnet-4]
+        fallbacks: [gpt-4.1, claude-sonnet-4, mistral-large]
       worker:
         model: gemini-2.5-pro
         maker: google
-        fallbacks: [claude-sonnet-4, gpt-4.1]
+        fallbacks: [mistral-large, claude-sonnet-4, gpt-4.1]
     workers: 3
     good_for: [surveys, architecture, long_context]
 
