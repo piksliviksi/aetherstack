@@ -63,6 +63,18 @@ curl -s -X POST http://127.0.0.1:8766/api/agents/plan \
 
 Full guide: [docs/AGENT-MODES.md](../docs/AGENT-MODES.md)
 
+### Slash commands (`/clear`, `/compact`, …)
+
+```bash
+curl -s -X POST http://127.0.0.1:8766/api/slash \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"demo","text":"/status"}'
+# When tasks complete:
+#   /done all  →  /clear   (archives to memory first)
+```
+
+Guide: [docs/SLASH-COMMANDS.md](../docs/SLASH-COMMANDS.md)
+
 ### Memory example
 
 ```bash
