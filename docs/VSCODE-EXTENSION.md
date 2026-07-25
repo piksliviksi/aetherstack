@@ -1,38 +1,35 @@
-# How to use the AetherStack VS Code extension
+# VS Code extension
 
 **Marketplace:** [AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack)
 
-This guide is for day-to-day use: install, find the UI, run commands, wire chat, and fix “I installed it but see nothing.”
-
-**Operating model:** [OPERATING-MODEL.md](./OPERATING-MODEL.md) — set up once, import trees/limits, then chat in **one window** while multi-LLM pipelines run behind a single gateway model.
-
-Related:
-
-- Architecture / AMD GPU notes: [VSCODE.md](./VSCODE.md)
-- Project Data Engine (`:8765`): [PROJECT-ENGINE.md](./PROJECT-ENGINE.md)
-- Security (API keys, path scans): [SECURITY-NOTES.md](./SECURITY-NOTES.md)
+| Related | Doc |
+|---------|-----|
+| Operating model | [OPERATING-MODEL.md](./OPERATING-MODEL.md) |
+| Architecture / GPU boundary | [VSCODE.md](./VSCODE.md) |
+| Project Data Engine `:8765` | [PROJECT-ENGINE.md](./PROJECT-ENGINE.md) |
+| Security | [SECURITY-NOTES.md](./SECURITY-NOTES.md) |
 
 ---
 
-## What this extension is (and is not)
+## Scope
 
-| It **is** | It **is not** |
-|-----------|----------------|
-| Glue so VS Code treats Aether as **one** OpenAI-compatible model | A place where you pick Claude vs GPT every message |
-| A **project hub** for AI history in the repo | A full multi-agent UI by itself (that’s Hub `/graph` + pipelines) |
-| A way to **wire Continue** to LiteLLM `:4000` | Something that loads weights or your GPU inside VS Code |
+| In scope | Out of scope |
+|----------|--------------|
+| Wire VS Code clients to one OpenAI-compatible gateway | Per-message provider picker UI |
+| Project AI history scan and overview | Full multi-agent graph UI (Hub `/graph` + pipelines) |
+| Continue → LiteLLM `:4000` config | Loading model weights or driving GPU inside VS Code |
 
-After wiring, day-to-day chat is:
+Chat path after wiring:
 
-1. **[Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue)** (or similar) → **one** base URL + key + model id  
-2. Optional: **Open WebUI** at `:3000` for the same façade in a browser  
-3. Optional: **Aether Hub** at `:8766` when you change pipelines, limits, or run `/clear` hygiene
+1. Continue (or equivalent) → one base URL + key + model id  
+2. Open WebUI `:3000` — same gateway in browser  
+3. Aether Hub `:8766` — pipelines, limits, slash hygiene  
 
 ---
 
 ## Install
 
-### Marketplace (recommended)
+### Marketplace
 
 1. Open VS Code.
 2. Extensions (`Ctrl+Shift+X`) → search **AetherStack**.
@@ -178,41 +175,40 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 ---
 
-## Files the extension may create
+## Files written
 
-| Path | Safe to commit? | Purpose |
-|------|-----------------|---------|
-| `.aetherstack/project-overview.md` | Usually yes | Human overview of AI history |
-| `.aetherstack/project-overview.json` | Usually yes | Machine-readable scan (no API key) |
-| `.aetherstack/snapshots/*.md` | Your choice | Manual notes |
-| `.continue/config.yaml` | Yes if using env placeholder | Continue → AetherStack |
+| Path | Commit | Purpose |
+|------|--------|---------|
+| `.aetherstack/project-overview.md` | Yes (no secrets) | Human AI history overview |
+| `.aetherstack/project-overview.json` | Yes (no API key) | Machine scan |
+| `.aetherstack/snapshots/*.md` | Operator choice | Manual notes |
+| `.continue/config.yaml` | Yes if key is env placeholder | Continue → gateway |
 | `.vscode/settings.json` | Yes if no secrets | URLs / default model |
-| `.vscode/extensions.json` | Yes | Recommends Continue + AetherStack |
+| `.vscode/extensions.json` | Yes | Extension recommendations |
 
 ---
 
-## Typical workflows
+## Procedures
 
-### A. “What AI tools touched this repo?”
+### Scan AI history
 
 1. Open the project folder.  
 2. **Scan Project AI History**.  
 3. Read `.aetherstack/project-overview.md` or the sidebar tree.  
-4. Open recent files from the tree.
 
-### B. “Code with every model on the gateway”
+### Wire gateway chat
 
 1. Stack running (`start.bat` / `./start.sh`).  
 2. **Wire Continue.dev**.  
-3. Set `AETHERSTACK_API_KEY` (or User `aetherstack.apiKey`).  
-4. In Continue, pick models like `local-default`, `grok-4.5`, `gpt-4.1`, `claude-sonnet-4`, …  
-5. Or use **Open Chat UI** for browser chat.
+3. Set `AETHERSTACK_API_KEY` or User `aetherstack.apiKey`.  
+4. Select model alias in Continue (`local-default`, `grok-4.5`, …).  
+5. Or **Open Chat UI** (`:3000`).
 
-### C. “Project disk / live resources”
+### Project engine
 
-1. Start the engine: `.\project-engine\start-engine.ps1` (or `./project-engine/start-engine.sh`).  
-2. **Open Project Data Engine** — or open http://127.0.0.1:8765/  
-3. Use **dash** or **term** mode; `scan` only works under allowed roots (cwd, home, repo, `--project`).
+1. `.\project-engine\start-engine.ps1` or `./project-engine/start-engine.sh`.  
+2. **Open Project Data Engine** or http://127.0.0.1:8765/  
+3. Scans limited to allowed roots: cwd, home, repo, `--project`.
 
 ---
 
@@ -239,9 +235,9 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 - Env `AETHERSTACK_API_KEY` must be set for the VS Code process (set user env and **fully restart** VS Code).  
 - Or configure Continue’s key field manually for local lab only.
 
-### “VS Code should use my AMD GPU”
+### Expectation: VS Code drives AMD GPU
 
-It does not. Inference runs in **Ollama** (host or WSL ROCm). VS Code only talks HTTP to LiteLLM. See [VSCODE.md](./VSCODE.md).
+False. Inference runs in Ollama (host or WSL ROCm). VS Code sends HTTP to LiteLLM. See [VSCODE.md](./VSCODE.md).
 
 ### Project Engine page empty / connection refused
 

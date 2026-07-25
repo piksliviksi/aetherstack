@@ -4,14 +4,14 @@ This page records security review notes for AetherStack and mitigations applied.
 
 ## Ranking
 
-| Sev | Finding | Reachable? | Status |
-|-----|---------|------------|--------|
-| **High** | Project engine scans **caller-supplied filesystem paths** over HTTP | Yes (localhost) | **Mitigated** — narrow path allowlist (no whole drives) |
-| **High** | Extension writes **connection secrets** into workspace files | Yes (user command) | **Mitigated** — no key in workspace |
-| **Medium** | CORS was `Access-Control-Allow-Origin: *` on engine | Yes | **Mitigated** — tightened |
-| **Medium** | Engine APIs unauthenticated on shared lab machines | Optional | **Optional token** — `AETHERSTACK_ENGINE_TOKEN` / `--token` |
-| **Low** | Default LiteLLM master key `sk-aether-local` | Lab default | Documented; change for exposure |
-| **Low** | `/api/system` discloses host install layout | Localhost only | By design; gate with token if needed |
+| Sev | Finding | Reachable | Status |
+|-----|---------|-----------|--------|
+| **High** | Project engine scans caller-supplied filesystem paths over HTTP | Yes (localhost) | Mitigated — path allowlist (no whole drives) |
+| **High** | Extension writes connection secrets into workspace files | Yes (user command) | Mitigated — no key in workspace |
+| **Medium** | CORS was `Access-Control-Allow-Origin: *` on engine | Yes | Mitigated — tightened |
+| **Medium** | Engine APIs unauthenticated on shared lab machines | Yes | Token gate — `AETHERSTACK_ENGINE_TOKEN` / `--token` |
+| **Low** | Default LiteLLM master key `sk-aether-local` | Lab default | Rotate before exposure |
+| **Low** | `/api/system` discloses host install layout | Localhost | By design; token when shared |
 | **Info** | Host bind warning if not 127.0.0.1 | Config | Warning printed |
 
 ---
@@ -81,10 +81,12 @@ API keys / gateway secrets committed to git or shared workspaces.
 
 ---
 
-## Operator guidance
+## Operator rules
 
-1. Keep Project Engine on **127.0.0.1** only.  
-2. Set `LITELLM_MASTER_KEY` to a strong value if ports are LAN-reachable.  
-3. Use `AETHERSTACK_API_KEY` env for Continue; never commit keys.  
-4. For shared machines: `set AETHERSTACK_ENGINE_TOKEN=…` before starting the engine.  
-5. Add `.continue/config.yaml` to git carefully (no secrets); prefer `.gitignore` for local overrides if needed.  
+| Rule | Requirement |
+|------|-------------|
+| Project Engine bind | `127.0.0.1` only unless token + network policy applied |
+| `LITELLM_MASTER_KEY` | Strong value when ports are LAN-reachable |
+| Continue key | `AETHERSTACK_API_KEY` env; never commit keys |
+| Shared machines | `AETHERSTACK_ENGINE_TOKEN` before starting the engine |
+| `.continue/config.yaml` | No secrets in git; gitignore local overrides |

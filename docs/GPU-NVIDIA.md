@@ -10,7 +10,7 @@ Use a local NVIDIA GPU for inference while AetherStack provides the chat UI and 
 
 ---
 
-## Option A — Host Ollama (recommended)
+## Path A — Host Ollama
 
 1. Install [NVIDIA drivers](https://www.nvidia.com/drivers).  
 2. Install [Ollama](https://ollama.com).  
@@ -27,7 +27,7 @@ Compose services talk to Ollama at `http://host.docker.internal:11434`.
 
 ---
 
-## Option B — Ollama GPU container
+## Path B — Ollama GPU container
 
 **Linux** — install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html), then:
 

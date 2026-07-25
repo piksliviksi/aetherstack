@@ -33,9 +33,9 @@ curl -s http://127.0.0.1:8766/api/modes | jq .runtime
 
 ---
 
-## Token saver (optional)
+## Token saver
 
-When **`token_saver: true`**:
+Default: off unless set. When **`token_saver: true`**:
 
 - Prefer **local / cheap** models for bulk (workers, inline)
 - **Cap** `max_tokens` per role
@@ -67,7 +67,7 @@ Knobs live under `token_saver:` in `agent_modes.yaml`.
 | **supervisor** | Quality-gates worker outputs | Separate strong model (often different maker) |
 | **worker** | Bulk work (drafts, code chunks, extraction) | Cheap / local / mini models |
 
-You can **point** each role by:
+Role selectors:
 
 | Selector | Example |
 |----------|---------|
@@ -134,7 +134,7 @@ curl -s -X POST http://127.0.0.1:8766/api/agents/plan \
   }' | jq '{mode, models_in_event, makers_in_event, agents: [.agents[]|{role,model,provider}]}'
 ```
 
-Per-task you can override `model` / `maker` / `tier` / `need` so **one event** fans out to several makers.
+Per-task overrides: `model` / `maker` / `tier` / `need`. One event can fan out to several makers.
 
 Execute a planned call:
 

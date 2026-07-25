@@ -1,11 +1,17 @@
-# How AetherStack operates
+# Operating model
 
-This is the **modus operandi**: set up once, work in one surface, let the stack orchestrate many models under a single façade.
+Configure once. Operate from one client surface. Route work across models under a single gateway façade.
 
-## Promise
+## Contract
 
-> **Outside:** one chat window, one model id, one API key — same feeling as talking to Grok or Claude.  
-> **Inside:** flexible multi-LLM routing, graphs, budgets, GPU-local workers, and memory hygiene.
+| Outside | Inside |
+|---------|--------|
+| One chat window | LiteLLM + Hub routers + pipelines |
+| One model id | Role-bound models (master, critic, worker, tester) |
+| One API key | Provider keys held in `.env` / LiteLLM |
+| Continuous conversation | Optional multi-stage graph: research → critique → build → test |
+
+Policy lives in Aether (combos, pipelines, graphs, matrix). The IDE does not re-select providers per prompt.
 
 ---
 
@@ -13,105 +19,98 @@ This is the **modus operandi**: set up once, work in one surface, let the stack 
 
 | Step | Action |
 |------|--------|
-| Stack | `start.bat` / `./start.sh` (Docker: WebUI, LiteLLM, Redis, Hub) |
-| Local GPU | Host Ollama (Metal / ROCm / CUDA) — not VS Code itself |
-| Secrets | `.env` cloud keys + `LITELLM_MASTER_KEY` |
-| Discover | Hub `/api/discover` or `scripts/scan-system.*` |
-| Import trees | Combos, pipelines, or node graphs (GitHub / email / canvas export) |
-| Limits | Token saver; stage `max_cost` / `tier`; avoid publishing default keys |
-| IDE | Continue (or similar) → `http://127.0.0.1:4000/v1` + master key + **one** model alias |
-
-You should not re-pick Anthropic vs OpenAI vs local in the IDE for every prompt. Policy lives in Aether.
+| Stack | `start.bat` / `./start.sh` — Docker: WebUI, LiteLLM, Redis, Hub |
+| Local GPU | Host Ollama (Metal / ROCm / CUDA). Not VS Code. |
+| Secrets | `.env`: cloud keys + `LITELLM_MASTER_KEY` |
+| Discover | Hub `GET /api/discover` or `scripts/scan-system.*` |
+| Trees | Import combos, pipelines, or node graphs |
+| Limits | Token saver; stage `max_cost` / `tier`; rotate default keys before exposure |
+| IDE | OpenAI-compatible client → `http://127.0.0.1:4000/v1` + master key + one model alias |
 
 ---
 
-## 2. Single façade
-
-Any OpenAI-compatible client only needs:
+## 2. Façade
 
 ```text
 base_url = http://127.0.0.1:4000/v1
 api_key  = <LITELLM_MASTER_KEY>
-model    = <one alias, e.g. local-default or claude-sonnet-4>
+model    = <one alias>
 ```
 
 | Surface | Role |
 |---------|------|
-| **VS Code + Continue** | Primary “one window” for coding |
-| **Open WebUI** | Same gateway in the browser |
-| **Aether Hub** | Operator console — not required for every keystroke |
+| VS Code + Continue (or equivalent) | Primary coding surface |
+| Open WebUI `:3000` | Browser surface on the same gateway |
+| Aether Hub `:8766` | Operator console: discover, modes, graphs, slash, memory |
 
-Hub multi-agent / pipeline execution can be driven by operator actions or future automatic hooks; the **user-facing** model remains one gateway id.
-
----
-
-## 3. Decision trees under the hood
-
-| Artifact | What it encodes |
-|----------|-----------------|
-| **Combos** | Quick multi-agent role pins or single-tier picks |
-| **Pipelines** | Ordered stages: research → critique/ack → build → test |
-| **Node graph** (`/graph`) | Visual FX–style canvas: Master / Analyser / Worker / Tester + wires |
-| **Capability matrix** | What each model is good for; live availability |
-| **Token saver** | Prefer cheap/local; cap tokens; compress prompts |
-
-Import from [combos/export](../combos/export), [pipelines/catalog](../pipelines/catalog), or draw on the canvas. Export and share the same files.
+Client-facing model id remains the gateway alias. Multi-agent and pipeline execution are controlled via Hub APIs and imported trees.
 
 ---
 
-## 4. Limits (spend & tier)
+## 3. Decision artifacts
+
+| Artifact | Encodes |
+|----------|---------|
+| Combos | Role pins or single-tier packs (`.aether-combo.json`) |
+| Pipelines | Ordered stages (`.aether-pipeline.yaml` / JSON) |
+| Node graph | Visual graph at `/graph` (`aetherstack.graph.v1`) |
+| Capability matrix | Per-model capabilities + live availability |
+| Token saver | Cheap/local bias, token caps, prompt compression |
+
+Catalogs: [combos/export](../combos/export), [pipelines/catalog](../pipelines/catalog).
+
+---
+
+## 4. Limits
 
 | Control | Effect |
 |---------|--------|
-| `token_saver: true` | Bias bulk work to cheap/local; truncate long context |
-| Stage / node `max_cost` | Cap how expensive a role may be (`low` … `very_high`) |
-| `tier: local` | Keep stage on Ollama (Metal/ROCm/CUDA) |
-| Maker pins | e.g. critic always Anthropic, workers local |
-| Pipeline `hw_weight` | Document / rank GPU heaviness |
-| `/clear` after `/done` | Stop unbounded context growth |
+| `token_saver: true` | Prefer cheap/local; truncate long context |
+| Stage / node `max_cost` | Cap role cost band (`low` … `very_high`) |
+| `tier: local` | Bind stage to Ollama |
+| Maker pins | Fixed provider per role |
+| Pipeline `hw_weight` | Documented GPU weight for ranking |
+| `/done` then `/clear` or `/compact` | Archive then reset working session |
 
-Exact dollar billing is still provider-side; Aether enforces **routing policy** so spend and hardware use follow your trees.
+Provider billing remains provider-side. Aether enforces routing policy only.
 
 ---
 
 ## 5. Daily loop
 
 ```text
-Chat in VS Code (one model façade)
-        │
-        ▼
-  Optional: run pipeline/graph for structured work
-        │
-        ▼
-  Agents finish → /done all → /compact or /clear
-        │
-        ▼
-  Memory holds archives; next messages stay short
+Start stack
+  → open project → chat via gateway alias
+  → structured work: pipeline/graph plan when required
+  → task complete: /done all
+  → /compact or /clear
+  → next unit of work (lean context; memory searchable)
 ```
 
 ---
 
-## 6. What not to expect
+## 6. Hard constraints
 
-- VS Code does **not** drive the GPU for weights; Ollama (or cloud) does.  
-- The façade is only as good as your **imported trees** and **keys**.  
-- Multi-agent fan-out may use more total tokens than a single call — use token saver and clear when done.  
-- ActionForge is **not** bundled (EULA); Aether’s node canvas is native.
+| Constraint | Fact |
+|------------|------|
+| GPU for weights | Host Ollama (or cloud). Not VS Code. Not LiteLLM container by default. |
+| Façade quality | Bound by imported trees, live discover, and present keys |
+| Multi-agent cost | Fan-out can exceed single-call tokens; token saver + slash hygiene apply |
+| Node canvas | Native MIT graph only. No third-party node engine is vendored in this repo. |
 
 ---
 
-## Related docs
+## Related
 
 | Doc | Topic |
 |-----|--------|
-| [README.md](./README.md) | Full documentation index |
-| [QUICKSTART.md](./QUICKSTART.md) | Install, ports, IDE wire-up |
-| [GATEWAY.md](./GATEWAY.md) | LiteLLM aliases & keys |
-| [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md) | IDE install & commands |
-| [PIPELINES.md](./PIPELINES.md) | Stage scripts + voting |
-| [NODE-GRAPH.md](./NODE-GRAPH.md) | Visual canvas |
-| [SLASH-COMMANDS.md](./SLASH-COMMANDS.md) | `/clear` memory hygiene |
-| [CROSS-MEMORY.md](./CROSS-MEMORY.md) | Multi-project session/code/research pull |
-| [AGENT-MODES.md](./AGENT-MODES.md) | inline vs multi-agent |
+| [README.md](./README.md) | Documentation index |
+| [QUICKSTART.md](./QUICKSTART.md) | Install, ports, IDE |
+| [GATEWAY.md](./GATEWAY.md) | LiteLLM aliases and keys |
+| [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md) | Extension procedure |
+| [PIPELINES.md](./PIPELINES.md) | Stage scripts |
+| [NODE-GRAPH.md](./NODE-GRAPH.md) | Canvas |
+| [SLASH-COMMANDS.md](./SLASH-COMMANDS.md) | Session hygiene |
+| [CROSS-MEMORY.md](./CROSS-MEMORY.md) | Multi-project index |
+| [AGENT-MODES.md](./AGENT-MODES.md) | Inline / multi-agent |
 | [AMD-COMPUTE.md](./AMD-COMPUTE.md) | Radeon CUs |
-| [TUTORIAL-MACOS.md](./TUTORIAL-MACOS.md) | Metal on Apple Silicon |

@@ -1,14 +1,14 @@
 # AetherStack as a Docker Desktop Extension
 
-Ship a small panel in Docker Desktop that links to the AetherStack control plane.
+Docker Desktop extension panel with links to the AetherStack control plane.
 
 | Extension piece | Mapping |
 |-----------------|---------|
 | UI panel | Status links to `:3000` / `:4000` |
 | Backend / compose | Root `docker-compose.yml` services |
-| Marketplace | Optional later publish |
+| Marketplace | Not published from this repo by default |
 
-## What we ship in-repo
+## In-repo contents
 
 Directory: [`extension/`](../extension/)
 

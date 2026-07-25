@@ -1,73 +1,65 @@
-# Gateway (LiteLLM façade)
+# Gateway (LiteLLM)
 
-Clients talk to **one** OpenAI-compatible endpoint. LiteLLM routes aliases to local Ollama and cloud providers per [`litellm_config.yaml`](../litellm_config.yaml).
+Single OpenAI-compatible endpoint for all model aliases.  
+Policy, multi-agent, and graphs run on Hub `:8766` and do not replace this façade for IDE chat.
 
 ```text
 Base URL: http://127.0.0.1:4000/v1
-API key:  LITELLM_MASTER_KEY from .env
-Model:    one alias from the table below (or your additions)
+API key:  LITELLM_MASTER_KEY
+Model:    one alias from litellm_config.yaml
 ```
 
-Hub / policy / multi-agent live on **:8766** and do not replace this façade for day-to-day IDE chat.
+Config file: [`litellm_config.yaml`](../litellm_config.yaml).
 
 ---
 
-## Default model aliases
-
-Edit [`litellm_config.yaml`](../litellm_config.yaml) to add more. LiteLLM can also accept provider-style names if you extend the list.
+## Default aliases
 
 | Alias | Backend |
 |-------|---------|
 | `local-default` / `local-llama` | Host Ollama (`llama3.1:8b`) |
 | `local-tiny` | Host Ollama (`tinyllama`) |
 | `grok` / `grok-4.5` | xAI Grok 4.5 |
-| `grok-4.3` / `grok-4` / `grok-4-fast` / `grok-code` | xAI Grok 4.x family |
-| `grok-3` | xAI Grok 3 (legacy) |
+| `grok-4.3` / `grok-4` / `grok-4-fast` / `grok-code` | xAI Grok 4.x |
+| `grok-3` | xAI Grok 3 |
 | `gpt-4.1` / `gpt-4.1-mini` / `gpt-4o` / `o3` / `o4-mini` | OpenAI |
 | `codex` / `openai-default` | OpenAI GPT-4.1 |
 | `claude` / `claude-sonnet-4` / `claude-opus-4` / `claude-haiku` | Anthropic |
 | `gemini` / `gemini-2.5-pro` / `gemini-2.5-flash` | Google Gemini |
 
-### Environment keys
+---
+
+## Environment keys
 
 | Variable | Provider |
 |----------|----------|
-| `XAI_API_KEY` | xAI / Grok |
+| `XAI_API_KEY` | xAI |
 | `OPENAI_API_KEY` | OpenAI |
 | `ANTHROPIC_API_KEY` | Anthropic |
 | `GOOGLE_API_KEY` | Gemini |
-| `LITELLM_MASTER_KEY` | Client auth for the gateway itself |
+| `LITELLM_MASTER_KEY` | Gateway client auth |
 
-Only set keys for providers you use. Local Ollama does not need a cloud key.
+Set only keys for providers in use. Local Ollama does not require a cloud key.
 
 ---
 
-## Listing models
+## List models
 
 ```bash
-# Windows
-powershell -File scripts/list-models.ps1
-
-# Linux / macOS
-./scripts/list-models.sh
-
+powershell -File scripts/list-models.ps1   # Windows
+./scripts/list-models.sh                  # Linux / macOS
 curl http://localhost:4000/v1/models \
   -H "Authorization: Bearer sk-aether-local"
 ```
 
-Default lab key is often `sk-aether-local` — match whatever is in `.env`.
+### HTTP 401
 
-### “401 No api key passed in”
-
-**Expected** when opening `http://localhost:4000` in a normal browser tab (no `Authorization` header). Use:
-
-- Open WebUI at http://localhost:3000  
-- An IDE client with the master key  
-- `curl` / `list-models` scripts as above  
+Bare browser requests to `:4000` omit `Authorization`. That returns 401.  
+Use Open WebUI `:3000`, an IDE client with the master key, or curl as above.
 
 ---
 
-## Example completion
+## Completion example
 
 ```bash
 curl http://localhost:4000/v1/chat/completions \
@@ -79,19 +71,19 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
-Routing preference from Hub (which model is good for a need):
+Route selection (Hub):
 
 ```bash
 curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local"
 ```
 
-Then call LiteLLM with the model id returned.
+Call LiteLLM with the returned model id.
 
 ---
 
 ## Related
 
-- [QUICKSTART.md](./QUICKSTART.md) — first run  
-- [OPERATING-MODEL.md](./OPERATING-MODEL.md) — one-façade philosophy  
-- [AGENT-MODES.md](./AGENT-MODES.md) — multi-agent policy behind the façade  
-- [aether-hub/README.md](../aether-hub/README.md) — hub APIs  
+- [QUICKSTART.md](./QUICKSTART.md)  
+- [OPERATING-MODEL.md](./OPERATING-MODEL.md)  
+- [AGENT-MODES.md](./AGENT-MODES.md)  
+- [aether-hub/README.md](../aether-hub/README.md)  

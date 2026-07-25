@@ -1,48 +1,49 @@
-# Shared agent memory (Redis + vectors)
+# Agent memory
 
-Redis is no longer a silent dependency: **LiteLLM** can cache completions, and **aether-hub** stores **session working memory** and a **vector store** for multi-agent / multi-tool recall.
+Redis backs LiteLLM cache and Hub session + vector stores.
 
-| Piece | Role |
-|-------|------|
-| `redis` service (`:6379`) | Persistence (AOF), hub data, LiteLLM cache |
-| `aether-hub` (`:8766`) | HTTP API for sessions + vector upsert/search |
-| Embeddings | Prefer Ollama `nomic-embed-text`; hash fallback if missing |
+| Component | Role |
+|-----------|------|
+| Redis `:6379` | Persistence, hub data, LiteLLM cache |
+| aether-hub `:8766` | Session and vector HTTP API |
+| Embeddings | Ollama `nomic-embed-text` when present; hash fallback otherwise |
+
+---
 
 ## Architecture
 
-```
-  Agents / IDE / scripts
-           │
-           ▼
-     aether-hub :8766
-           │
-     ┌─────┴─────┐
-     ▼           ▼
-  sessions    vectors (JSON + embedding[])
-     │           │
-     └─────┬─────┘
-           ▼
-        Redis :6379
-           ▲
-           │ cache
-        LiteLLM :4000
+```text
+Agents / IDE / scripts
+        │
+        ▼
+  aether-hub :8766
+     ├─ sessions
+     └─ vectors (JSON + embedding[])
+        │
+        ▼
+     Redis :6379
+        ▲
+        │ cache
+     LiteLLM :4000
 ```
 
-## Session memory (short-term)
+---
+
+## Session memory
 
 ```bash
-# Append
 curl -s -X POST http://127.0.0.1:8766/api/memory/sessions/demo/messages \
   -H "Content-Type: application/json" \
-  -d '{"role":"user","content":"We use port 4000 for LiteLLM","index":true}'
+  -d '{"role":"user","content":"LiteLLM listens on port 4000","index":true}'
 
-# Read last N
 curl -s "http://127.0.0.1:8766/api/memory/sessions/demo?limit=20"
 ```
 
-Keys: `aether:mem:session:{id}` (Redis list, TTL default 7 days).
+Key: `aether:mem:session:{id}` (Redis list, default TTL 7 days).
 
-## Vector memory (shared long-ish term)
+---
+
+## Vector memory
 
 ```bash
 curl -s -X POST http://127.0.0.1:8766/api/memory/vectors \
@@ -54,20 +55,21 @@ curl -s -X POST http://127.0.0.1:8766/api/memory/search \
   -d '{"namespace":"project-alpha","query":"API key policy","top_k":5}'
 ```
 
-Cosine similarity is computed in the hub process over vectors stored in Redis hashes (lab scale: thousands of chunks). For multi-million scale, swap in Redis Stack / Qdrant later — API can stay stable.
+Cosine similarity runs in-process over Redis-stored vectors. Scale: lab (thousands of chunks).
 
-### Better embeddings
+### Embeddings
 
 ```bash
 ollama pull nomic-embed-text
-# optional: AETHER_EMBED_MODEL=nomic-embed-text
+# AETHER_EMBED_MODEL=nomic-embed-text
+# AETHER_HASH_EMBED=1  # force hash, no network
 ```
 
-Without that model, hub uses a **hash embedding** so demos still run (weaker semantic quality).
+Without Ollama embeddings, hub uses deterministic hash vectors (weaker recall).
+
+---
 
 ## LiteLLM Redis cache
-
-`litellm_config.yaml` enables:
 
 ```yaml
 litellm_settings:
@@ -79,16 +81,23 @@ litellm_settings:
     ttl: 600
 ```
 
-Identical chat completions can be served from Redis within the TTL — useful for agents that retry.
+Identical completions within TTL are served from Redis.
 
-## Security notes
+---
 
-- Memory API is open on localhost by default (same lab trust model as Project Engine).  
-- Do **not** publish `:8766` / `:6379` to the internet.  
-- Vector store may hold secrets if you put them in `text` — treat namespaces as sensitive.  
-- For shared machines, put hub behind a reverse proxy with auth (future).
+## Security constraints
+
+| Rule | Fact |
+|------|------|
+| Default bind | Localhost lab trust model |
+| Exposure | Do not publish `:8766` or `:6379` publicly |
+| Content | Vectors store whatever text is upserted — treat as sensitive |
+| Shared host | Put Hub behind authenticated reverse proxy |
+
+---
 
 ## Related
 
-- Capability routing: [CAPABILITY-MATRIX.md](./CAPABILITY-MATRIX.md)  
-- Hub package: [`aether-hub/`](../aether-hub/)  
+- [CAPABILITY-MATRIX.md](./CAPABILITY-MATRIX.md)  
+- [CROSS-MEMORY.md](./CROSS-MEMORY.md)  
+- [aether-hub/](../aether-hub/)  

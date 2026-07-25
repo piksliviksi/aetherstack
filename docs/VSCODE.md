@@ -1,92 +1,83 @@
-# AetherStack + VS Code projects
+# VS Code architecture
 
-> **Using the extension day to day?** Start here:  
-> **[How to use the VS Code extension](./VSCODE-EXTENSION.md)**  
-> (install, find the sidebar, commands, Continue wiring, troubleshooting)
+Day-to-day extension use: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md).
 
-## Goal
+## Role
 
-Open a **project folder** in VS Code, recover context from **previous AI chats** (when stored in the repo or known folders), see **which models/tools were used**, and **continue** via AetherStack (multi-model LiteLLM + Open WebUI + optional Ollama).
+Open a project folder. Scan stored AI history. Wire OpenAI-compatible clients to the Aether gateway. Continue work through LiteLLM + Hub policy.
 
-## Important: VS Code does **not** run local LLMs on the GPU
+## GPU boundary
 
-This is expected on **Windows, macOS, and Linux** — not a bug in AetherStack.
+VS Code does not run local LLM weights on GPU. This holds on Windows, macOS, and Linux.
 
-| Layer | Runs on | Local GPU for LLMs? |
-|-------|---------|---------------------|
-| **VS Code UI** | Desktop process | Display only — **not** LLM compute |
-| **Continue / Cline / Copilot chat UI** | VS Code extension host | **No** Metal/ROCm/CUDA inside the extension |
-| **AetherStack LiteLLM** (`:4000`) | Docker | CPU gateway only |
-| **Local model inference** | **Host Ollama** (Mac Metal · Win/Linux ROCm/CUDA/WSL) | **Yes — only here** |
+| Layer | Process | Local GPU for LLMs |
+|-------|---------|-------------------|
+| VS Code UI | Desktop | No |
+| Continue / Cline / similar | Extension host | No |
+| LiteLLM `:4000` | Docker | Gateway only |
+| Inference | Host Ollama (Metal / ROCm / CUDA / WSL) | Yes |
 
-```
-VS Code  ──HTTP──►  LiteLLM :4000  ──HTTP──►  Ollama (Windows or WSL)
-   │                      │                        │
-   │ no GPU for LLM       │ no GPU                 │ AMD RX 6600 XT
-   └──────────────────────┴────────────────────────┘  (ROCm / Vulkan / DXG)
+```text
+VS Code  ──HTTP──►  LiteLLM :4000  ──HTTP──►  Ollama (host or WSL)
 ```
 
-**On Win11 + Radeon, do this:**
+### Windows + Radeon procedure
 
-1. Run GPU inference in **WSL Ollama** (ROCm/DXG — see [WSL-AMD-GPU.md](./WSL-AMD-GPU.md)) or native Ollama if it supports your card.  
-2. Keep AetherStack stack up (`start.bat`).  
-3. Point VS Code tools at **`http://127.0.0.1:4000/v1`** (or Open WebUI at `:3000`).  
+1. Run inference in WSL Ollama (ROCm/DXG) or supported native Ollama — [WSL-AMD-GPU.md](./WSL-AMD-GPU.md).  
+2. Start stack (`start.bat`).  
+3. Point clients at `http://127.0.0.1:4000/v1` (or WebUI `:3000`).
 
-VS Code only **sends prompts over the network**; it never loads ROCm or `/dev/dxg`. NVIDIA on Windows is similar for most extensions (host Ollama/CUDA or cloud), except some vendor plugins — still not “VS Code owns the GPU.”
+---
 
-## Quick start
+## Install
 
-1. Start AetherStack: `start.bat` (Windows) or `./start.sh` (macOS / Ubuntu / Linux).
-2. Install the extension:
+| Path | Command |
+|------|---------|
+| Marketplace | `code --install-extension AetherStack.aetherstack` |
+| Local VSIX | `code --install-extension packages/aetherstack-0.1.2.vsix` |
+| Dev folder | `code --install-extension path/to/integrations/vscode` |
 
-**Marketplace (recommended):**  
-[https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack)
+Listing: https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack
 
-```bash
-code --install-extension AetherStack.aetherstack
-```
+## Procedure
 
-**From this repo (dev):**
+1. Start stack: `start.bat` or `./start.sh`.  
+2. Install extension.  
+3. **File → Open Folder** on the project.  
+4. Command Palette:  
+   - `AetherStack: Scan Project AI History`  
+   - `AetherStack: Wire Continue.dev to AetherStack`  
+5. Install Continue (or equivalent) for in-editor chat.  
+6. Select gateway model alias (`local-default`, `grok-4.5`, …).
 
-```bash
-code --install-extension path/to/aetherstack/integrations/vscode
-```
+---
 
-Or install the packaged VSIX under `packages/`.
-
-3. **File → Open Folder** on your project.
-4. Command Palette:
-   - `AetherStack: Scan Project AI History`
-   - `AetherStack: Wire Continue.dev to AetherStack`
-5. Install [Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue) if you want in-editor chat.
-6. Chat with models: `local-default`, `grok-4.5`, `gpt-4.1`, `claude-sonnet-4`, …
-
-## Project files written
+## Files written
 
 | Path | Purpose |
 |------|---------|
-| `.aetherstack/project-overview.md` | Human-readable history + how to continue |
-| `.aetherstack/project-overview.json` | Machine-readable scan |
+| `.aetherstack/project-overview.md` | Human scan report |
+| `.aetherstack/project-overview.json` | Machine scan report |
 | `.aetherstack/snapshots/*.md` | Manual session notes |
-| `.continue/config.yaml` | Continue → AetherStack gateway |
-| `.vscode/settings.json` | Workspace AetherStack settings |
-| `.vscode/extensions.json` | Recommends Continue + AetherStack |
+| `.continue/config.yaml` | Continue → gateway |
+| `.vscode/settings.json` | Workspace URLs/model (no secret key) |
+| `.vscode/extensions.json` | Extension recommendations |
 
-## CLI scan (no extension)
+---
+
+## CLI scan
 
 ```powershell
-# Windows
 powershell -File scripts/scan-project-ai.ps1 -Path C:\path\to\project
 ```
 
 ```bash
-# macOS / Linux
 ./scripts/scan-project-ai.sh /path/to/project
 ```
 
-## Continue.dev (manual)
+---
 
-`~/.continue/config.yaml` or project `.continue/config.yaml`:
+## Continue config
 
 ```yaml
 name: AetherStack
@@ -101,14 +92,20 @@ models:
     roles: [chat, edit, apply]
 ```
 
-## Cline / other OpenAI-compatible agents
+## Other OpenAI-compatible clients
 
-- Base URL: `http://127.0.0.1:4000/v1`
-- API key: `sk-aether-local` (or your `LITELLM_MASTER_KEY`)
-- Model: any alias from `litellm_config.yaml`
+| Field | Value |
+|-------|-------|
+| Base URL | `http://127.0.0.1:4000/v1` |
+| API key | `LITELLM_MASTER_KEY` |
+| Model | Alias from `litellm_config.yaml` |
+
+---
 
 ## Limits
 
-- Copilot/Cursor **internal** history is not fully readable without their export tools.
-- Prefer project-local folders (Continue, Claude Code, Aider, WayLog, AetherStack snapshots).
-- Always start AetherStack before expecting the gateway/models list to work.
+| Limit | Fact |
+|-------|------|
+| Copilot / Cursor private history | Not fully readable without their export |
+| Preferred sources | Project-local: Continue, Claude Code, Aider, WayLog, AetherStack |
+| Gateway | Stack must be running for model list and chat |

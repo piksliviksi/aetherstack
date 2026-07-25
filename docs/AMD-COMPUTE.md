@@ -1,65 +1,71 @@
-# AMD compute engines (ROCm / HIP / DXG)
+# AMD compute (ROCm / HIP / DXG)
 
-AetherStack local inference on Radeon must use the GPU’s **compute units (CUs)** via **ROCm/HSA**, not the display stack and not a CUDA-only Ollama build.
+Local Radeon inference uses GPU **compute units (CUs)** through **ROCm/HSA**. Display drivers alone do not run LLM kernels. CUDA-only Ollama builds do not use AMD CUs.
 
-## Do we write a custom driver?
+## Scope of this repository
 
-| Layer | Who provides it | Aether role |
-|-------|-----------------|-------------|
-| Kernel / display / DXCore | **AMD Adrenalin** (Windows), **amdgpu** (Linux) | Never replace |
-| ROCDXG / HSA in WSL | **librocdxg** + ROCm | Install/configure |
-| LLM HIP kernels | **Ollama ROCm package** (`libggml` HIP) | Force-install on WSL |
-| Device profiles, dids, env, probes | **`aether-amd/` userspace adapter** | Yes — this is our “driver glue” |
+| Layer | Provider | In this repo |
+|-------|----------|--------------|
+| Kernel / display / DXCore | AMD Adrenalin (Windows), amdgpu (Linux) | Not shipped |
+| ROCDXG / HSA in WSL | librocdxg + ROCm | Install/configure scripts |
+| LLM HIP kernels | Ollama ROCm package (`libggml` HIP) | Force-install path for WSL |
+| Device profiles, dids, env, probes | `aether-amd/` userspace adapter | Shipped |
 
-We **do not** ship a signed kernel GPU driver. That would be a multi-year AMD/Microsoft project.  
-We **do** ship a **userspace compute adapter** so the stack always targets the CUs correctly:
+**Not included:** signed kernel GPU driver.  
+**Included:** userspace adapter — profiles, dids, probe, ensure-backend.
 
 ```bash
 python3 aether-amd/probe.py
 sudo bash aether-amd/ensure-backend.sh
 ```
 
-## What “compute engines” means here
+---
 
-On discrete AMD GPUs (e.g. **RX 6600 XT**):
+## Compute units (example)
 
-| Concept | Example (RX 6600 XT) |
-|---------|----------------------|
+| Field | RX 6600 XT |
+|-------|------------|
 | Marketing name | AMD Radeon RX 6600 XT |
-| ISA / gfx | gfx1032 (Navi 23); often overridden to **gfx1030** for HIP |
-| **Compute Units** | **32** |
+| ISA / gfx | gfx1032 (Navi 23); HIP override often **gfx1030** |
+| Compute units | **32** |
 | Wavefront | 32 |
-| Access on Win11 | WSL2 **`/dev/dxg`** + **librocdxg** + ROCm HSA |
-| Access on Linux bare metal | `/dev/kfd` + `/dev/dri` + ROCm |
+| Windows access | WSL2 `/dev/dxg` + librocdxg + ROCm HSA |
+| Linux bare metal | `/dev/kfd` + `/dev/dri` + ROCm |
 
-`rocminfo` **Agent 2** with `Device Type: GPU` and `Compute Unit: 32` means the stack can see the engines.  
-**`ollama ps` showing `100% CPU`** means those engines are **not** being used for LLM kernels yet.
+| Observation | Meaning |
+|-------------|---------|
+| `rocminfo` Agent GPU + `Compute Unit: 32` | HSA sees the engines |
+| `ollama ps` → `100% CPU` | LLM kernels not on GPU |
 
-## Why Ollama often stays on CPU in WSL
+---
 
-1. Stock `install.sh` downloads **`ollama-linux-amd64-rocm` only if `lspci` finds AMD**.  
-2. Under WSL + ROCDXG, the GPU often **does not appear as PCI amdgpu** — only via `rocminfo` / DXG.  
-3. Result: install keeps **cuda_v12 / cuda_v13 / vulkan / cpu** runners → **VRAM = 0**, inference on CPU.
+## WSL: CPU fallback cause
 
-**Fix:** Aether AMD adapter + ROCm Ollama package:
+1. Stock `install.sh` pulls `ollama-linux-amd64-rocm` only when `lspci` reports AMD.  
+2. Under WSL + ROCDXG the GPU often does not appear as PCI amdgpu.  
+3. Install keeps CUDA / Vulkan / CPU runners → VRAM 0 → CPU inference.
+
+**Corrective procedure:**
 
 ```bash
-# In Debian WSL — preferred
+# Debian WSL
 sudo bash /mnt/d/llm/stack/aether-amd/ensure-backend.sh
 python3 /mnt/d/llm/stack/aether-amd/probe.py
 
-# Or low-level:
+# Lower-level
 sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh
 bash /mnt/d/llm/stack/scripts/amd-compute-status.sh
 ```
 
-From Windows (elevated auto-install path):
+Windows (elevated host path):
 
 ```powershell
 .\scripts\auto-install.ps1 -Yes -IncludeElevated
 ```
 
-## Required environment (systemd)
+---
+
+## Required environment (systemd / Ollama)
 
 ```bash
 HSA_ENABLE_DXG_DETECTION=1
@@ -70,7 +76,7 @@ ROCR_VISIBLE_DEVICES=0
 OLLAMA_HOST=0.0.0.0:11434
 ```
 
-Device allow-list for RX 6600 XT:
+Device allow-list example (RX 6600 XT):
 
 ```text
 # /opt/rocm/share/rocdxg/dids.conf
@@ -79,42 +85,42 @@ Device allow-list for RX 6600 XT:
 
 Scripts: `scripts/wire-ollama-wsl.sh`, `scripts/wsl-rocm-env.sh`, `scripts/install-ollama-rocm-wsl.sh`.
 
-## Verify engines are used
+---
+
+## Verification
 
 ```bash
 source /etc/profile.d/aether-rocm.sh
 rocminfo | grep -E "Marketing Name:|Compute Unit:|Device Type:"
-# Expect GPU agent + Compute Unit: 32 (6600 XT)
+# Expect GPU agent + Compute Unit count for the card
 
 ollama run tinyllama "hi"
 ollama ps
-# PROCESSOR must include GPU — not "100% CPU"
-
-# Windows: Task Manager → GPU → Compute graphs should move
+# PROCESSOR includes GPU — not 100% CPU
 ```
 
-Hub discover will recommend the ROCm install when host scan sets `ollama_missing_rocm_libs`.
+Windows: Task Manager → GPU → compute graphs active during run.
 
-## AetherStack layout (who uses CUs)
+Hub discover surfaces `ollama_missing_rocm_libs` when host scan reports the gap.
 
+---
+
+## Runtime path
+
+```text
+Client (VS Code / browser)
+  → Docker: WebUI :3000 · LiteLLM :4000 · Hub :8766 · Redis
+  → host.docker.internal:11434
+  → WSL/host Ollama + ROCm HIP runners
+  → Radeon CUs (HSA)
 ```
-Windows browser / VS Code
-        │
-        ▼
- Docker: Open WebUI :3000 · LiteLLM :4000 · Hub :8766 · Redis
-        │  (no AMD CUs inside containers by default)
-        ▼
- host.docker.internal:11434
-        │
-        ▼
- WSL Ollama  +  ROCm HIP runners  +  DXG
-        │
-        ▼
- RX 6600 XT compute units (HSA)
-```
+
+Docker control plane does not own AMD CUs by default.
+
+---
 
 ## Related
 
-- [WSL-AMD-GPU.md](./WSL-AMD-GPU.md) — enablement history / limitations  
-- [GPU-NVIDIA.md](./GPU-NVIDIA.md) / [GPU-INTEL.md](./GPU-INTEL.md) — other vendors  
-- Combos `private_local` / `inline_fable` — route work to local Ollama once GPU works  
+- [WSL-AMD-GPU.md](./WSL-AMD-GPU.md)  
+- [GPU-NVIDIA.md](./GPU-NVIDIA.md) · [GPU-INTEL.md](./GPU-INTEL.md)  
+- Combos `private_local` / `inline_fable` bind work to local Ollama once GPU path is verified  

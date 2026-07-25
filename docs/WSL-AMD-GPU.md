@@ -40,8 +40,8 @@ rocminfo | grep -A5 "Agent 2"
 ## Important limitations
 
 1. **Not Vulkan** — GPU compute is via **ROCm/HSA → DXCore**, not Mesa Vulkan. `vulkaninfo` may still show only llvmpipe.
-2. **Warning: “Windows driver is old”** — Adrenalin on this PC is ~**25.10.x**; AMD docs recommend **Adrenalin 26.2.2** for production ROCDXG. Upgrade when possible.
-3. **Unofficial for RX 6000** — AMD’s matrix focuses on 7000/9000. The `dids.conf` line is community-style enablement; some workloads may still fail.
+2. **Adrenalin version** — Host driver ~**25.10.x** on the reference machine; AMD documents **Adrenalin 26.2.2+** for production ROCDXG.
+3. **RX 6000 matrix** — AMD’s official list emphasizes 7000/9000. The `dids.conf` line is enablement outside that list; some workloads fail.
 4. **Debian + Ubuntu ROCm packages** — mixed repos; pin AMD `rocminfo` if Debian’s package shadows `/opt/rocm/bin`.
 5. **Ollama** — needs ROCm-capable build/env; host Ollama on Windows may be separate from WSL Ollama.
 
@@ -61,13 +61,13 @@ ollama ps   # must NOT be 100% CPU
 
 Full write-up: [AMD-COMPUTE.md](./AMD-COMPUTE.md).
 
-Optional: upgrade Adrenalin to **26.2.2+**, then retest.
+Adrenalin **26.2.2+**: retest ROCDXG after upgrade.
 
 ## VS Code on the same machine
 
-**VS Code does not attach to the AMD GPU for LLM work on Windows 11.**  
-Wire Continue/Cline to LiteLLM (`http://127.0.0.1:4000/v1`); keep **Ollama in WSL** as the only process that should use ROCm/DXG. See [VSCODE.md](./VSCODE.md).
+VS Code does not attach to the AMD GPU for LLM inference on Windows 11.  
+Clients use LiteLLM (`http://127.0.0.1:4000/v1`). Ollama in WSL is the ROCm/DXG process. See [VSCODE.md](./VSCODE.md).
 
-## Dual-boot alternative
+## Bare metal
 
-For full Mesa Vulkan + native `amdgpu` (no DXG): install Debian bare metal with Mesa/ROCm — more reliable than WSL for RDNA2 inference.
+Full Mesa Vulkan + native `amdgpu` (no DXG): Debian (or other Linux) bare metal with Mesa/ROCm.

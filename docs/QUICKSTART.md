@@ -1,172 +1,160 @@
 # Quick start
 
-Service pitch and benefits: root [README](../README.md).  
-Operating philosophy: [OPERATING-MODEL.md](./OPERATING-MODEL.md).
+Root overview: [README](../README.md).  
+Operating model: [OPERATING-MODEL.md](./OPERATING-MODEL.md).
 
 ---
 
 ## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) (Desktop on Windows/macOS, Engine on Linux)
-- [Ollama](https://ollama.com) **on the host** (recommended for GPU / Metal / ROCm / CUDA)
-- Optional cloud keys for providers you actually use
+| Item | Requirement |
+|------|-------------|
+| Docker | Desktop (Windows/macOS) or Engine (Linux) |
+| Ollama | Host install for Metal / ROCm / CUDA inference |
+| Cloud keys | Only for providers in use |
 
 ```bash
 ollama pull llama3.1:8b
-# optional better embeddings for hub memory:
+# Embeddings for hub memory (higher quality):
 # ollama pull nomic-embed-text
 ```
 
 ```bash
 cp .env.example .env
-# Edit: LITELLM_MASTER_KEY, XAI_API_KEY, OPENAI_API_KEY,
-#       ANTHROPIC_API_KEY, GOOGLE_API_KEY — only what you need
+# Set: LITELLM_MASTER_KEY, and provider keys as needed
 ```
 
-Default gateway key in examples: `sk-aether-local` (from `LITELLM_MASTER_KEY`).
+Example lab master key: `sk-aether-local` (`LITELLM_MASTER_KEY`).
 
 ---
 
 ## Start / stop
 
-| OS | Start | Stop | Full tutorial |
-|----|--------|------|----------------|
+| OS | Start | Stop | Tutorial |
+|----|--------|------|----------|
 | Windows | `start.bat` or `.\start.ps1` | `stop.bat` | [TUTORIAL-WINDOWS.md](./TUTORIAL-WINDOWS.md) |
 | macOS | `./start.sh` | `./stop.sh` | [TUTORIAL-MACOS.md](./TUTORIAL-MACOS.md) |
 | Ubuntu/Linux | `./start.sh` | `./stop.sh` | [TUTORIAL-UBUNTU.md](./TUTORIAL-UBUNTU.md) |
-
-Manual:
 
 ```bash
 docker compose up -d
 docker compose down
 ```
 
-Optional auto-install of missing pieces (off by default): [AUTO-INSTALL.md](./AUTO-INSTALL.md).
+Auto-install of missing pieces: off by default — [AUTO-INSTALL.md](./AUTO-INSTALL.md).
 
 ---
 
-## URLs after start
+## Endpoints
 
 | Surface | URL |
 |---------|-----|
-| Open WebUI (chat) | http://localhost:3000 |
-| LiteLLM gateway | http://localhost:4000 |
+| Open WebUI | http://localhost:3000 |
+| LiteLLM | http://localhost:4000 |
 | OpenAI-compatible API | http://localhost:4000/v1 |
-| Aether Hub (operator) | http://localhost:8766 |
+| Aether Hub | http://localhost:8766 |
 | Node canvas | http://localhost:8766/graph |
 | Redis | `localhost:6379` |
 | Host Ollama | http://127.0.0.1:11434 |
 
 ---
 
-## Wire the IDE once
-
-Any OpenAI-compatible client (Continue, Cline, custom OpenAI base):
+## IDE client
 
 ```text
 Base URL:  http://127.0.0.1:4000/v1
-API key:   <LITELLM_MASTER_KEY from .env>
+API key:   <LITELLM_MASTER_KEY>
 Model:     one alias (e.g. local-default, claude-sonnet-4)
 ```
 
-- VS Code extension: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md)  
-- Model alias list: [GATEWAY.md](./GATEWAY.md) · [`litellm_config.yaml`](../litellm_config.yaml)
+- Extension: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md)  
+- Aliases: [GATEWAY.md](./GATEWAY.md) · [`litellm_config.yaml`](../litellm_config.yaml)
 
-**LiteLLM 401 without a key is expected** — browsers do not send `Authorization`. Use WebUI, the extension, or:
+**HTTP 401 without Authorization:** expected for bare browser hits on `:4000`. Use WebUI, IDE client, or:
 
 ```bash
 # Windows
 powershell -File scripts/list-models.ps1
 # Linux / macOS
 ./scripts/list-models.sh
-# or
 curl http://localhost:4000/v1/models -H "Authorization: Bearer sk-aether-local"
 ```
 
 ---
 
-## First operator checks
+## Operator checks
 
 ```bash
-# What is available?
 curl -s http://127.0.0.1:8766/api/discover | jq .summary
-
-# Host deep scan (GPU / WSL / ports)
 # Windows:  .\scripts\scan-system.ps1
 # Unix:     ./scripts/scan-system.sh
-
-# Prefer local for code
 curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local"
 ```
 
 ---
 
-## Optional compose profiles
+## Compose profiles
 
-**Ollama inside Docker** (only if not using host Ollama — CPU or NVIDIA-friendly):
+**Ollama in Docker** (no host Ollama):
 
 ```bash
 docker compose --profile with-ollama-container up -d
 ```
 
-**AMD ROCm on Linux bare metal** (`/dev/kfd`, `/dev/dri`):
+**AMD ROCm Linux bare metal** (`/dev/kfd`, `/dev/dri`):
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.amd.yml --profile with-ollama-container up -d
 ```
 
-Often for RDNA2 (e.g. RX 6600 XT) in `.env`:
+RDNA2 example in `.env`:
 
 ```env
 HSA_OVERRIDE_GFX_VERSION=10.3.0
 ```
 
-Preferred on Windows+AMD: **host/WSL Ollama**, not the container path — [WSL-AMD-GPU.md](./WSL-AMD-GPU.md), [AMD-COMPUTE.md](./AMD-COMPUTE.md).
-
-**NVIDIA** passthrough: [GPU-NVIDIA.md](./GPU-NVIDIA.md) · `docker-compose.nvidia.yml`.
-
----
-
-## Why host Ollama?
-
-| Platform | Recommendation |
+| Platform | Inference path |
 |----------|----------------|
-| macOS (Apple Silicon / Intel) | Host Ollama + **Metal** |
-| NVIDIA | Host Ollama or container GPU passthrough |
-| AMD on Linux | ROCm Ollama native or `ollama/ollama:rocm` |
-| Windows / WSL + Radeon | Native/WSL Ollama; Docker GPU for AMD is often flaky |
+| macOS | Host Ollama + Metal |
+| NVIDIA | Host Ollama or `docker-compose.nvidia.yml` |
+| AMD Linux | ROCm Ollama native or `ollama/ollama:rocm` |
+| Windows + Radeon | Host/WSL Ollama — [WSL-AMD-GPU.md](./WSL-AMD-GPU.md), [AMD-COMPUTE.md](./AMD-COMPUTE.md) |
 
-Docker keeps the **control plane** reproducible; **GPU inference** stays flexible on the host.
+Docker holds the control plane. GPU inference runs on the host path above.
+
+NVIDIA: [GPU-NVIDIA.md](./GPU-NVIDIA.md).
 
 ---
 
-## Project layout (repo)
+## Repository layout
 
 ```text
 aetherstack/
-├── docker-compose.yml         # WebUI, LiteLLM, Redis, Hub
-├── docker-compose.amd.yml     # ROCm mounts (Linux AMD)
-├── docker-compose.nvidia.yml  # NVIDIA passthrough
-├── litellm_config.yaml        # Gateway model aliases
+├── docker-compose.yml
+├── docker-compose.amd.yml
+├── docker-compose.nvidia.yml
+├── litellm_config.yaml
 ├── .env.example
 ├── start.* / stop.*
-├── aether-hub/                # Operator hub service
-├── aether-amd/                # AMD userspace adapter
-├── combos/                    # Shareable multi-LLM packs
-├── pipelines/                 # Pipeline scripts + votes
-├── project-engine/            # Footprint / cleanup UI
-├── integrations/vscode/       # Extension source
-├── scripts/                   # Scan, install, GPU helpers
-└── docs/                      # This documentation tree
+├── aether-hub/
+├── aether-amd/
+├── combos/
+├── pipelines/
+├── project-engine/
+├── integrations/vscode/
+├── scripts/
+└── docs/
 ```
 
 ---
 
-## Security (lab defaults)
+## Security defaults
 
-- `WEBUI_AUTH=false` is for **local lab** only — enable auth before exposing ports  
-- Do not commit `.env`; change `LITELLM_MASTER_KEY` for anything shared  
-- Prefer localhost bind or TLS reverse proxy if remote  
+| Default | Constraint |
+|---------|------------|
+| `WEBUI_AUTH=false` | Lab only. Enable auth before public bind. |
+| `.env` | Not committed. |
+| `LITELLM_MASTER_KEY` | Rotate before shared or remote use. |
+| Bind | Localhost or TLS reverse proxy for remote access. |
 
 Details: [SECURITY-NOTES.md](./SECURITY-NOTES.md).
