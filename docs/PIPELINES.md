@@ -125,12 +125,15 @@ POST /api/pipelines/{id}/plan
 
 ---
 
-## Combos vs pipelines
+## Combos vs pipelines vs node graph
 
-| | Combos | Pipelines |
-|--|--------|-----------|
-| Focus | Role pins (mastermind/worker) or single tier | **Ordered stages** with critique gates |
-| Format | `.aether-combo.json` | `.aether-pipeline.yaml/json` |
-| Voting | — | **Yes** (quality + hw) |
+| | Combos | Pipelines | **Node canvas** |
+|--|--------|-----------|-----------------|
+| Focus | Role pins | Ordered stages | **Visual FX–style graph** |
+| Format | `.aether-combo.json` | `.aether-pipeline.yaml` | `.aether-graph.json` |
+| UI | Hub buttons | Hub plan | **http://127.0.0.1:8766/graph** |
+| Voting | — | Yes | Export → pipeline → vote |
 
-Use **combos** for quick multi-agent role packs; **pipelines** for scripted research→critique→build→test programs you share and rank.
+Use **combos** for quick packs; **pipelines** for YAML programs; **node canvas** to draw Master/Worker/Analyser and auto-wire best practices. See [NODE-GRAPH.md](./NODE-GRAPH.md).
+
+**ActionForge:** not vendored (proprietary EULA). Aether canvas is MIT-native.

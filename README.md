@@ -297,6 +297,7 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 | [combos/](./combos/) | Shareable LLM tier + situation packs (export/import) |
 | [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md) | `/clear` `/compact` — archive to memory then reset context |
 | [docs/PIPELINES.md](./docs/PIPELINES.md) | Scriptable multi-stage LLM workflows + voting |
+| [docs/NODE-GRAPH.md](./docs/NODE-GRAPH.md) | **Node canvas** (Master/Worker/Analyser, auto-connect) |
 | [pipelines/catalog/](./pipelines/catalog/) | Shareable pipeline scripts |
 | [`aether-hub/`](./aether-hub/) | Service source |
 
@@ -396,6 +397,16 @@ curl -s -X POST http://127.0.0.1:8766/api/pipelines/research-code-test/vote \
 ```
 
 Details: [docs/PIPELINES.md](./docs/PIPELINES.md).
+
+### Node canvas (visual FX style)
+
+```text
+http://127.0.0.1:8766/graph
+```
+
+Drag **Master / Worker / Analyser / Tester** nodes, set tier/maker/model, draw wires — or **Auto-connect** / **Best-practice template**. Export to pipeline JSON for share/vote.
+
+ActionForge was evaluated but **not bundled** (non-MIT EULA). See [docs/NODE-GRAPH.md](./docs/NODE-GRAPH.md).
 
 ### Mac ARM GPU
 

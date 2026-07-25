@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AetherStack · Node Graph</title>
+  <style>
+    :root {
+      --bg: #0a0e17; --panel: #121826; --border: #1e293b; --text: #e2e8f0;
+      --muted: #64748b; --accent: #38bdf8; --port: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg); color: var(--text); overflow: hidden; }
+    #toolbar {
+      display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
+      padding: .45rem .65rem; border-bottom: 1px solid var(--border); background: var(--panel);
+      z-index: 20; position: relative;
+    }
+    #toolbar button, #toolbar select, #toolbar input {
+      background: #0f172a; border: 1px solid var(--border); color: var(--text);
+      border-radius: 6px; padding: .3rem .55rem; font-size: 12px; cursor: pointer;
+    }
+    #toolbar button.primary { background: #0369a1; border-color: #0284c7; }
+    #toolbar button:hover { filter: brightness(1.15); }
+    #toolbar .grow { flex: 1; }
+    #toolbar .muted { color: var(--muted); font-size: 11px; }
+    #wrap { display: flex; height: calc(100% - 42px); }
+    #palette {
+      width: 140px; border-right: 1px solid var(--border); background: var(--panel);
+      padding: .5rem; overflow: auto; font-size: 12px;
+    }
+    #palette .ptype {
+      padding: .45rem .5rem; margin: .3rem 0; border-radius: 6px; border: 1px solid var(--border);
+      cursor: grab; user-select: none;
+    }
+    #canvas-wrap { flex: 1; position: relative; overflow: hidden; cursor: default;
+      background-image: radial-gradient(circle, #1e293b 1px, transparent 1px);
+      background-size: 20px 20px; }
+    #canvas-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    #nodes { position: absolute; inset: 0; z-index: 2; }
+    .node {
+      position: absolute; min-width: 150px; background: #0f172a; border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.35); font-size: 12px;
+      user-select: none;
+    }
+    .node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .node .hd {
+      padding: .35rem .5rem; border-radius: 8px 8px 0 0; font-weight: 600; cursor: move;
+      display: flex; justify-content: space-between; gap: .4rem;
+    }
+    .node .bd { padding: .4rem .5rem .55rem; color: var(--muted); }
+    .node .bd label { display: block; font-size: 10px; margin-top: .25rem; }
+    .node .bd input, .node .bd select {
+      width: 100%; background: #020617; border: 1px solid var(--border); color: var(--text);
+      border-radius: 4px; padding: .15rem .3rem; font-size: 11px;
+    }
+    .port {
+      width: 12px; height: 12px; border-radius: 50%; background: var(--port);
+      border: 2px solid #0f172a; position: absolute; cursor: crosshair; z-index: 5;
+    }
+    .port.in { left: -7px; top: 50%; transform: translateY(-50%); }
+    .port.out { right: -7px; top: 50%; transform: translateY(-50%); }
+    .port.hot { background: var(--accent); }
+    #inspector {
+      width: 200px; border-left: 1px solid var(--border); background: var(--panel);
+      padding: .6rem; font-size: 11px; overflow: auto;
+    }
+    #inspector h3 { margin: 0 0 .5rem; font-size: 12px; color: var(--muted); }
+    #toast {
+      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+      background: #1e293b; border: 1px solid var(--border); padding: .4rem .8rem;
+      border-radius: 8px; font-size: 12px; display: none; z-index: 50;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <strong style="color:var(--accent)">Aether Graph</strong>
+    <button type="button" class="primary" id="btnAuto">Auto-connect</button>
+    <button type="button" id="btnTemplate">Best-practice template</button>
+    <button type="button" id="btnFromPipe">From pipeline…</button>
+    <button type="button" id="btnSave">Save</button>
+    <button type="button" id="btnPlan">Plan models</button>
+    <button type="button" id="btnToPipe">Export pipeline JSON</button>
+    <button type="button" id="btnDel">Delete node</button>
+    <span class="grow"></span>
+    <span class="muted">Drag palette → canvas · ports to wire · ActionForge not bundled (EULA)</span>
+    <a class="muted" href="/" style="color:var(--accent)">← hub</a>
+  </div>
+  <div id="wrap">
+    <div id="palette"></div>
+    <div id="canvas-wrap">
+      <svg id="canvas-svg"></svg>
+      <div id="nodes"></div>
+    </div>
+    <div id="inspector">
+      <h3>Inspector</h3>
+      <div id="insp">Select a node</div>
+      <h3 style="margin-top:1rem">Plan</h3>
+      <pre id="planOut" style="white-space:pre-wrap;color:var(--muted);font-size:10px"></pre>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <script>
+const TYPES = {
+  goal: { label: "Goal", color: "#3b82f6" },
+  master: { label: "Master", color: "#a78bfa" },
+  analyser: { label: "Analyser", color: "#fbbf24" },
+  worker: { label: "Worker", color: "#34d399" },
+  tester: { label: "Tester", color: "#22d3ee" },
+  memory: { label: "Memory", color: "#fb7185" },
+  slash: { label: "Slash", color: "#94a3b8" },
+  output: { label: "Output", color: "#64748b" },
+};
+
+let graph = { schema: "aetherstack.graph.v1", id: "canvas-"+Date.now().toString(36), title: "Canvas", nodes: [], edges: [] };
+let selected = null;
+let drag = null;
+let link = null; // {from, x, y}
+
+const palette = document.getElementById("palette");
+const nodesEl = document.getElementById("nodes");
+const svg = document.getElementById("canvas-svg");
+const canvasWrap = document.getElementById("canvas-wrap");
+
+Object.keys(TYPES).forEach(t => {
+  const d = document.createElement("div");
+  d.className = "ptype";
+  d.style.borderLeft = "3px solid " + TYPES[t].color;
+  d.textContent = TYPES[t].label;
+  d.draggable = true;
+  d.addEventListener("dragstart", e => e.dataTransfer.setData("type", t));
+  palette.appendChild(d);
+});
+
+canvasWrap.addEventListener("dragover", e => e.preventDefault());
+canvasWrap.addEventListener("drop", e => {
+  e.preventDefault();
+  const t = e.dataTransfer.getData("type");
+  if (!t) return;
+  const r = canvasWrap.getBoundingClientRect();
+  addNode(t, e.clientX - r.left - 70, e.clientY - r.top - 20);
+});
+
+function toast(m) {
+  const el = document.getElementById("toast");
+  el.textContent = m; el.style.display = "block";
+  setTimeout(() => el.style.display = "none", 2200);
+}
+
+function uid() { return "n_" + Math.random().toString(36).slice(2, 9); }
+
+function defaultData(t) {
+  const map = {
+    goal: { text: "" },
+    master: { role: "mastermind", maker: "anthropic", model: "claude-sonnet-4", max_cost: "high", strategy: "best_score" },
+    analyser: { role: "critic", maker: "openai", model: "gpt-4.1", gate: true, ack: true, max_cost: "high", strategy: "best_score" },
+    worker: { role: "builder", tier: "local", model: "local-default", strategy: "cheapest", parallel: 2, max_cost: "medium" },
+    tester: { role: "tester", strategy: "cheapest", tier: "local", max_cost: "low" },
+    memory: { namespace: "default" },
+    slash: { commands: ["/done all", "/compact"] },
+    output: {},
+  };
+  return JSON.parse(JSON.stringify(map[t] || {}));
+}
+
+function addNode(type, x, y) {
+  const n = { id: uid(), type, x, y, data: defaultData(type) };
+  graph.nodes.push(n);
+  render();
+  select(n.id);
+}
+
+function select(id) {
+  selected = id;
+  render();
+  const n = graph.nodes.find(x => x.id === id);
+  const insp = document.getElementById("insp");
+  if (!n) { insp.textContent = "Select a node"; return; }
+  const d = n.data || {};
+  let html = `<div style="color:${TYPES[n.type].color};font-weight:600">${TYPES[n.type].label}</div>`;
+  html += `<div class="muted">${n.id}</div>`;
+  const fields = Object.keys(d);
+  fields.forEach(k => {
+    const v = d[k];
+    if (typeof v === "boolean") {
+      html += `<label>${k}<br/><input type="checkbox" data-k="${k}" ${v?"checked":""}/></label>`;
+    } else if (Array.isArray(v)) {
+      html += `<label>${k}<br/><input data-k="${k}" value="${v.join(", ")}"/></label>`;
+    } else {
+      html += `<label>${k}<br/><input data-k="${k}" value="${v ?? ""}"/></label>`;
+    }
+  });
+  insp.innerHTML = html;
+  insp.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const k = inp.dataset.k;
+      if (inp.type === "checkbox") n.data[k] = inp.checked;
+      else if (Array.isArray(d[k])) n.data[k] = inp.value.split(",").map(s => s.trim()).filter(Boolean);
+      else {
+        const num = Number(inp.value);
+        n.data[k] = (inp.value !== "" && !Number.isNaN(num) && String(num) === inp.value) ? num : inp.value || null;
+      }
+      render();
+    });
+  });
+}
+
+function portPos(node, which) {
+  const el = document.querySelector(`.node[data-id="${node.id}"]`);
+  if (!el) return { x: node.x, y: node.y + 30 };
+  const r = el.getBoundingClientRect();
+  const cr = canvasWrap.getBoundingClientRect();
+  return {
+    x: (which === "out" ? r.right : r.left) - cr.left,
+    y: r.top + r.height / 2 - cr.top,
+  };
+}
+
+function renderEdges() {
+  const parts = [];
+  graph.edges.forEach(e => {
+    const a = graph.nodes.find(n => n.id === e.from);
+    const b = graph.nodes.find(n => n.id === e.to);
+    if (!a || !b) return;
+    const p1 = portPos(a, "out");
+    const p2 = portPos(b, "in");
+    const mx = (p1.x + p2.x) / 2;
+    parts.push(`<path d="M ${p1.x} ${p1.y} C ${mx} ${p1.y}, ${mx} ${p2.y}, ${p2.x} ${p2.y}"
+      stroke="#38bdf8" stroke-width="2" fill="none" opacity="0.85"/>`);
+  });
+  if (link) {
+    const a = graph.nodes.find(n => n.id === link.from);
+    if (a) {
+      const p1 = portPos(a, "out");
+      parts.push(`<path d="M ${p1.x} ${p1.y} L ${link.x} ${link.y}" stroke="#fbbf24" stroke-width="2" fill="none" stroke-dasharray="4 3"/>`);
+    }
+  }
+  svg.innerHTML = parts.join("");
+}
+
+function render() {
+  nodesEl.innerHTML = "";
+  graph.nodes.forEach(n => {
+    const el = document.createElement("div");
+    el.className = "node" + (selected === n.id ? " selected" : "");
+    el.dataset.id = n.id;
+    el.style.left = n.x + "px";
+    el.style.top = n.y + "px";
+    const col = TYPES[n.type]?.color || "#64748b";
+    const d = n.data || {};
+    let sub = d.model || d.maker || d.tier || d.text || d.commands?.join(" ") || "";
+    if (typeof sub === "string" && sub.length > 28) sub = sub.slice(0, 26) + "…";
+    el.innerHTML = `
+      <div class="hd" style="background:${col}33;border-bottom:1px solid ${col}55">
+        <span>${TYPES[n.type]?.label || n.type}</span>
+        <span style="opacity:.6;font-weight:400;font-size:10px">${n.type}</span>
+      </div>
+      <div class="bd">${sub || "—"}</div>
+      ${n.type !== "goal" ? '<div class="port in" data-port="in"></div>' : ""}
+      ${n.type !== "output" ? '<div class="port out" data-port="out"></div>' : ""}
+    `;
+    const hd = el.querySelector(".hd");
+    hd.addEventListener("mousedown", ev => {
+      if (ev.button !== 0) return;
+      select(n.id);
+      drag = { id: n.id, ox: ev.clientX - n.x, oy: ev.clientY - n.y };
+    });
+    el.addEventListener("mousedown", ev => {
+      if (ev.target.classList.contains("port")) return;
+      select(n.id);
+    });
+    const pout = el.querySelector(".port.out");
+    if (pout) {
+      pout.addEventListener("mousedown", ev => {
+        ev.stopPropagation();
+        const r = canvasWrap.getBoundingClientRect();
+        link = { from: n.id, x: ev.clientX - r.left, y: ev.clientY - r.top };
+      });
+    }
+    const pin = el.querySelector(".port.in");
+    if (pin) {
+      pin.addEventListener("mouseup", ev => {
+        ev.stopPropagation();
+        if (link && link.from !== n.id) {
+          graph.edges = graph.edges.filter(e => !(e.from === link.from && e.to === n.id));
+          graph.edges.push({ id: "e_"+uid().slice(2), from: link.from, to: n.id, kind: "data" });
+          link = null;
+          render();
+        }
+      });
+    }
+    nodesEl.appendChild(el);
+  });
+  requestAnimationFrame(renderEdges);
+}
+
+window.addEventListener("mousemove", e => {
+  const r = canvasWrap.getBoundingClientRect();
+  if (drag) {
+    const n = graph.nodes.find(x => x.id === drag.id);
+    if (n) {
+      n.x = e.clientX - drag.ox;
+      n.y = e.clientY - drag.oy;
+      const el = document.querySelector(`.node[data-id="${n.id}"]`);
+      if (el) { el.style.left = n.x + "px"; el.style.top = n.y + "px"; }
+      renderEdges();
+    }
+  }
+  if (link) {
+    link.x = e.clientX - r.left;
+    link.y = e.clientY - r.top;
+    renderEdges();
+  }
+});
+window.addEventListener("mouseup", () => { drag = null; if (link) { link = null; renderEdges(); } });
+
+document.getElementById("btnDel").onclick = () => {
+  if (!selected) return;
+  graph.nodes = graph.nodes.filter(n => n.id !== selected);
+  graph.edges = graph.edges.filter(e => e.from !== selected && e.to !== selected);
+  selected = null;
+  render();
+  document.getElementById("insp").textContent = "Select a node";
+};
+
+document.getElementById("btnAuto").onclick = async () => {
+  const j = await fetch("/api/graphs/auto-connect", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ graph }),
+  }).then(r => r.json());
+  if (j.nodes) graph.nodes = j.nodes;
+  if (j.edges) graph.edges = j.edges;
+  render();
+  toast("Auto-connected · " + (j.practices || []).length + " practices");
+};
+
+document.getElementById("btnTemplate").onclick = async () => {
+  const j = await fetch("/api/graphs/template").then(r => r.json());
+  graph = j;
+  selected = null;
+  render();
+  toast("Best-practice template loaded");
+};
+
+document.getElementById("btnFromPipe").onclick = async () => {
+  const id = prompt("Pipeline id (e.g. research-code-test)", "research-code-test");
+  if (!id) return;
+  const j = await fetch("/api/graphs/from-pipeline", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pipeline_id: id }),
+  }).then(r => r.json());
+  if (j.error) { toast(j.error); return; }
+  graph = j;
+  render();
+  toast("Loaded pipeline " + id);
+};
+
+document.getElementById("btnSave").onclick = async () => {
+  const j = await fetch("/api/graphs", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(graph),
+  }).then(r => r.json());
+  if (j.id) graph.id = j.id;
+  toast("Saved " + (j.id || ""));
+};
+
+document.getElementById("btnPlan").onclick = async () => {
+  const j = await fetch("/api/graphs/plan", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ graph, goal: (graph.nodes.find(n => n.type === "goal") || {}).data?.text || "" }),
+  }).then(r => r.json());
+  document.getElementById("planOut").textContent = (j.flow || "") + "\n" + JSON.stringify(j.stages_resolved || j, null, 2).slice(0, 2500);
+  toast("Models resolved for nodes");
+};
+
+document.getElementById("btnToPipe").onclick = async () => {
+  const j = await fetch("/api/graphs/to-pipeline", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ graph }),
+  }).then(r => r.json());
+  const blob = new Blob([JSON.stringify(j, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (j.id || "graph") + ".aether-pipeline.json";
+  a.click();
+  toast("Pipeline JSON downloaded");
+};
+
+// load template on first visit
+fetch("/api/graphs/template").then(r => r.json()).then(j => { graph = j; render(); }).catch(() => render());
+  </script>
+</body>
+</html>

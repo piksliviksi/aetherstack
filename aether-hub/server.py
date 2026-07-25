@@ -41,6 +41,17 @@ from combos import (  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
+from graph import (  # noqa: E402
+    auto_connect,
+    best_practice_template,
+    graph_to_pipeline,
+    list_graphs,
+    load_graph,
+    node_types,
+    pipeline_to_graph,
+    plan_graph,
+    save_graph,
+)
 from pipelines import (  # noqa: E402
     export_pipeline,
     get_pipeline,
@@ -227,6 +238,13 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send(200, _index_html(), "text/html; charset=utf-8")
             return
+        if path in ("/graph", "/graph/", "/graph.html"):
+            gp = ROOT / "static" / "graph.html"
+            if gp.is_file():
+                self._send(200, gp.read_bytes(), "text/html; charset=utf-8")
+            else:
+                self._send(404, {"error": "graph.html missing"})
+            return
         if path == "/api/health":
             d = get_discover()
             self._send(
@@ -325,6 +343,24 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/pipelines/ranking", "/api/scripts/ranking"):
             self._send(200, {"ranking": ranking()})
             return
+        if path in ("/api/graphs", "/api/graph"):
+            self._send(200, {"graphs": list_graphs(), "node_types": node_types()})
+            return
+        if path == "/api/graphs/template":
+            self._send(200, best_practice_template())
+            return
+        if path == "/api/graphs/node-types":
+            self._send(200, node_types())
+            return
+        if path.startswith("/api/graphs/") and path.count("/") == 3:
+            gid = path[len("/api/graphs/") :].strip("/")
+            if gid and gid not in ("template", "node-types", "auto-connect", "to-pipeline", "from-pipeline", "plan"):
+                g = load_graph(gid)
+                if g:
+                    self._send(200, g)
+                else:
+                    self._send(404, {"error": f"unknown graph: {gid}"})
+                return
         if path.startswith("/api/pipelines/") and path.endswith("/export"):
             pid = path[len("/api/pipelines/") : -len("/export")].strip("/")
             try:
@@ -374,6 +410,52 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except (ValueError, json.JSONDecodeError) as e:
                 self._send(400, {"error": str(e)})
+            return
+        if path in ("/api/graphs", "/api/graph"):
+            try:
+                self._send(200, save_graph(body or {}))
+            except Exception as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path == "/api/graphs/auto-connect":
+            g = body.get("graph") or body
+            nodes = g.get("nodes") or []
+            res = auto_connect(nodes=nodes, graph=g)
+            # merge layout back
+            out = dict(g)
+            out["nodes"] = res.get("nodes") or nodes
+            out["edges"] = res.get("edges") or []
+            out["practices"] = res.get("practices")
+            self._send(200, out)
+            return
+        if path == "/api/graphs/to-pipeline":
+            g = body.get("graph") or body
+            try:
+                self._send(200, graph_to_pipeline(g))
+            except Exception as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path == "/api/graphs/from-pipeline":
+            try:
+                self._send(
+                    200,
+                    pipeline_to_graph(
+                        pipeline_id=body.get("pipeline_id"),
+                        pipeline=body.get("pipeline"),
+                    ),
+                )
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            return
+        if path == "/api/graphs/plan":
+            g = body.get("graph") or body
+            try:
+                self._send(
+                    200,
+                    plan_graph(g, get_snapshot(), goal=body.get("goal") or ""),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
             return
         if path.startswith("/api/pipelines/") and path.endswith("/vote"):
             pid = path[len("/api/pipelines/") : -len("/vote")].strip("/")
@@ -622,6 +704,10 @@ def _paths() -> list[str]:
         "GET  /api/pipelines/{id}/export",
         "POST /api/pipelines/{id}/plan",
         "POST /api/pipelines/{id}/vote  {up|down, hw_flag}",
+        "GET  /graph                 ← node canvas UI",
+        "GET|POST /api/graphs",
+        "POST /api/graphs/auto-connect",
+        "POST /api/graphs/to-pipeline | from-pipeline | plan",
         "POST /api/sessions/{id}/message",
         "GET  /api/sessions/{id}/status",
         "/api/health",
@@ -697,7 +783,7 @@ def _index_html() -> bytes:
   <a href="/api/modes">/api/modes</a> ·
   <a href="/api/combos">/api/combos</a> ·
   <a href="/api/pipelines">/api/pipelines</a> ·
-  <a href="/api/pipelines/ranking">ranking</a> ·
+  <a href="/graph"><b>node canvas</b></a> ·
   <a href="/api/matrix">matrix</a> ·
   <a href="/api/health">health</a>
  </div>
@@ -928,6 +1014,7 @@ def main() -> None:
     print("  MODES:  GET|POST /api/modes   (inline|multi_agent, token_saver)")
     print("  PLAN:   POST /api/agents/plan (multi-LLM event)")
     print("  SLASH:  POST /api/slash  {\"text\":\"/clear\"}  (archive→clear)")
+    print("  GRAPH:  http://{HOST}:{PORT}/graph  (node canvas)".format(HOST=HOST, PORT=PORT))
     print("  ROUTE:  GET /api/route?need=code&prefer=local")
     print(f"  redis:  {REDIS_URL}  backend={_memory.backend}")
     try:
