@@ -292,7 +292,6 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 |-----|--------|
 | [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) | Local ↔ cloud routing / sync matrix |
 | [docs/AGENT-MEMORY.md](./docs/AGENT-MEMORY.md) | Redis sessions + vector search |
-| [docs/CRITIQUE.md](./docs/CRITIQUE.md) | Design critique & residual risks |
 | [`aether-hub/`](./aether-hub/) | Service source |
 
 ```bash
