@@ -217,9 +217,8 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 1. Reload window.  
 2. Open a **folder**, not a single file.  
-3. Command Palette → type `AetherStack` — if commands appear, the extension works; use the sidebar enable steps above.  
-4. Uninstall duplicate `piksliviksi.aetherstack`.  
-5. Remote/WSL: install the extension **on the remote** side if the workspace is remote (`Extensions: Show Local / Remote`).
+3. Command Palette → type `AetherStack` — if commands appear, the extension works; use the sidebar enable steps above.
+4. Remote/WSL: install the extension **on the remote** side if the workspace is remote (`Extensions: Show Local / Remote`).
 
 ### List Models → 401
 
