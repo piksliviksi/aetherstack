@@ -361,8 +361,8 @@ def build_recommendations(report: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "severity": "high",
                 "code": "no_rocm_libs",
-                "action": "sudo bash scripts/install-ollama-rocm-wsl.sh  # force AMD compute (ROCm) package",
-                "detail": "AMD CUs visible via rocminfo/DXG but Ollama has no /rocm runner — stock install skips ROCm when lspci has no amdgpu (typical WSL).",
+                "action": "sudo bash aether-amd/ensure-backend.sh  # userspace AMD adapter + ROCm Ollama",
+                "detail": "AMD CUs visible via rocminfo/DXG but Ollama has no /rocm runner — stock install skips ROCm when lspci has no amdgpu (typical WSL). Not a kernel driver issue.",
             }
         )
     engines = (report.get("gpu_hints") or {}).get("amd_compute_engines") or host.get(

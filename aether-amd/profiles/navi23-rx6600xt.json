@@ -1,0 +1,33 @@
+{
+  "id": "navi23-rx6600xt",
+  "marketing_names": ["AMD Radeon RX 6600 XT", "Radeon RX 6600 XT"],
+  "chip_ids": ["0x73FF", "73FF"],
+  "gfx_native": "gfx1032",
+  "hsa_override_gfx_version": "10.3.0",
+  "compute_units_ref": 32,
+  "wavefront": 32,
+  "rocdxg_dids_line": "0x73FF,10,3,2",
+  "wsl": {
+    "requires_dxg": true,
+    "requires_librocdxg": true,
+    "note": "WSL uses DXCore path; lspci often has no amdgpu — force Ollama ROCm package"
+  },
+  "linux_bare_metal": {
+    "requires_kfd": true,
+    "requires_dri": true
+  },
+  "ollama": {
+    "package": "ollama-linux-amd64-rocm",
+    "env": {
+      "HSA_ENABLE_DXG_DETECTION": "1",
+      "HSA_OVERRIDE_GFX_VERSION": "10.3.0",
+      "HIP_VISIBLE_DEVICES": "0",
+      "ROCR_VISIBLE_DEVICES": "0",
+      "OLLAMA_VULKAN": "false"
+    }
+  },
+  "vendor_driver": {
+    "windows": "AMD Software: Adrenalin Edition (prefer 26.2.2+ for ROCDXG)",
+    "linux": "amdgpu + ROCm userland from repo.radeon.com"
+  }
+}

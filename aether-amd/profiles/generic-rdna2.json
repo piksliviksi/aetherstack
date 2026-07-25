@@ -1,0 +1,23 @@
+{
+  "id": "generic-rdna2",
+  "marketing_names": [],
+  "chip_ids": [],
+  "gfx_native": "gfx1030",
+  "hsa_override_gfx_version": "10.3.0",
+  "compute_units_ref": null,
+  "rocdxg_dids_line": null,
+  "wsl": {
+    "requires_dxg": true,
+    "note": "Fallback profile when chip not in catalog — still force ROCm Ollama on WSL"
+  },
+  "ollama": {
+    "package": "ollama-linux-amd64-rocm",
+    "env": {
+      "HSA_ENABLE_DXG_DETECTION": "1",
+      "HSA_OVERRIDE_GFX_VERSION": "10.3.0",
+      "HIP_VISIBLE_DEVICES": "0",
+      "ROCR_VISIBLE_DEVICES": "0",
+      "OLLAMA_VULKAN": "false"
+    }
+  }
+}

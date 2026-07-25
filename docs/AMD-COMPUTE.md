@@ -2,6 +2,23 @@
 
 AetherStack local inference on Radeon must use the GPU’s **compute units (CUs)** via **ROCm/HSA**, not the display stack and not a CUDA-only Ollama build.
 
+## Do we write a custom driver?
+
+| Layer | Who provides it | Aether role |
+|-------|-----------------|-------------|
+| Kernel / display / DXCore | **AMD Adrenalin** (Windows), **amdgpu** (Linux) | Never replace |
+| ROCDXG / HSA in WSL | **librocdxg** + ROCm | Install/configure |
+| LLM HIP kernels | **Ollama ROCm package** (`libggml` HIP) | Force-install on WSL |
+| Device profiles, dids, env, probes | **`aether-amd/` userspace adapter** | Yes — this is our “driver glue” |
+
+We **do not** ship a signed kernel GPU driver. That would be a multi-year AMD/Microsoft project.  
+We **do** ship a **userspace compute adapter** so the stack always targets the CUs correctly:
+
+```bash
+python3 aether-amd/probe.py
+sudo bash aether-amd/ensure-backend.sh
+```
+
 ## What “compute engines” means here
 
 On discrete AMD GPUs (e.g. **RX 6600 XT**):
@@ -24,12 +41,15 @@ On discrete AMD GPUs (e.g. **RX 6600 XT**):
 2. Under WSL + ROCDXG, the GPU often **does not appear as PCI amdgpu** — only via `rocminfo` / DXG.  
 3. Result: install keeps **cuda_v12 / cuda_v13 / vulkan / cpu** runners → **VRAM = 0**, inference on CPU.
 
-**Fix:** force the ROCm package:
+**Fix:** Aether AMD adapter + ROCm Ollama package:
 
 ```bash
-# In Debian WSL
+# In Debian WSL — preferred
+sudo bash /mnt/d/llm/stack/aether-amd/ensure-backend.sh
+python3 /mnt/d/llm/stack/aether-amd/probe.py
+
+# Or low-level:
 sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh
-# Status
 bash /mnt/d/llm/stack/scripts/amd-compute-status.sh
 ```
 

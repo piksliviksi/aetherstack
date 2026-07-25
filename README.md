@@ -370,13 +370,15 @@ Ready-made JSON: [combos/export/](./combos/export/) · guide: [combos/README.md]
 
 `rocminfo` seeing the card is not enough — Ollama must load the **ROCm** package so HIP runs on the GPU’s **compute units** (e.g. 32 CUs on RX 6600 XT). On WSL, stock install often skips ROCm (no `lspci` amdgpu).
 
+Aether ships a **userspace AMD adapter** (not a kernel driver): device profiles, dids, probe, ensure-backend.
+
 ```powershell
-# Force ROCm runners + wire env (Debian WSL)
-wsl -d Debian -- bash -lc "sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh"
-wsl -d Debian -- bash -lc "bash /mnt/d/llm/stack/scripts/amd-compute-status.sh"
+# Preferred: adapter applies profile + ROCm Ollama
+wsl -d Debian -- bash -lc "sudo bash /mnt/d/llm/stack/aether-amd/ensure-backend.sh"
+wsl -d Debian -- bash -lc "python3 /mnt/d/llm/stack/aether-amd/probe.py"
 ```
 
-Guide: [docs/AMD-COMPUTE.md](./docs/AMD-COMPUTE.md) · WSL notes: [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md)
+Guide: [docs/AMD-COMPUTE.md](./docs/AMD-COMPUTE.md) · Adapter: [`aether-amd/`](./aether-amd/) · WSL: [docs/WSL-AMD-GPU.md](./docs/WSL-AMD-GPU.md)
 
 ## Related
 
