@@ -1,6 +1,6 @@
 # AetherStack for VS Code
 
-**Marketplace:** [AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack)
+Install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack):
 
 ```bash
 code --install-extension AetherStack.aetherstack
@@ -10,7 +10,7 @@ code --install-extension AetherStack.aetherstack
 
 Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
-**[docs/VSCODE-EXTENSION.md](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
+**[How to use the VS Code extension](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
 
 Open a project folder, scan prior AI chat artifacts, see which tools/models were used, and continue building through [AetherStack](https://github.com/piksliviksi/aetherstack) (LiteLLM multi-model gateway + Open WebUI + Ollama).
 
@@ -47,31 +47,6 @@ VS Code does **not** run LLMs on the Radeon. Point Continue/Cline at `http://127
 | `aetherstack.apiKey` | `sk-aether-local` |
 | `aetherstack.chatUiUrl` | `http://127.0.0.1:3000` |
 | `aetherstack.defaultModel` | `local-default` |
-
-## Install from VSIX
-
-```bash
-code --install-extension aetherstack-0.1.0.vsix
-```
-
-Or in VS Code: Extensions view → `...` → **Install from VSIX...**
-
-## Package this extension
-
-```bash
-cd integrations/vscode
-npm install -g @vscode/vsce
-vsce package
-```
-
-## Marketplace publish (optional)
-
-1. Create a publisher at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage)
-2. Create an Azure DevOps PAT with **Marketplace → Manage**
-3. `vsce login AetherStack`
-4. `vsce publish`
-
-See [Publishing Extensions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
 
 ## License
 
