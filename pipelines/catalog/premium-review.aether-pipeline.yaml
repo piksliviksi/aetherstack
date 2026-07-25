@@ -1,0 +1,45 @@
+schema: aetherstack.pipeline.v1
+id: premium-review
+title: Premium review (Opus critic, Sonnet build)
+description: >
+  Expensive critique gate with Opus; builders on Sonnet/GPT; tests on mini.
+  Marked hw_weight low for cloud (no local GPU load) but cost_weight high.
+author: aetherstack
+version: "1.0.0"
+tags: [review, premium, cloud]
+hw_weight: low
+cost_weight: high
+token_saver: false
+mode: multi_agent
+
+stages:
+  - id: research
+    label: Scope
+    role: researcher
+    select: { strategy: best_score, maker: openai, max_cost: medium }
+    prefer_models: [gpt-4.1]
+    needs: [chat, code]
+  - id: critique
+    label: Opus critique
+    role: critic
+    select: { strategy: best_score, maker: anthropic, max_cost: very_high }
+    prefer_models: [claude-opus-4, claude-sonnet-4]
+    needs: [reason, code]
+    ack: true
+    gate: true
+  - id: implement
+    label: Sonnet implement
+    role: builder
+    select: { strategy: best_score, maker: anthropic, max_cost: high }
+    prefer_models: [claude-sonnet-4, gpt-4.1]
+    needs: [code, tools]
+    parallel: 2
+  - id: test
+    label: Mini tests
+    role: tester
+    select: { strategy: cheapest, max_cost: low }
+    prefer_models: [gpt-4.1-mini, claude-haiku]
+    needs: [code, cheap]
+
+on_complete:
+  slash: [/done all, /compact]

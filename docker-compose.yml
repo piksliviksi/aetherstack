@@ -79,11 +79,15 @@ services:
       - AETHER_COMBOS_CATALOG=/combos/catalog.yaml
       - AETHER_COMBOS_EXPORT=/combos/export
       - AETHER_COMBOS_IMPORT=/combos/import
+      - AETHER_PIPELINES_CATALOG=/pipelines/catalog
+      - AETHER_PIPELINES_USER=/pipelines/user
+      - AETHER_PIPELINES_VOTES=/pipelines/votes.json
     volumes:
       - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
       - ./aether-hub/agent_modes.yaml:/app/agent_modes.yaml:ro
       - ./aether-hub/bootstrap.yaml:/app/bootstrap.yaml:ro
       - ./combos:/combos:ro
+      - ./pipelines:/pipelines
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

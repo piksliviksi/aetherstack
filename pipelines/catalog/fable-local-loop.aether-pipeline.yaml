@@ -1,0 +1,43 @@
+schema: aetherstack.pipeline.v1
+id: fable-local-loop
+title: Fable local loop (private / Metal / ROCm)
+description: >
+  All stages prefer local Ollama — research lite, self-critique, build, test.
+  Hardware-friendly on Mac Metal or AMD once ROCm runners work.
+author: aetherstack
+version: "1.0.0"
+tags: [local, private, low-cost, metal, rocm]
+hw_weight: low
+token_saver: true
+mode: multi_agent
+
+stages:
+  - id: research
+    label: Local research
+    role: researcher
+    select: { strategy: best_score, tier: local, max_cost: low }
+    prefer_models: [local-default, local-llama31-8b]
+    needs: [chat, private]
+  - id: critique
+    label: Self-critique
+    role: critic
+    select: { strategy: cheapest, tier: local }
+    prefer_models: [local-tiny, local-default]
+    needs: [chat, private]
+    ack: true
+  - id: implement
+    label: Build
+    role: builder
+    select: { strategy: best_score, tier: local }
+    prefer_models: [local-default]
+    needs: [code, private]
+  - id: test
+    label: Test
+    role: tester
+    select: { strategy: cheapest, tier: local }
+    prefer_models: [local-tiny, local-default]
+    needs: [cheap, fast, private]
+
+on_complete:
+  slash: [/done all, /clear]
+  archive: true

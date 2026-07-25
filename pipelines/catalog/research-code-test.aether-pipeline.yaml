@@ -1,0 +1,79 @@
+schema: aetherstack.pipeline.v1
+id: research-code-test
+title: Research → Critique → Code → Test
+description: >
+  High-tier research, separate critic models, medium builders, cheap/local testers.
+  Good default multi-LLM software loop.
+author: aetherstack
+version: "1.0.0"
+tags: [coding, research, multi-stage, default]
+hw_weight: medium   # low | medium | high | extreme
+token_saver: false
+mode: multi_agent
+
+# Global defaults (stages may override)
+defaults:
+  prefer: auto
+  max_cost: high
+
+stages:
+  - id: research
+    label: Research
+    purpose: Survey problem, constraints, approach options
+    role: researcher
+    select:
+      strategy: best_score
+      max_cost: high
+      prefer: cloud
+    prefer_models: [claude-opus-4, grok-4.5, o3, gemini-2.5-pro]
+    prefer_makers: [anthropic, xai, openai, google]
+    needs: [reason, long_context, chat]
+    outputs: [brief, plan_outline]
+
+  - id: critique
+    label: Critique / ack
+    purpose: Adversarial review of research; accept or send back
+    role: critic
+    select:
+      strategy: best_score
+      max_cost: high
+      # Prefer a *different* maker than researcher when possible
+      prefer: cloud
+    prefer_models: [gpt-4.1, claude-sonnet-4, grok-4.5]
+    prefer_makers: [openai, anthropic, xai]
+    needs: [reason, chat]
+    ack: true
+    gate: true
+    outputs: [ack, risks, revisions]
+
+  - id: implement
+    label: Build code
+    purpose: Implement accepted plan in code units
+    role: builder
+    select:
+      strategy: best_score
+      max_cost: medium
+    prefer_models: [claude-sonnet-4, gpt-4.1, grok-code, local-default]
+    prefer_makers: [anthropic, openai, xai, ollama]
+    needs: [code, tools, chat]
+    parallel: 2
+    split_by: modules
+    outputs: [patches, files]
+
+  - id: test
+    label: Testing
+    purpose: Unit/smoke checks, cheap and fast
+    role: tester
+    select:
+      strategy: cheapest
+      max_cost: low
+      tier: local
+    prefer_models: [local-default, gpt-4.1-mini, claude-haiku, gemini-flash]
+    prefer_makers: [ollama, openai, anthropic, google]
+    needs: [code, cheap, fast]
+    parallel: 2
+    outputs: [test_report]
+
+on_complete:
+  slash: [/done all, /compact]
+  archive: true
