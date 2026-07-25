@@ -22,6 +22,13 @@ from agents import (  # noqa: E402
     modes_status,
     plan_event,
 )
+from bootstrap import (  # noqa: E402
+    apply_plan,
+    build_install_plan,
+    get_bootstrap_state,
+    plan_and_maybe_apply,
+    set_bootstrap_state,
+)
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
@@ -237,6 +244,18 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/modes", "/api/agent-modes"):
             self._send(200, modes_status(get_snapshot()))
             return
+        if path in ("/api/bootstrap", "/api/auto-install"):
+            if (qs.get("refresh") or ["0"])[0] in ("1", "true", "yes"):
+                run_discover()
+            plan = build_install_plan(get_discover())
+            self._send(
+                200,
+                {
+                    "state": get_bootstrap_state(),
+                    **plan,
+                },
+            )
+            return
         if path.startswith("/api/memory/sessions/"):
             sid = path[len("/api/memory/sessions/") :].strip("/")
             if not sid:
@@ -269,6 +288,28 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, modes_status(get_snapshot()))
             except ValueError as e:
                 self._send(400, {"error": str(e)})
+            return
+        if path in ("/api/bootstrap", "/api/auto-install"):
+            st = set_bootstrap_state(body or {})
+            plan = build_install_plan(get_discover())
+            self._send(200, {"state": st, **plan})
+            return
+        if path in ("/api/bootstrap/run", "/api/auto-install/run"):
+            dry = bool((body or {}).get("dry_run", False))
+            confirm = bool((body or {}).get("confirm", False))
+            only_safe = bool((body or {}).get("only_safe", True))
+            cats = (body or {}).get("categories")
+            # refresh discover first
+            disc = run_discover()
+            plan = build_install_plan(disc)
+            run = apply_plan(
+                plan,
+                confirm=confirm,
+                only_safe=only_safe,
+                categories=cats,
+                dry_run=dry,
+            )
+            self._send(200, {"plan": plan, "run": run, "state": get_bootstrap_state()})
             return
         if path in ("/api/agents/plan", "/api/agents/event"):
             try:
@@ -379,6 +420,8 @@ def _paths() -> list[str]:
         "POST /api/discover          {host_scan: {...}}",
         "GET|POST /api/modes         ← inline|multi_agent, token_saver, role pins",
         "POST /api/agents/plan       ← multi-LLM event plan",
+        "GET|POST /api/bootstrap     ← optional auto-install plan (off by default)",
+        "POST /api/bootstrap/run     ← {confirm, dry_run, only_safe}",
         "/api/health",
         "/api/matrix",
         "/api/route?need=code&prefer=local",
@@ -472,6 +515,50 @@ def _index_html() -> bytes:
   see <a href="https://github.com/piksliviksi/aetherstack/blob/main/docs/AGENT-MODES.md">AGENT-MODES.md</a>
  </div>
 </div>
+<div class="card">
+ <b>Auto-install</b> (optional, off by default)
+ <div class="muted" id="bootState">…</div>
+ <div style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.35rem">
+  <button type="button" onclick="bootEnable(true)">enable</button>
+  <button type="button" onclick="bootEnable(false)">disable</button>
+  <button type="button" onclick="bootDry()">dry-run plan</button>
+  <button type="button" onclick="bootApply()">apply safe</button>
+ </div>
+ <pre id="bootPlan" class="muted" style="white-space:pre-wrap;max-height:12rem;overflow:auto;font-size:11px"></pre>
+ <div class="muted">Host full install: <code>.\\scripts\\auto-install.ps1 -Enable -Yes</code> · elevated: <code>-IncludeElevated</code></div>
+</div>
+<script>
+async function refreshBoot(){{
+  try {{
+    const j = await fetch('/api/bootstrap?refresh=1').then(r=>r.json());
+    const st = j.state||{{}};
+    document.getElementById('bootState').textContent =
+      'enabled='+st.enabled+' · actions='+j.action_count+' (safe='+j.safe_count+')';
+    const lines = (j.actions||[]).slice(0,12).map(a =>
+      '['+(a.safe?'safe':'elev')+'] '+a.title);
+    document.getElementById('bootPlan').textContent = lines.join('\\n') || 'nothing missing';
+  }} catch(e) {{
+    document.getElementById('bootState').textContent = 'bootstrap unavailable';
+  }}
+}}
+async function bootEnable(v){{
+  await fetch('/api/bootstrap',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{enabled:v}})}});
+  refreshBoot();
+}}
+async function bootDry(){{
+  const j = await fetch('/api/bootstrap/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{confirm:true,dry_run:true,only_safe:true}})}}).then(r=>r.json());
+  document.getElementById('bootPlan').textContent = JSON.stringify(j.run||j,null,2).slice(0,2500);
+  refreshBoot();
+}}
+async function bootApply(){{
+  if(!confirm('Apply SAFE auto-installs (pip/models via API)? Elevated host steps need auto-install.ps1 -Yes')) return;
+  await fetch('/api/bootstrap',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{enabled:true}})}});
+  const j = await fetch('/api/bootstrap/run',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{confirm:true,dry_run:false,only_safe:true}})}}).then(r=>r.json());
+  document.getElementById('bootPlan').textContent = JSON.stringify(j.run||j,null,2).slice(0,2500);
+  refreshBoot();
+}}
+refreshBoot();
+</script>
 <div class="card">
  <b>Do this next</b>
  <ul class="rec">{rec_html}</ul>
