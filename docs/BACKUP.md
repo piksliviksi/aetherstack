@@ -124,4 +124,4 @@ Schema: `aetherstack.backup.v1`.
 - [PRIVATE-MODE.md](./PRIVATE-MODE.md)  
 - [AGENT-MEMORY.md](./AGENT-MEMORY.md)  
 - [FUTURE.md](./FUTURE.md) enterprise backup  
-- Example config: [`.aetherstack/backup.yaml.example`](../.aetherstack/backup.yaml.example)  
+- Example config: [backup.yaml.example](./backup.yaml.example) → copy to `.aetherstack/backup.yaml`
