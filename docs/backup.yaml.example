@@ -1,0 +1,37 @@
+# Copy to .aetherstack/backup.yaml (local PC; not committed by default)
+version: 1
+
+local:
+  enabled: true
+  path: .aetherstack/backups          # or absolute e.g. D:/Backups/aetherstack
+  keep_last: 20
+  zip: true
+
+# Pre-configure AWS S3 (optional)
+aws:
+  enabled: false
+  bucket: my-company-aether-backups
+  prefix: aetherstack/backups
+  region: us-east-1
+  profile: ""                         # AWS_PROFILE name, or use env credentials
+
+# Pre-configure Azure Blob (optional)
+azure:
+  enabled: false
+  container: aether-backups
+  prefix: aetherstack/backups
+  connection_string_env: AZURE_STORAGE_CONNECTION_STRING
+
+auto:
+  enabled: false                      # set true for scheduled hub backups
+  interval_sec: 86400                 # 24h
+  scope: global                       # global | project
+  include_private: false
+  include_embeddings: false
+
+include:
+  memory_vectors: true
+  sessions: true
+  privacy_state: true
+  xref_registry: true
+  project_files: true
