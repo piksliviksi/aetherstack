@@ -104,6 +104,9 @@ Chat in VS Code (one model façade)
 
 | Doc | Topic |
 |-----|--------|
+| [README.md](./README.md) | Full documentation index |
+| [QUICKSTART.md](./QUICKSTART.md) | Install, ports, IDE wire-up |
+| [GATEWAY.md](./GATEWAY.md) | LiteLLM aliases & keys |
 | [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md) | IDE install & commands |
 | [PIPELINES.md](./PIPELINES.md) | Stage scripts + voting |
 | [NODE-GRAPH.md](./NODE-GRAPH.md) | Visual canvas |
