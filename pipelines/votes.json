@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "research-code-test": {
+      "up": 1,
+      "down": 0,
+      "hw_votes": {
+        "medium": 1
+      },
+      "voters": {
+        "local:research-code-test": "up"
+      },
+      "score": 1,
+      "updated_at": 1784971123.8879864
+    }
+  }
+}

@@ -41,6 +41,15 @@ from combos import (  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
+from pipelines import (  # noqa: E402
+    export_pipeline,
+    get_pipeline,
+    import_pipeline,
+    list_pipelines,
+    plan_pipeline,
+    ranking,
+    vote,
+)
 from slash_commands import (  # noqa: E402
     cmd_status,
     execute_slash,
@@ -310,6 +319,33 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/slash", "/api/commands"):
             self._send(200, {"commands": list_commands()})
             return
+        if path in ("/api/pipelines", "/api/scripts"):
+            self._send(200, list_pipelines())
+            return
+        if path in ("/api/pipelines/ranking", "/api/scripts/ranking"):
+            self._send(200, {"ranking": ranking()})
+            return
+        if path.startswith("/api/pipelines/") and path.endswith("/export"):
+            pid = path[len("/api/pipelines/") : -len("/export")].strip("/")
+            try:
+                self._send(200, export_pipeline(pid))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            return
+        if path.startswith("/api/pipelines/") and not any(
+            path.endswith(x) for x in ("/plan", "/vote", "/launch", "/export")
+        ):
+            pid = path[len("/api/pipelines/") :].strip("/")
+            if pid and pid not in ("import", "ranking"):
+                pipe = get_pipeline(pid)
+                if pipe:
+                    self._send(
+                        200,
+                        {k: v for k, v in pipe.items() if not str(k).startswith("_")},
+                    )
+                else:
+                    self._send(404, {"error": f"unknown pipeline: {pid}"})
+                return
         if path.startswith("/api/sessions/") and path.endswith("/status"):
             sid = path[len("/api/sessions/") : -len("/status")].strip("/") or "default"
             self._send(200, cmd_status(sid, _memory))
@@ -326,6 +362,49 @@ class Handler(BaseHTTPRequestHandler):
             sid = body.get("session_id") or body.get("session") or "default"
             try:
                 self._send(200, execute_slash(text, _memory, session_id=sid))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/pipelines/import", "/api/scripts/import"):
+            try:
+                raw = body.get("pipeline") if body.get("pipeline") is not None else body
+                self._send(
+                    200,
+                    import_pipeline(raw, persist=bool(body.get("persist", True))),
+                )
+            except (ValueError, json.JSONDecodeError) as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path.startswith("/api/pipelines/") and path.endswith("/vote"):
+            pid = path[len("/api/pipelines/") : -len("/vote")].strip("/")
+            try:
+                self._send(
+                    200,
+                    vote(
+                        pid,
+                        up=body.get("up"),
+                        down=body.get("down"),
+                        hw_flag=body.get("hw_flag") or body.get("hw"),
+                        voter=body.get("voter") or "local",
+                    ),
+                )
+            except Exception as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path.startswith("/api/pipelines/") and path.endswith("/plan"):
+            pid = path[len("/api/pipelines/") : -len("/plan")].strip("/")
+            try:
+                self._send(
+                    200,
+                    plan_pipeline(
+                        pid,
+                        get_snapshot(),
+                        goal=body.get("goal") or body.get("prompt") or "",
+                        session_id=body.get("session_id") or "default",
+                    ),
+                )
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
             except Exception as e:
                 self._send(500, {"error": str(e)})
             return
@@ -538,6 +617,11 @@ def _paths() -> list[str]:
         "POST /api/combos/import",
         "GET  /api/slash             ← list /clear /compact /save …",
         "POST /api/slash             {session_id, text:\"/clear\"}",
+        "GET  /api/pipelines         ← multi-stage LLM scripts",
+        "POST /api/pipelines/import",
+        "GET  /api/pipelines/{id}/export",
+        "POST /api/pipelines/{id}/plan",
+        "POST /api/pipelines/{id}/vote  {up|down, hw_flag}",
         "POST /api/sessions/{id}/message",
         "GET  /api/sessions/{id}/status",
         "/api/health",
@@ -612,11 +696,58 @@ def _index_html() -> bytes:
   <a href="/api/discover?refresh=1">refresh</a> ·
   <a href="/api/modes">/api/modes</a> ·
   <a href="/api/combos">/api/combos</a> ·
-  <a href="/api/combos/guide">guide</a> ·
+  <a href="/api/pipelines">/api/pipelines</a> ·
+  <a href="/api/pipelines/ranking">ranking</a> ·
   <a href="/api/matrix">matrix</a> ·
   <a href="/api/health">health</a>
  </div>
 </div>
+<div class="card" id="pipeCard">
+ <b>Pipeline scripts</b> — research → critique → build → test (tier/cost per stage)
+ <div class="muted" id="pipeList">…</div>
+ <div id="pipeBtns" style="margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.35rem"></div>
+ <pre id="pipeOut" class="muted" style="white-space:pre-wrap;max-height:8rem;overflow:auto;font-size:11px"></pre>
+</div>
+<script>
+async function refreshPipes(){{
+  try {{
+    const j = await fetch('/api/pipelines').then(r=>r.json());
+    const pipes = j.pipelines||[];
+    document.getElementById('pipeList').textContent = pipes.map(p =>
+      p.id+' (score '+(p.votes&&p.votes.score||0)+', hw='+p.hw_weight+')'
+    ).join(' · ') || 'none';
+    const box = document.getElementById('pipeBtns');
+    box.innerHTML = '';
+    for (const p of pipes.slice(0,6)) {{
+      const b = document.createElement('button');
+      b.type='button'; b.textContent='plan:'+p.id;
+      b.onclick = () => planPipe(p.id);
+      box.appendChild(b);
+      const u = document.createElement('button');
+      u.type='button'; u.textContent='▲';
+      u.onclick = () => votePipe(p.id, true);
+      box.appendChild(u);
+    }}
+  }} catch(e) {{
+    document.getElementById('pipeList').textContent = 'pipelines unavailable';
+  }}
+}}
+async function planPipe(id){{
+  const j = await fetch('/api/pipelines/'+encodeURIComponent(id)+'/plan',{{
+    method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{goal:'Demo pipeline run', session_id:'ui'}})
+  }}).then(r=>r.json());
+  document.getElementById('pipeOut').textContent = (j.flow||'')+'\\n'+JSON.stringify(j.stages,null,2).slice(0,2000);
+}}
+async function votePipe(id, up){{
+  await fetch('/api/pipelines/'+encodeURIComponent(id)+'/vote',{{
+    method:'POST', headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{up:up, down:!up, voter:'ui'}})
+  }});
+  refreshPipes();
+}}
+refreshPipes();
+</script>
 <div class="card" id="combosCard">
  <b>Combos</b> — Fable low / Sonnet / Opus / GPT · situations (coding, research, testing)
  <div class="muted" id="combosList">…</div>

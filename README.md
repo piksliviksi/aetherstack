@@ -296,6 +296,8 @@ Scripts under `scripts/` install ROCm env and wire the Ollama systemd unit (`HSA
 | [docs/AUTO-INSTALL.md](./docs/AUTO-INSTALL.md) | Optional auto-install of missing packages |
 | [combos/](./combos/) | Shareable LLM tier + situation packs (export/import) |
 | [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md) | `/clear` `/compact` — archive to memory then reset context |
+| [docs/PIPELINES.md](./docs/PIPELINES.md) | Scriptable multi-stage LLM workflows + voting |
+| [pipelines/catalog/](./pipelines/catalog/) | Shareable pipeline scripts |
 | [`aether-hub/`](./aether-hub/) | Service source |
 
 ```bash
@@ -375,6 +377,25 @@ curl -s -X POST http://127.0.0.1:8766/api/slash -H "Content-Type: application/js
 ```
 
 See [docs/SLASH-COMMANDS.md](./docs/SLASH-COMMANDS.md).
+
+### Pipeline scripts (research → critique → build → test)
+
+```bash
+# List + community-style local ranking
+curl -s http://127.0.0.1:8766/api/pipelines | jq '.ranking'
+
+# Plan which models run each stage
+curl -s -X POST http://127.0.0.1:8766/api/pipelines/research-code-test/plan \
+  -H "Content-Type: application/json" -d '{"goal":"Add OAuth"}'
+
+# Export / import / vote
+curl -s http://127.0.0.1:8766/api/pipelines/fable-local-loop/export -o my.aether-pipeline.json
+curl -s -X POST http://127.0.0.1:8766/api/pipelines/import -d @my.aether-pipeline.json
+curl -s -X POST http://127.0.0.1:8766/api/pipelines/research-code-test/vote \
+  -d '{"up":true,"hw_flag":"medium"}' -H "Content-Type: application/json"
+```
+
+Details: [docs/PIPELINES.md](./docs/PIPELINES.md).
 
 ### Mac ARM GPU
 
