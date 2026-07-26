@@ -39,7 +39,14 @@ from combos import (  # noqa: E402
     list_combos,
     plan_with_combo,
 )
-from services import activate_service, execute_service, list_services, plan_service  # noqa: E402
+from services import (  # noqa: E402
+    activate_service,
+    classify_service,
+    execute_service,
+    list_services,
+    plan_service,
+)
+from activity_words import add_word, delete_word, list_words  # noqa: E402
 from update import stage_update, update_status  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
@@ -417,6 +424,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, {"error": "graph.html missing"})
             return
+        if path in ("/aetherstack-icon.png", "/favicon.png"):
+            icon = ROOT / "static" / "aetherstack-icon.png"
+            if icon.is_file():
+                self._send(200, icon.read_bytes(), "image/png")
+            else:
+                self._send(404, {"error": "aetherstack-icon.png missing"})
+            return
         if path == "/api/health":
             d = get_discover()
             self._send(
@@ -493,6 +507,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/api/services", "/api/service-presets"):
             self._send(200, list_services(get_snapshot(), get_discover()))
+            return
+        if path == "/api/activity-words":
+            self._send(200, list_words())
             return
         if path in ("/api/update", "/api/updates"):
             self._send(200, update_status())
@@ -926,6 +943,18 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, {"error": str(e)})
             return
+        if path == "/api/services/classify":
+            try:
+                self._send(200, classify_service(body.get("goal") or body.get("prompt"), get_snapshot()))
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path == "/api/activity-words":
+            try:
+                self._send(201, {"ok": True, "word": add_word(body or {})})
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            return
         if path in ("/api/update/stage", "/api/updates/stage"):
             try:
                 self._send(200, stage_update())
@@ -935,7 +964,11 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/activate"):
             service_id = path[len("/api/services/") : -len("/activate")].strip("/")
             try:
-                self._send(200, activate_service(service_id, get_snapshot(), body or {}))
+                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
+                result = activate_service(selection["service_id"] if selection else service_id, get_snapshot(), body or {})
+                if selection:
+                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
+                self._send(200, result)
             except ValueError as e:
                 self._send(404, {"error": str(e)})
             except Exception as e:
@@ -944,7 +977,11 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/plan"):
             service_id = path[len("/api/services/") : -len("/plan")].strip("/")
             try:
-                self._send(200, plan_service(service_id, get_snapshot(), body or {}))
+                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
+                result = plan_service(selection["service_id"] if selection else service_id, get_snapshot(), body or {})
+                if selection:
+                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
+                self._send(200, result)
             except ValueError as e:
                 self._send(404, {"error": str(e)})
             except Exception as e:
@@ -953,7 +990,11 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/run"):
             service_id = path[len("/api/services/") : -len("/run")].strip("/")
             try:
-                self._send(200, execute_service(service_id, get_snapshot(), body or {}))
+                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
+                result = execute_service(selection["service_id"] if selection else service_id, get_snapshot(), body or {})
+                if selection:
+                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
+                self._send(200, result)
             except ValueError as e:
                 self._send(400, {"error": str(e)})
             except Exception as e:
@@ -1256,6 +1297,13 @@ class Handler(BaseHTTPRequestHandler):
             _memory.clear_session(sid)
             self._send(200, {"ok": True, "cleared": sid})
             return
+        if path.startswith("/api/activity-words/"):
+            word_id = path[len("/api/activity-words/") :].strip("/")
+            try:
+                self._send(200, delete_word(word_id))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            return
         self._send(404, {"error": "not found"})
 
 
@@ -1266,9 +1314,11 @@ def _paths() -> list[str]:
         "POST /api/discover          {host_scan: {...}}",
         "GET|POST /api/modes         ← inline|multi_agent, token_saver, role pins",
         "GET  /api/services          ← capability-driven task services",
+        "POST /api/services/classify ← choose a service from task language",
         "POST /api/services/{id}/activate",
         "POST /api/services/{id}/plan",
         "POST /api/services/{id}/run",
+        "GET|POST|DELETE /api/activity-words  ← editable inference activity text",
         "GET  /api/update            ← check upstream",
         "POST /api/update/stage      ← download without applying",
         "POST /api/agents/plan       ← multi-LLM event plan",
@@ -1356,6 +1406,7 @@ def _index_html() -> bytes:
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/>
 <title>Aether Hub — discover · matrix · memory</title>
+<link rel="icon" type="image/png" href="/aetherstack-icon.png"/>
 <style>
  body{{font-family:ui-monospace,Consolas,monospace;background:#0b1020;color:#e8eefc;margin:1rem;font-size:13px}}
  h1{{font-size:1.1rem;color:#7dd3a7}} h2{{font-size:.85rem;color:#9db0d0;margin:1rem 0 .4rem}}
@@ -1369,8 +1420,9 @@ def _index_html() -> bytes:
  ul.rec{{margin:.3rem 0;padding-left:1.1rem}}
  .sev-high{{color:#f87171}} .sev-medium{{color:#fbbf24}} .sev-ok{{color:#4ade80}} .sev-info{{color:#9db0d0}}
  .ep{{margin:.2rem 0}} .ep.up{{color:#4ade80}} .ep.dn{{color:#64748b}}
+ .brand{{display:flex;align-items:center;gap:.55rem}} .brand img{{width:32px;height:32px;border-radius:8px}}
 </style></head><body>
-<h1>Aether Hub · scan first, then route</h1>
+<h1 class="brand"><img src="/aetherstack-icon.png" width="32" height="32" alt=""/>Aether Hub · scan first, then route</h1>
 <div class="card">
  <b>System scan</b> —
  Ollama: <b>{"OK" if dsum.get("ollama_ok") else "DOWN"}</b>
@@ -1664,6 +1716,47 @@ function setSaver(v){{ postModes({{token_saver:v}}); }}
 function setPreset(p){{ postModes({{preset:p}}); }}
 refreshModes();
 </script>
+<div class="card" id="activityWordsCard">
+ <b>Inference activity wording</b>
+ <div class="muted">Local editable database used by AetherStack Chat while models are working. Mild-vulgar entries are labelled and can be removed.</div>
+ <div id="activityWords" style="display:grid;gap:.3rem;margin:.6rem 0"></div>
+ <div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center">
+  <input id="activityText" type="text" maxlength="160" placeholder="Add an activity line…" style="flex:1;min-width:220px;background:#0b1020;border:1px solid #243056;color:#e8eefc;padding:.3rem .5rem;border-radius:6px" />
+  <select id="activityLanguage"><option value="en">English</option><option value="et">Estonian</option><option value="uk">Ukrainian</option></select>
+  <select id="activityTone"><option value="playful">playful</option><option value="neutral">neutral</option><option value="mild-vulgar">mild-vulgar</option></select>
+  <button type="button" onclick="addActivityWord()">add</button>
+ </div>
+ <div class="muted" id="activityWordsStatus"></div>
+</div>
+<script>
+async function refreshActivityWords(){{
+  const status=document.getElementById('activityWordsStatus');
+  try{{
+    const j=await fetch('/api/activity-words').then(r=>r.json());
+    const box=document.getElementById('activityWords');
+    box.replaceChildren(...(j.words||[]).map(item=>{{
+      const row=document.createElement('div');row.style.cssText='display:flex;gap:.5rem;align-items:center;border-bottom:1px solid #243056;padding:.25rem 0';
+      const label=document.createElement('span');label.style.flex='1';label.textContent=item.text;
+      const meta=document.createElement('code');meta.textContent=item.language+' · '+item.tone;
+      const remove=document.createElement('button');remove.type='button';remove.textContent='delete';remove.onclick=()=>deleteActivityWord(item.id);
+      row.append(label,meta,remove);return row;
+    }}));
+    status.textContent=(j.words||[]).length+' entries · '+j.path;
+  }}catch(error){{status.textContent=error.message;}}
+}}
+async function addActivityWord(){{
+  const text=document.getElementById('activityText').value.trim();if(!text)return;
+  const response=await fetch('/api/activity-words',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{text,language:document.getElementById('activityLanguage').value,tone:document.getElementById('activityTone').value}})}});
+  const body=await response.json();if(!response.ok){{document.getElementById('activityWordsStatus').textContent=body.error||'add failed';return;}}
+  document.getElementById('activityText').value='';refreshActivityWords();
+}}
+async function deleteActivityWord(id){{
+  const response=await fetch('/api/activity-words/'+encodeURIComponent(id),{{method:'DELETE'}});
+  const body=await response.json();if(!response.ok){{document.getElementById('activityWordsStatus').textContent=body.error||'delete failed';return;}}
+  refreshActivityWords();
+}}
+refreshActivityWords();
+</script>
 <div class="card">
  matrix live: local <b>{esc(summary.get('local_online'))}</b> · cloud <b>{esc(summary.get('cloud_ready'))}</b> · down <b>{esc(summary.get('unavailable'))}</b>
  · memory <b>{esc(_memory.backend)}</b>
@@ -1712,11 +1805,11 @@ def main() -> None:
     t = threading.Thread(target=_bg_sync, daemon=True)
     t.start()
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Aether Hub → http://{HOST}:{PORT}/")
+    print(f"Aether Hub -> http://{HOST}:{PORT}/")
     print("  FIRST:  GET /api/discover")
     print("  MODES:  GET|POST /api/modes   (inline|multi_agent, token_saver)")
     print("  PLAN:   POST /api/agents/plan (multi-LLM event)")
-    print("  SLASH:  POST /api/slash  {\"text\":\"/clear\"}  (archive→clear)")
+    print("  SLASH:  POST /api/slash  {\"text\":\"/clear\"}  (archive -> clear)")
     print("  XREF:   GET|POST /api/xref  (multi-project memory; off by default)")
     print("  PRIV:   GET|POST /api/privacy  (private project/model vault; until release)")
     print("  GRAPH:  http://{HOST}:{PORT}/graph  (node canvas)".format(HOST=HOST, PORT=PORT))

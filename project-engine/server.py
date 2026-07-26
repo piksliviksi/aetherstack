@@ -189,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
                 if fp.suffix == ".css"
                 else "application/javascript"
                 if fp.suffix == ".js"
+                else "image/png"
+                if fp.suffix == ".png"
                 else "application/octet-stream"
             )
             self._send(200, fp.read_bytes(), ctype)
@@ -284,9 +286,9 @@ def main() -> None:
     print("API: /api/live  /api/system  /api/project?path=  /api/full  /api/roots")
     print("Project scans: cwd, home, AetherStack repo, --project only (no whole drives).")
     if Handler.engine_token:
-        print("Auth: ON — send X-Aether-Token or ?token= for /api/* (except /api/health).")
+        print("Auth: ON - send X-Aether-Token or ?token= for /api/* (except /api/health).")
     else:
-        print("Auth: OFF — set AETHERSTACK_ENGINE_TOKEN or --token to require a secret.")
+        print("Auth: OFF - set AETHERSTACK_ENGINE_TOKEN or --token to require a secret.")
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:

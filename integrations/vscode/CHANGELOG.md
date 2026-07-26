@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+- Replace the Marketplace extension icon with the flat, front-facing white AetherStack mark on a blue background.
+- Carry the same mark through the Hub, advanced dashboard, node graph, project engine, Docker Desktop extension, VS Code Activity Bar, browser favicons, and GitHub README branding.
+- Auto-detect the task stage in AetherStack Chat and activate a catalog-driven Research, Planning, Design, Build, Test, Bug-fix, Security, Polish, or Writing tree whose agents still resolve from the live capability matrix.
+- Show a collapsed active-preset node graph below the dynamic agent lineup and keep the full editor behind a separate Advanced setup button.
+- Show live active model aliases in Chat when enabled and rotate editable English, Estonian, and Ukrainian inference activity wording from a local JSON database managed in Advanced Hub.
+- Avoid Windows startup crashes from non-UTF-8 console logging.
+
 ## 0.3.0
 
 - Add the native **AetherStack Chat** editor with capability-resolved service presets, multi-agent execution, lean delivery, and token-saver controls.

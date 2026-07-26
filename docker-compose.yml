@@ -100,7 +100,7 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - AETHER_HUB_HOST=0.0.0.0
       - AETHER_HUB_PORT=8766
-      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.0}
+      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.1}
       - AETHERSTACK_REVISION=${AETHERSTACK_REVISION:-}
       - AETHER_UPDATE_DIR=/host-aetherstack/updates
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
@@ -139,6 +139,7 @@ services:
       - AETHER_PIPELINES_USER=/pipelines/user
       - AETHER_PIPELINES_VOTES=/pipelines/votes.json
       - AETHER_GRAPHS_DIR=/pipelines/graphs
+      - AETHER_ACTIVITY_WORDS_PATH=/host-aetherstack/activity_words.json
     volumes:
       - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
       - ./aether-hub/agent_modes.yaml:/app/agent_modes.yaml:ro

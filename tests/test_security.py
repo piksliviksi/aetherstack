@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import importlib.util
 import json
+import struct
 import sys
 import tempfile
 import unittest
@@ -30,6 +32,34 @@ def load_project_server():
 
 
 class SecurityBoundaryTests(unittest.TestCase):
+    def test_brand_icon_is_consistent_across_surfaces(self) -> None:
+        icon_paths = (
+            REPO / "aetherstack-icon.png",
+            HUB / "static" / "aetherstack-icon.png",
+            REPO / "project-engine" / "static" / "aetherstack-icon.png",
+            REPO / "extension" / "aetherstack.png",
+            REPO / "extension" / "ui" / "aetherstack-icon.png",
+            REPO / "integrations" / "vscode" / "media" / "icon.png",
+        )
+        payloads = [path.read_bytes() for path in icon_paths]
+        self.assertTrue(all(hashlib.sha256(data).digest() == hashlib.sha256(payloads[0]).digest() for data in payloads))
+        self.assertEqual(payloads[0][:8], b"\x89PNG\r\n\x1a\n")
+        width, height = struct.unpack(">II", payloads[0][16:24])
+        self.assertEqual((width, height), (256, 256))
+
+    def test_hub_serves_brand_icon_as_png(self) -> None:
+        sent = []
+        fake = SimpleNamespace(
+            path="/aetherstack-icon.png",
+            _send=lambda code, value, content_type="application/json; charset=utf-8": sent.append(
+                (code, value, content_type)
+            ),
+        )
+        hub_server.Handler.do_GET(fake)
+        self.assertEqual(sent[0][0], 200)
+        self.assertEqual(sent[0][2], "image/png")
+        self.assertEqual(sent[0][1][:8], b"\x89PNG\r\n\x1a\n")
+
     def test_graph_id_rejects_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             old_dir = graph.GRAPH_DIR
