@@ -51,7 +51,14 @@ from services import (  # noqa: E402
 from activity_words import add_word, delete_word, list_words  # noqa: E402
 from update import stage_update, update_status  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
-from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
+from matrix import (  # noqa: E402
+    annotate_availability,
+    load_matrix,
+    matrix_table,
+    merge_host_cli_models,
+    probe_host_cli_bridge,
+    route,
+)
 from memory import MemoryStore  # noqa: E402
 from graph import (  # noqa: E402
     auto_connect,
@@ -299,6 +306,7 @@ def refresh_snapshot() -> dict:
             "inference_hint": primary.get("inference_hint"),
         }
     snap = annotate_availability(raw, ollama=ollama_info)
+    snap = merge_host_cli_models(snap, probe_host_cli_bridge())
     snap["discover_summary"] = disc.get("summary")
     snap["recommendations"] = disc.get("recommendations")
     with _state_lock:

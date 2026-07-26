@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.3
+
+- Replace the separate monochrome Activity Bar glyph with the same flat blue/white AetherStack mark used by the packaged extension icon.
+- Make AetherStack Chat a persistent sidebar conversation with transcript restoration, safe fenced-code rendering, automatic intent analysis, immediate active-preset feedback, and direct `/preset`, `/research`, `/plan`, `/code`, `/test`, `/bugfix`, `/auto`, and `/help` commands.
+- Give final service responses a direct conversational-copilot contract instead of returning orchestration facts as the answer.
+- Reuse authenticated Codex, Claude, and Grok host CLI sessions through a Docker-reachable, random-token-protected host bridge; no provider key is copied or generated.
+- Persist embedded/full-page graph positions and camera state, add blank-canvas panning and centering, and support per-agent Markdown behavior profiles.
+- Keep service teams adaptive and small by default, expanding only for assurance or genuinely parallel work.
+
 ## 0.3.2
 
 - Carry the same mark through the Hub, advanced dashboard, node graph, project engine, Docker Desktop extension, VS Code Activity Bar, browser favicons, and GitHub README branding.

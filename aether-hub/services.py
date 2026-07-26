@@ -20,6 +20,8 @@ from matrix import _score_model
 ROOT = Path(__file__).resolve().parent
 CATALOG_PATH = Path(os.environ.get("AETHER_SERVICE_CATALOG", str(ROOT / "service_catalog.yaml")))
 LITELLM_BASE_URL = os.environ.get("LITELLM_INTERNAL_URL", "http://litellm:4000").rstrip("/")
+CLI_BRIDGE_URL = os.environ.get("AETHER_CLI_BRIDGE_URL", "http://host.docker.internal:8767").rstrip("/")
+CLI_BRIDGE_TOKEN = os.environ.get("AETHER_CLI_BRIDGE_TOKEN", "")
 VERIFY_TTL_SECONDS = 5 * 60
 _verify_cache: dict[str, tuple[float, bool]] = {}
 _MATCH_STOP_WORDS = {
@@ -158,7 +160,7 @@ def classify_service(goal: str, snapshot: dict[str, Any]) -> dict[str, Any]:
             {"service_id": service_id, "score": round(score, 2)}
             for score, service_id, _matches in ranked[:3]
         ],
-        "service": resolve_service(best[1], snapshot),
+        "service": minimize_service_agents(resolve_service(best[1], snapshot), {"goal": goal}),
     }
 
 
@@ -246,6 +248,69 @@ def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]
     }
 
 
+_ASSURANCE_SERVICES = {"research", "testing", "bugfixing", "whitehat-pentesting"}
+_ASSURANCE_WORDS = re.compile(
+    r"\b(auth|security|privacy|release|production|migration|payment|permission|destructive|regression|audit|legal)\b",
+    re.IGNORECASE,
+)
+_COMPLEX_WORDS = re.compile(
+    r"\b(compare|multiple|several|comprehensive|architecture|end[- ]to[- ]end|parallel|cross[- ]platform|system[- ]wide)\b",
+    re.IGNORECASE,
+)
+
+
+def minimize_service_agents(
+    resolved: dict[str, Any], event: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Use the smallest useful team; expand only for assurance or real parallel work."""
+    event = event or {}
+    budget = str(event.get("agent_budget") or "adaptive").lower()
+    if budget == "full":
+        result = copy.deepcopy(resolved)
+        result["agent_policy"] = {"budget": "full", "reason": "explicit full team"}
+        return result
+
+    result = copy.deepcopy(resolved)
+    agents = list(result.get("agents") or [])
+    lead = next((agent for agent in agents if agent.get("role") == "mastermind"), None)
+    reviewer = next((agent for agent in agents if agent.get("role") == "supervisor"), None)
+    workers = [agent for agent in agents if agent.get("role") == "worker"]
+    goal = str(event.get("goal") or event.get("prompt") or "")
+    assurance = result.get("id") in _ASSURANCE_SERVICES or bool(_ASSURANCE_WORDS.search(goal))
+    complex_work = bool(_COMPLEX_WORDS.search(goal)) or len(goal) > 700
+
+    chosen = [agent for agent in (lead, workers[0] if workers else None) if agent]
+    if assurance and reviewer:
+        chosen.append(reviewer)
+    if budget == "adaptive" and complex_work and len(workers) > 1:
+        chosen.append(workers[1])
+    chosen_ids = {agent.get("id") for agent in chosen}
+    result["agents"] = [agent for agent in agents if agent.get("id") in chosen_ids]
+    available = [agent for agent in result["agents"] if agent.get("available")]
+    missing = [agent for agent in result["agents"] if not agent.get("available")]
+    partial = [agent for agent in available if agent.get("missing_capabilities")]
+    result.update(
+        {
+            "ready": not missing and not partial and bool(available),
+            "degraded": bool(available) and bool(missing or partial),
+            "available_agents": len(available),
+            "agent_count": len(result["agents"]),
+            "models": sorted({agent.get("model") for agent in available if agent.get("model")}),
+            "providers": sorted({agent.get("provider") for agent in available if agent.get("provider")}),
+            "backends": sorted({agent.get("backend") for agent in available if agent.get("backend")}),
+            "missing": missing,
+            "partial": partial,
+            "agent_policy": {
+                "budget": budget if budget in {"minimal", "adaptive"} else "adaptive",
+                "assurance_gate": assurance,
+                "parallel_worker": complex_work and len(workers) > 1,
+                "reason": "smallest useful team; review only for assurance and a second worker only for parallel complexity",
+            },
+        }
+    )
+    return result
+
+
 def _verify_model(alias: str) -> bool:
     cached = _verify_cache.get(alias)
     if cached and time.time() - cached[0] < VERIFY_TTL_SECONDS:
@@ -268,12 +333,27 @@ def _verify_model(alias: str) -> bool:
     return ok
 
 
+def _verify_host_cli(alias: str) -> bool:
+    if not CLI_BRIDGE_TOKEN:
+        return False
+    request = urllib.request.Request(
+        f"{CLI_BRIDGE_URL}/health?model={urllib.parse.quote(alias)}",
+        headers={"Authorization": f"Bearer {CLI_BRIDGE_TOKEN}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        return response.status == 200 and body.get("ok") is True
+    except Exception:
+        return False
+
+
 def resolve_verified_service(
     service_id: str,
     snapshot: dict[str, Any],
     verifier: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
-    verifier = verifier or _verify_model
+    supplied_verifier = verifier
     working = copy.deepcopy(snapshot)
     checked: dict[str, bool] = {}
     resolved = resolve_service(service_id, working)
@@ -281,8 +361,14 @@ def resolve_verified_service(
         aliases = sorted({a.get("model") for a in resolved["agents"] if a.get("model") and a.get("available")})
         pending = [alias for alias in aliases if alias not in checked]
         if pending:
+            def verify_alias(alias: str) -> bool:
+                if supplied_verifier:
+                    return supplied_verifier(alias)
+                meta = (working.get("models") or {}).get(alias) or {}
+                return _verify_host_cli(alias) if meta.get("executor") == "host_cli" else _verify_model(alias)
+
             with ThreadPoolExecutor(max_workers=min(6, len(pending))) as pool:
-                results = list(pool.map(verifier, pending))
+                results = list(pool.map(verify_alias, pending))
             checked.update(dict(zip(pending, results)))
         failed = [alias for alias in aliases if not checked.get(alias, False)]
         if not failed:
@@ -290,7 +376,11 @@ def resolve_verified_service(
         for alias in failed:
             if alias in (working.get("models") or {}):
                 working["models"][alias]["available"] = False
-                working["models"][alias]["availability_reason"] = "LiteLLM provider health failed"
+                working["models"][alias]["availability_reason"] = (
+                    "authenticated host CLI health failed"
+                    if working["models"][alias].get("executor") == "host_cli"
+                    else "LiteLLM provider health failed"
+                )
         resolved = resolve_service(service_id, working)
     resolved["verification"] = "passed" if resolved.get("ready") else "degraded"
     resolved["verified_models"] = sorted(alias for alias, ok in checked.items() if ok)
@@ -300,7 +390,7 @@ def resolve_verified_service(
 
 def list_services(snapshot: dict[str, Any], discover: dict[str, Any] | None = None) -> dict[str, Any]:
     catalog = load_service_catalog()
-    services = [resolve_service(service_id, snapshot) for service_id in catalog["services"]]
+    services = [minimize_service_agents(resolve_service(service_id, snapshot)) for service_id in catalog["services"]]
     return {
         "schema": catalog.get("schema"),
         "services": services,
@@ -325,6 +415,7 @@ def activate_service(
         if options.get("verify", True)
         else resolve_service(service_id, snapshot)
     )
+    resolved = minimize_service_agents(resolved, options)
     runtime = _activate_resolved_service(resolved, options)
     return {"ok": resolved.get("ready") or resolved.get("degraded"), "service": resolved, "runtime": runtime}
 
@@ -369,7 +460,7 @@ def build_service_graph(
         if verify
         else resolve_service(service_id, snapshot)
     )
-    return service_to_graph(resolved)
+    return service_to_graph(minimize_service_agents(resolved))
 
 
 def plan_service(
@@ -383,6 +474,7 @@ def plan_service(
         if event.get("verify", True)
         else resolve_service(service_id, snapshot)
     )
+    resolved = minimize_service_agents(resolved, event)
     roles = {}
     tasks = []
     for agent in resolved["agents"]:
@@ -418,14 +510,18 @@ def plan_service(
 
 
 def _chat_completion(call: dict[str, Any], messages: list[dict[str, str]] | None = None) -> dict[str, Any]:
-    key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    model = str(call.get("model") or "")
+    host_cli = model in {"codex-cli", "claude-cli", "grok-cli"}
+    key = CLI_BRIDGE_TOKEN if host_cli else os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    if host_cli and not key:
+        raise RuntimeError("host CLI bridge is not configured")
     payload = {
-        "model": call.get("model"),
+        "model": model,
         "messages": messages or call.get("messages") or [],
         "max_tokens": call.get("max_tokens") or 1600,
     }
     request = urllib.request.Request(
-        f"{LITELLM_BASE_URL}/v1/chat/completions",
+        f"{CLI_BRIDGE_URL if host_cli else LITELLM_BASE_URL}/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         method="POST",
@@ -528,8 +624,11 @@ def execute_service(
         {
             "role": "system",
             "content": (
-                "You are the service lead. Synthesize the final answer from the plan, worker results, and review. "
-                "Resolve conflicts, do not mention orchestration mechanics unless useful, and clearly state remaining uncertainty."
+                "You are AetherStack, an interactive coding and project copilot. Answer the user directly and conversationally, "
+                "using the plan, worker results, review, and recent context. Provide the next useful decision, explanation, code, "
+                "or concrete action instead of merely listing facts or orchestration status. Ask one focused question only when "
+                "missing information truly blocks a useful answer. Resolve conflicts, do not mention orchestration mechanics "
+                "unless useful, and clearly state remaining uncertainty."
             ),
         },
         {

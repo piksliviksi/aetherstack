@@ -1,8 +1,10 @@
 """Capability / routing sync matrix — load YAML, probe liveness, route."""
 from __future__ import annotations
 
+import copy
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -87,6 +89,72 @@ def probe_ollama(base: str | None = None) -> dict[str, Any]:
                 if ":" in n:
                     names.add(n.split(":", 1)[0])
     return {"base": base, "ok": tags is not None, "models": sorted(names)}
+
+
+def probe_host_cli_bridge(base: str | None = None, token: str | None = None) -> dict[str, Any]:
+    """Read authenticated host CLI availability without importing host credentials."""
+    base = (base or os.environ.get("AETHER_CLI_BRIDGE_URL") or "").rstrip("/")
+    token = token or os.environ.get("AETHER_CLI_BRIDGE_TOKEN") or ""
+    if not base or not token:
+        return {"ok": False, "models": [], "reason": "bridge token not configured"}
+    value = _http_json(
+        f"{base}/v1/models",
+        timeout=20.0,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    models = value.get("models") if isinstance(value, dict) else None
+    return {
+        "ok": isinstance(models, list),
+        "models": models if isinstance(models, list) else [],
+        "reason": "host bridge ready" if isinstance(models, list) else "host bridge unreachable",
+    }
+
+
+def merge_host_cli_models(snapshot: dict[str, Any], bridge: dict[str, Any]) -> dict[str, Any]:
+    """Merge only callable, bridge-verified CLI aliases into a capability snapshot."""
+    snapshot = dict(snapshot)
+    models = dict(snapshot.get("models") or {})
+    added = []
+    for raw in bridge.get("models") or []:
+        if not isinstance(raw, dict):
+            continue
+        alias = str(raw.get("alias") or raw.get("id") or "")
+        if not re.fullmatch(r"(?:codex|claude|grok)-cli", alias):
+            continue
+        capabilities = [str(value) for value in (raw.get("capabilities") or []) if str(value)]
+        models[alias] = {
+            "alias": alias,
+            "provider": str(raw.get("provider") or alias),
+            "backend": str(raw.get("backend") or f"host-cli/{alias[:-4]}"),
+            "tier": "subscription",
+            "cost": raw.get("cost") or "account",
+            "latency": raw.get("latency") or "medium",
+            "capabilities": capabilities,
+            "available": True,
+            "availability_reason": str(raw.get("availability_reason") or "authenticated host CLI"),
+            "executor": "host_cli",
+        }
+        added.append(alias)
+    snapshot["models"] = models
+    snapshot["host_cli"] = {
+        "ok": bool(bridge.get("ok")),
+        "models": sorted(added),
+        "reason": bridge.get("reason"),
+    }
+    capability_index = copy.deepcopy(snapshot.get("capability_index") or {})
+    for alias in added:
+        for capability in models[alias].get("capabilities") or []:
+            entry = capability_index.setdefault(capability, {"local": [], "cloud": [], "any_available": []})
+            if alias not in entry.setdefault("cloud", []):
+                entry["cloud"].append(alias)
+            if alias not in entry.setdefault("any_available", []):
+                entry["any_available"].append(alias)
+    snapshot["capability_index"] = capability_index
+    summary = dict(snapshot.get("summary") or {})
+    summary["models_total"] = len(models)
+    summary["host_cli_ready"] = len(added)
+    snapshot["summary"] = summary
+    return snapshot
 
 
 def env_key_present(name: str | list[str] | None) -> bool:

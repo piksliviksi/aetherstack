@@ -36,9 +36,10 @@
       padding: .45rem .5rem; margin: .3rem 0; border-radius: 6px; border: 1px solid var(--border);
       cursor: grab; user-select: none;
     }
-    #canvas-wrap { flex: 1; position: relative; overflow: hidden; cursor: default;
+    #canvas-wrap { flex: 1; position: relative; overflow: hidden; cursor: grab; touch-action: none;
       background-image: radial-gradient(circle, #1e293b 1px, transparent 1px);
       background-size: 20px 20px; }
+    #canvas-wrap.panning { cursor: grabbing; }
     #canvas-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
     #nodes { position: absolute; inset: 0; z-index: 2; }
     .node {
@@ -70,10 +71,13 @@
     }
     #inspector h3 { margin: 0 0 .5rem; font-size: 12px; color: var(--muted); }
     #insp label { display: block; margin-top: .55rem; color: var(--muted); }
-    #insp input, #insp select {
+    #insp input, #insp select, #insp textarea {
       width: 100%; margin-top: .15rem; background: #020617; border: 1px solid var(--border);
       color: var(--text); border-radius: 5px; padding: .3rem .4rem; font-size: 11px;
     }
+    #insp textarea { min-height: 150px; resize: vertical; line-height: 1.35; }
+    #insp .md-actions { display: flex; gap: .35rem; margin-top: .3rem; }
+    #insp .md-actions button { flex: 1; background: #0f172a; border: 1px solid var(--border); color: var(--text); border-radius: 5px; padding: .3rem; cursor: pointer; }
     #toast {
       position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
       background: #1e293b; border: 1px solid var(--border); padding: .4rem .8rem;
@@ -92,10 +96,11 @@
     <button type="button" id="btnFromPipe">From pipeline…</button>
     <button type="button" id="btnSave">Save</button>
     <button type="button" id="btnPlan">Plan models</button>
+    <button type="button" id="btnCenter">Center tree</button>
     <button type="button" id="btnToPipe">Export pipeline JSON</button>
     <button type="button" id="btnDel">Delete node</button>
     <span class="grow"></span>
-    <span class="muted">Drag palette → canvas · ports to wire · ActionForge not bundled (EULA)</span>
+    <span class="muted">Drag empty canvas to pan · drag node headers to move · ports to wire</span>
     <a class="muted" href="/" style="color:var(--accent)">← simple</a>
     <a class="muted" href="/advanced" style="color:var(--accent)">advanced</a>
   </div>
@@ -129,7 +134,14 @@ let graph = { schema: "aetherstack.graph.v1", id: "canvas-"+Date.now().toString(
 let selected = null;
 let drag = null;
 let link = null; // {from, x, y}
+let pan = null;
+let camera = { x: 0, y: 0 };
 const AGENT_NODE_TYPES = new Set(["master", "analyser", "worker", "tester"]);
+const DRAFT_DATA_KEYS = new Set([
+  "label", "text", "role", "agent_ref", "model", "provider", "backend", "tier", "strategy",
+  "needs", "available", "service_id", "maker", "max_cost", "parallel", "gate", "ack",
+  "purpose", "commands", "namespace", "action", "instructions_md", "instructions_source",
+]);
 const liveChoices = { models: [], agents: [], roles: [] };
 
 const palette = document.getElementById("palette");
@@ -153,7 +165,7 @@ canvasWrap.addEventListener("drop", e => {
   const t = e.dataTransfer.getData("type");
   if (!t) return;
   const r = canvasWrap.getBoundingClientRect();
-  addNode(t, e.clientX - r.left - 70, e.clientY - r.top - 20);
+  addNode(t, e.clientX - r.left - camera.x - 70, e.clientY - r.top - camera.y - 20);
 });
 
 function toast(m) {
@@ -167,10 +179,10 @@ function uid() { return "n_" + Math.random().toString(36).slice(2, 9); }
 function defaultData(t) {
   const map = {
     goal: { text: "" },
-    master: { role: "mastermind", maker: null, model: null, max_cost: "high", strategy: "best_score" },
-    analyser: { role: "critic", maker: null, model: null, gate: true, ack: true, max_cost: "high", strategy: "best_score" },
-    worker: { role: "builder", tier: null, model: null, strategy: "cheapest", parallel: 2, max_cost: "medium" },
-    tester: { role: "tester", strategy: "cheapest", tier: "local", max_cost: "low" },
+    master: { role: "mastermind", maker: null, model: null, instructions_md: "", max_cost: "high", strategy: "best_score" },
+    analyser: { role: "critic", maker: null, model: null, instructions_md: "", gate: true, ack: true, max_cost: "high", strategy: "best_score" },
+    worker: { role: "builder", tier: null, model: null, instructions_md: "", strategy: "cheapest", parallel: 2, max_cost: "medium" },
+    tester: { role: "tester", strategy: "cheapest", tier: "local", model: null, instructions_md: "", max_cost: "low" },
     memory: { namespace: "default" },
     slash: { commands: ["/done all", "/compact"] },
     output: {},
@@ -181,6 +193,7 @@ function defaultData(t) {
 function addNode(type, x, y) {
   const n = { id: uid(), type, x, y, data: defaultData(type) };
   graph.nodes.push(n);
+  saveGraphLayout();
   render();
   select(n.id);
 }
@@ -189,6 +202,80 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, ch => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[ch]);
+}
+
+function graphLayoutKey(value = graph) {
+  const identity = value?.service_id || value?.id;
+  return identity ? `aetherstack.graph.layout.v1.${identity}` : null;
+}
+
+function saveGraphLayout() {
+  const key = graphLayoutKey();
+  if (!key) return;
+  const positions = Object.fromEntries((graph.nodes || []).map(node => [
+    node.id, { x: Number(node.x) || 0, y: Number(node.y) || 0 },
+  ]));
+  const nodeData = Object.fromEntries((graph.nodes || []).map(node => [
+    node.id,
+    Object.fromEntries(Object.entries(node.data || {}).filter(([name]) => DRAFT_DATA_KEYS.has(name))),
+  ]));
+  try { localStorage.setItem(key, JSON.stringify({ positions, nodeData, camera })); }
+  catch { /* storage can be disabled without breaking the editor */ }
+}
+
+function restoreGraphLayout() {
+  const key = graphLayoutKey();
+  camera = { x: 0, y: 0 };
+  if (!key) return false;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    if (!saved || typeof saved !== "object") return false;
+    (graph.nodes || []).forEach(node => {
+      const position = saved.positions?.[node.id];
+      if (Number.isFinite(position?.x)) node.x = Math.max(-20000, Math.min(20000, position.x));
+      if (Number.isFinite(position?.y)) node.y = Math.max(-20000, Math.min(20000, position.y));
+      const draft = saved.nodeData?.[node.id];
+      if (draft && typeof draft === "object") {
+        node.data ||= {};
+        Object.entries(draft).forEach(([name, value]) => {
+          if (DRAFT_DATA_KEYS.has(name)) node.data[name] = value;
+        });
+      }
+    });
+    if (Number.isFinite(saved.camera?.x)) camera.x = Math.max(-20000, Math.min(20000, saved.camera.x));
+    if (Number.isFinite(saved.camera?.y)) camera.y = Math.max(-20000, Math.min(20000, saved.camera.y));
+    return true;
+  } catch { return false; }
+}
+
+function applyCamera() {
+  (graph.nodes || []).forEach(node => {
+    const el = document.querySelector(`.node[data-id="${node.id}"]`);
+    if (el) {
+      el.style.left = (node.x + camera.x) + "px";
+      el.style.top = (node.y + camera.y) + "px";
+    }
+  });
+  renderEdges();
+}
+
+function centerGraph(persist = true) {
+  const items = graph.nodes || [];
+  if (!items.length) return;
+  const minX = Math.min(...items.map(node => Number(node.x) || 0));
+  const maxX = Math.max(...items.map(node => Number(node.x) || 0)) + 170;
+  const minY = Math.min(...items.map(node => Number(node.y) || 0));
+  const maxY = Math.max(...items.map(node => Number(node.y) || 0)) + 80;
+  const contentWidth = maxX - minX;
+  const contentHeight = maxY - minY;
+  camera.x = contentWidth < canvasWrap.clientWidth - 40
+    ? (canvasWrap.clientWidth - contentWidth) / 2 - minX
+    : 24 - minX;
+  camera.y = contentHeight < canvasWrap.clientHeight - 40
+    ? (canvasWrap.clientHeight - contentHeight) / 2 - minY
+    : 24 - minY;
+  applyCamera();
+  if (persist) saveGraphLayout();
 }
 
 function option(value, label, selectedValue) {
@@ -251,9 +338,13 @@ function select(id) {
   const isAgentNode = AGENT_NODE_TYPES.has(n.type);
   if (isAgentNode) {
     html += `<label>available agent<br/><select id="inspectorAgent">${agentOptions(d)}</select></label>`;
+    html += `<label>load behavior profile (.md)<br/><input id="agentMdFile" type="file" accept=".md,text/markdown,text/plain"/></label>`;
+    html += `<div class="md-actions"><button type="button" id="clearAgentMd">Clear profile</button></div>`;
+    if (d.instructions_source) html += `<div class="muted" style="margin-top:.3rem">Loaded: ${esc(d.instructions_source)}</div>`;
   }
-  const fields = Object.keys(d).filter(k => k !== "agent_ref");
+  const fields = Object.keys(d).filter(k => k !== "agent_ref" && k !== "instructions_source");
   if (isAgentNode && !fields.includes("model")) fields.push("model");
+  if (isAgentNode && !fields.includes("instructions_md")) fields.push("instructions_md");
   fields.forEach(k => {
     const v = d[k];
     if (typeof v === "boolean") {
@@ -262,6 +353,8 @@ function select(id) {
       html += `<label>model<br/><select data-k="model">${modelOptions(v)}</select></label>`;
     } else if (k === "role" && isAgentNode) {
       html += `<label>role<br/><select data-k="role">${roleOptions(v)}</select></label>`;
+    } else if (k === "instructions_md" && isAgentNode) {
+      html += `<label>behavior instructions (.md)<br/><textarea data-k="instructions_md" placeholder="Role, workflow, constraints, stopping rules, and output format…">${esc(v ?? "")}</textarea></label>`;
     } else if (Array.isArray(v)) {
       html += `<label>${esc(k)}<br/><input data-k="${esc(k)}" value="${esc(v.join(", "))}"/></label>`;
     } else {
@@ -278,7 +371,25 @@ function select(id) {
       strategy: agent.strategy, needs: [...(agent.needs || [])], available: true,
       service_id: agent.service_id,
     });
+    saveGraphLayout();
     select(n.id);
+  });
+  document.getElementById("agentMdFile")?.addEventListener("change", async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 262144) { toast("Behavior profile must be 256 KiB or smaller"); return; }
+    n.data.instructions_md = await file.text();
+    n.data.instructions_source = file.name;
+    saveGraphLayout();
+    select(n.id);
+    toast(`Loaded ${file.name}`);
+  });
+  document.getElementById("clearAgentMd")?.addEventListener("click", () => {
+    n.data.instructions_md = "";
+    delete n.data.instructions_source;
+    saveGraphLayout();
+    select(n.id);
+    toast("Behavior profile cleared");
   });
   insp.querySelectorAll("[data-k]").forEach(control => {
     control.addEventListener("change", () => {
@@ -297,6 +408,7 @@ function select(id) {
           });
         }
       }
+      saveGraphLayout();
       if (k === "model" || k === "role") select(n.id);
       else render();
     });
@@ -305,7 +417,7 @@ function select(id) {
 
 function portPos(node, which) {
   const el = document.querySelector(`.node[data-id="${node.id}"]`);
-  if (!el) return { x: node.x, y: node.y + 30 };
+  if (!el) return { x: node.x + camera.x, y: node.y + camera.y + 30 };
   const r = el.getBoundingClientRect();
   const cr = canvasWrap.getBoundingClientRect();
   return {
@@ -342,8 +454,8 @@ function render() {
     const el = document.createElement("div");
     el.className = "node" + (selected === n.id ? " selected" : "");
     el.dataset.id = n.id;
-    el.style.left = n.x + "px";
-    el.style.top = n.y + "px";
+    el.style.left = (n.x + camera.x) + "px";
+    el.style.top = (n.y + camera.y) + "px";
     const col = TYPES[n.type]?.color || "#64748b";
     const d = n.data || {};
     let sub = d.model || d.maker || d.tier || d.text || d.commands?.join(" ") || "";
@@ -361,7 +473,7 @@ function render() {
     hd.addEventListener("mousedown", ev => {
       if (ev.button !== 0) return;
       select(n.id);
-      drag = { id: n.id, ox: ev.clientX - n.x, oy: ev.clientY - n.y };
+      drag = { id: n.id, ox: ev.clientX - n.x - camera.x, oy: ev.clientY - n.y - camera.y };
     });
     el.addEventListener("mousedown", ev => {
       if (ev.target.classList.contains("port")) return;
@@ -383,6 +495,7 @@ function render() {
           graph.edges = graph.edges.filter(e => !(e.from === link.from && e.to === n.id));
           graph.edges.push({ id: "e_"+uid().slice(2), from: link.from, to: n.id, kind: "data" });
           link = null;
+          saveGraphLayout();
           render();
         }
       });
@@ -392,15 +505,38 @@ function render() {
   requestAnimationFrame(renderEdges);
 }
 
+canvasWrap.addEventListener("mousedown", event => {
+  if (event.button !== 0 || (event.target !== canvasWrap && event.target !== nodesEl)) return;
+  pan = {
+    startX: event.clientX, startY: event.clientY,
+    cameraX: camera.x, cameraY: camera.y,
+  };
+  canvasWrap.classList.add("panning");
+  event.preventDefault();
+});
+
+canvasWrap.addEventListener("wheel", event => {
+  camera.x -= event.shiftKey ? event.deltaY : event.deltaX;
+  camera.y -= event.shiftKey ? 0 : event.deltaY;
+  applyCamera();
+  saveGraphLayout();
+  event.preventDefault();
+}, { passive: false });
+
 window.addEventListener("mousemove", e => {
   const r = canvasWrap.getBoundingClientRect();
+  if (pan) {
+    camera.x = pan.cameraX + e.clientX - pan.startX;
+    camera.y = pan.cameraY + e.clientY - pan.startY;
+    applyCamera();
+  }
   if (drag) {
     const n = graph.nodes.find(x => x.id === drag.id);
     if (n) {
-      n.x = e.clientX - drag.ox;
-      n.y = e.clientY - drag.oy;
+      n.x = e.clientX - camera.x - drag.ox;
+      n.y = e.clientY - camera.y - drag.oy;
       const el = document.querySelector(`.node[data-id="${n.id}"]`);
-      if (el) { el.style.left = n.x + "px"; el.style.top = n.y + "px"; }
+      if (el) { el.style.left = (n.x + camera.x) + "px"; el.style.top = (n.y + camera.y) + "px"; }
       renderEdges();
     }
   }
@@ -410,23 +546,32 @@ window.addEventListener("mousemove", e => {
     renderEdges();
   }
 });
-window.addEventListener("mouseup", () => { drag = null; if (link) { link = null; renderEdges(); } });
+window.addEventListener("mouseup", () => {
+  if (drag || pan) saveGraphLayout();
+  drag = null;
+  pan = null;
+  canvasWrap.classList.remove("panning");
+  if (link) { link = null; renderEdges(); }
+});
 
 document.getElementById("btnDel").onclick = () => {
   if (!selected) return;
   graph.nodes = graph.nodes.filter(n => n.id !== selected);
   graph.edges = graph.edges.filter(e => e.from !== selected && e.to !== selected);
   selected = null;
+  saveGraphLayout();
   render();
   document.getElementById("insp").textContent = "Select a node";
 };
 
 async function loadServiceGraph(serviceId, announce = true) {
   const id = serviceId || "active";
+  saveGraphLayout();
   const response = await fetch(`/api/services/${encodeURIComponent(id)}/graph`);
   const body = await response.json();
   if (!response.ok || body.error) { toast(body.error || `Cannot load ${id}`); return; }
   graph = body;
+  const restoredLayout = restoreGraphLayout();
   selected = (body.nodes || []).find(node => node.type === "master")?.id || null;
   document.getElementById("graphTitle").textContent = body.title || "Aether Graph";
   if (body.service_id && [...document.getElementById("servicePreset").options].some(option => option.value === body.service_id)) {
@@ -435,6 +580,7 @@ async function loadServiceGraph(serviceId, announce = true) {
   render();
   if (selected) select(selected);
   else document.getElementById("insp").textContent = "Select a node";
+  if (!restoredLayout) requestAnimationFrame(() => centerGraph(false));
   if (announce) toast(`Loaded ${body.title || id}`);
 }
 
@@ -463,6 +609,7 @@ async function loadServiceChoices() {
 
 document.getElementById("btnActive").onclick = () => loadServiceGraph(document.getElementById("servicePreset").value);
 document.getElementById("servicePreset").onchange = () => loadServiceGraph(document.getElementById("servicePreset").value);
+document.getElementById("btnCenter").onclick = () => centerGraph();
 
 document.getElementById("btnAuto").onclick = async () => {
   const j = await fetch("/api/graphs/auto-connect", {
@@ -471,6 +618,7 @@ document.getElementById("btnAuto").onclick = async () => {
   }).then(r => r.json());
   if (j.nodes) graph.nodes = j.nodes;
   if (j.edges) graph.edges = j.edges;
+  saveGraphLayout();
   render();
   toast("Auto-connected · " + (j.practices || []).length + " practices");
 };
@@ -478,6 +626,7 @@ document.getElementById("btnAuto").onclick = async () => {
 document.getElementById("btnTemplate").onclick = async () => {
   const j = await fetch("/api/graphs/template").then(r => r.json());
   graph = j;
+  restoreGraphLayout();
   selected = null;
   render();
   toast("Best-practice template loaded");
@@ -492,6 +641,7 @@ document.getElementById("btnFromPipe").onclick = async () => {
   }).then(r => r.json());
   if (j.error) { toast(j.error); return; }
   graph = j;
+  restoreGraphLayout();
   render();
   toast("Loaded pipeline " + id);
 };
@@ -502,6 +652,7 @@ document.getElementById("btnSave").onclick = async () => {
     body: JSON.stringify(graph),
   }).then(r => r.json());
   if (j.id) graph.id = j.id;
+  saveGraphLayout();
   toast("Saved " + (j.id || ""));
 };
 
@@ -535,6 +686,7 @@ loadServiceChoices().then(() => {
   }
   return loadServiceGraph(requestedService, false);
 }).catch(() => render());
+window.addEventListener("beforeunload", saveGraphLayout);
   </script>
 </body>
 </html>

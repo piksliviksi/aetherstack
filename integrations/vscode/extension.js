@@ -3,6 +3,8 @@ const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { createCliBridge } = require("./cli-bridge");
+const { parseChatInput, commandHelp } = require("./chat-routing");
 const {
   SERVICES,
   checkServices,
@@ -336,6 +338,9 @@ async function fetchAvailableModels({ force = false } = {}) {
   }
   const gatewayIds = (gatewayResponse.body.data || []).map((model) => model.id);
   const candidates = selectAvailableModels(matrixResponse.body, gatewayIds, null, 32);
+  const hostCliModels = Object.entries(matrixResponse.body.models || {})
+    .filter(([, model]) => model.available === true && model.executor === "host_cli")
+    .map(([alias, model]) => ({ alias, ...model }));
   const checks = await Promise.all(
     candidates.map(async (model) => {
       try {
@@ -353,9 +358,11 @@ async function fetchAvailableModels({ force = false } = {}) {
       }
     })
   );
+  const gatewayModels = selectAvailableModels(matrixResponse.body, gatewayIds, checks.filter(Boolean));
   const value = {
     matrix: matrixResponse.body,
-    models: selectAvailableModels(matrixResponse.body, gatewayIds, checks.filter(Boolean)),
+    models: [...hostCliModels, ...gatewayModels],
+    gatewayModels,
     checked: candidates.length,
   };
   modelVerificationCache = { checkedAt: Date.now(), value };
@@ -625,19 +632,19 @@ async function writeAvailableContinueConfig({ provider, replaceExisting, openDoc
   if (!root) throw new Error("Open a project folder before wiring Continue.");
   const discovered = await fetchAvailableModels();
   provider.updateRuntime(provider.runtime, discovered.models, provider.inference);
-  if (!discovered.models.length) {
-    throw new Error("The capability matrix reports no available chat/code models. Configure a provider key or pull a local Ollama model first.");
+  if (!discovered.gatewayModels.length) {
+    throw new Error("No LiteLLM-backed models are available for Continue.dev. Host CLI agents remain available inside AetherStack Chat.");
   }
 
   const dir = path.join(root, ".continue");
   const confPath = path.join(dir, "config.yaml");
-  if (fs.existsSync(confPath) && !replaceExisting) return { written: false, confPath, models: discovered.models };
+  if (fs.existsSync(confPath) && !replaceExisting) return { written: false, confPath, models: discovered.gatewayModels };
   fs.mkdirSync(dir, { recursive: true });
   if (fs.existsSync(confPath)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     fs.copyFileSync(confPath, `${confPath}.bak-${stamp}`);
   }
-  fs.writeFileSync(confPath, continueConfigYaml(cfg(), discovered.models), "utf8");
+  fs.writeFileSync(confPath, continueConfigYaml(cfg(), discovered.gatewayModels), "utf8");
 
   const overview = buildOverview(root);
   writeOverviewFiles(root, overview);
@@ -646,7 +653,7 @@ async function writeAvailableContinueConfig({ provider, replaceExisting, openDoc
     const doc = await vscode.workspace.openTextDocument(confPath);
     await vscode.window.showTextDocument(doc, { preview: true });
   }
-  return { written: true, confPath, models: discovered.models };
+  return { written: true, confPath, models: discovered.gatewayModels };
 }
 
 function nonce() {
@@ -708,6 +715,7 @@ class HubChat {
   constructor(context) {
     this.context = context;
     this.panel = null;
+    this.view = null;
     this.services = [];
     this.history = [];
     this.activityWords = [];
@@ -722,7 +730,7 @@ class HubChat {
     return response.body || {};
   }
 
-  async loadServices(force = false) {
+  async loadServices(force = false, webview = this.activeWebview()) {
     const pathname = force ? "/api/services/refresh" : "/api/services";
     const options = force ? { method: "POST", body: {} } : {};
     const body = await this.hubRequest(pathname, options);
@@ -733,22 +741,65 @@ class HubChat {
     } catch {
       this.activityWords = [];
     }
-    await this.postState(this.services.length ? "" : "No capability-matched services are currently available.");
+    await this.postState(this.services.length ? "" : "No capability-matched services are currently available.", false, webview);
   }
 
-  async run(message) {
-    const serviceId = String(message.serviceId || "");
-    if (serviceId !== "auto" && !this.services.some((service) => service.id === serviceId)) throw new Error("Select a valid service preset.");
-    const prompt = String(message.prompt || "").trim();
+  activeWebview() {
+    return (this.view && this.view.webview) || (this.panel && this.panel.webview) || null;
+  }
+
+  async run(message, webview = this.activeWebview()) {
+    if (!webview) throw new Error("AetherStack Chat view is not available.");
+    const parsed = parseChatInput(
+      message.prompt,
+      message.serviceId,
+      this.services.map((service) => service.id)
+    );
+    if (parsed.action === "error") throw new Error(parsed.message);
+    if (parsed.action === "help" || parsed.action === "presets") {
+      const content = parsed.action === "help"
+        ? commandHelp(this.services)
+        : this.services.map((service) => `/${service.id} — ${service.label}: ${service.summary}`).join("\n");
+      await webview.postMessage({ type: "command", content });
+      return;
+    }
+    if (parsed.action === "select") {
+      await webview.postMessage({
+        type: "route",
+        selection: parsed.serviceId === "auto"
+          ? { service_id: "", label: "Automatic routing", confidence: "ready", source: "slash-command" }
+          : { service_id: parsed.serviceId, label: (this.services.find((item) => item.id === parsed.serviceId) || {}).label, confidence: "fixed", source: "slash-command" },
+      });
+      await webview.postMessage({ type: "command", content: parsed.serviceId === "auto" ? "Automatic intent routing is active." : `Preset selected: ${parsed.serviceId}.` });
+      return;
+    }
+    const prompt = String(parsed.prompt || "").trim();
     if (!prompt) throw new Error("Enter a goal first.");
-    await this.panel.webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
-    await this.panel.webview.postMessage({ type: "busy", value: true });
+    let serviceId = parsed.serviceId;
+    let selection;
+    if (serviceId === "auto") {
+      selection = await this.hubRequest("/api/services/classify", {
+        method: "POST",
+        body: { goal: prompt },
+      });
+      serviceId = String(selection.service_id || "");
+      if (!this.services.some((service) => service.id === serviceId)) {
+        throw new Error("AetherStack could not map this request to an available service preset.");
+      }
+      selection.source = "intent-analysis";
+    } else if (parsed.command) {
+      const service = this.services.find((item) => item.id === serviceId) || {};
+      selection = { service_id: serviceId, label: service.label || serviceId, confidence: "fixed", source: "slash-command" };
+    }
+    if (selection) await webview.postMessage({ type: "route", selection });
+    await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
+    await webview.postMessage({ type: "busy", value: true });
     let inferenceTimer = null;
     const publishInference = async () => {
-      if (!cfg().showActiveModel || !this.panel) return;
+      if (!cfg().showActiveModel) return;
       try {
         const inference = await fetchInferenceStatus();
-        await this.panel.webview.postMessage({ type: "inference", inference });
+        await webview.postMessage({ type: "inference", inference });
       } catch {
         /* The normal service result will still report the models used. */
       }
@@ -767,18 +818,19 @@ class HubChat {
           history: this.history.slice(-8),
         },
       });
+      if (selection) result.selection = selection;
       this.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
-      await this.panel.webview.postMessage({ type: "result", result });
+      await webview.postMessage({ type: "result", result });
     } finally {
       if (inferenceTimer) clearInterval(inferenceTimer);
-      if (this.panel) await this.panel.webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
-      await this.panel.webview.postMessage({ type: "busy", value: false });
+      await webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
+      await webview.postMessage({ type: "busy", value: false });
     }
   }
 
-  async postState(notice = "", error = false) {
-    if (!this.panel) return;
-    await this.panel.webview.postMessage({
+  async postState(notice = "", error = false, webview = this.activeWebview()) {
+    if (!webview) return;
+    await webview.postMessage({
       type: "state",
       services: this.services,
       activityWords: this.activityWords,
@@ -788,10 +840,40 @@ class HubChat {
     });
   }
 
-  show() {
+  configureWebview(webview) {
+    webview.options = { enableScripts: true };
+    const template = fs.readFileSync(path.join(this.context.extensionPath, "chat.html"), "utf8");
+    webview.html = template
+      .replaceAll("{{NONCE}}", nonce())
+      .replaceAll("{{CSP_SOURCE}}", webview.cspSource);
+    webview.onDidReceiveMessage(async (message) => {
+      try {
+        if (message.type === "ready") await this.loadServices(false, webview);
+        else if (message.type === "refresh") await this.loadServices(true, webview);
+        else if (message.type === "run") await this.run(message, webview);
+        else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
+        else if (message.type === "openEditor") this.showPanel();
+      } catch (error) {
+        await webview.postMessage({ type: "error", message: error.message || String(error) });
+      }
+    }, null, this.context.subscriptions);
+  }
+
+  resolveWebviewView(view) {
+    this.view = view;
+    this.configureWebview(view.webview);
+    view.onDidDispose(() => { if (this.view === view) this.view = null; }, null, this.context.subscriptions);
+  }
+
+  async show() {
+    await vscode.commands.executeCommand("aetherstack.chatView.focus");
+    if (this.view) this.loadServices(false, this.view.webview).catch((error) => this.postState(error.message, true, this.view.webview));
+  }
+
+  showPanel() {
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.One);
-      this.loadServices().catch((error) => this.postState(error.message, true));
+      this.loadServices(false, this.panel.webview).catch((error) => this.postState(error.message, true, this.panel.webview));
       return;
     }
     this.panel = vscode.window.createWebviewPanel(
@@ -800,21 +882,8 @@ class HubChat {
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true }
     );
-    const template = fs.readFileSync(path.join(this.context.extensionPath, "chat.html"), "utf8");
-    this.panel.webview.html = template
-      .replaceAll("{{NONCE}}", nonce())
-      .replaceAll("{{CSP_SOURCE}}", this.panel.webview.cspSource);
+    this.configureWebview(this.panel.webview);
     this.panel.onDidDispose(() => { this.panel = null; }, null, this.context.subscriptions);
-    this.panel.webview.onDidReceiveMessage(async (message) => {
-      try {
-        if (message.type === "ready") await this.loadServices();
-        else if (message.type === "refresh") await this.loadServices(true);
-        else if (message.type === "run") await this.run(message);
-        else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
-      } catch (error) {
-        if (this.panel) await this.panel.webview.postMessage({ type: "error", message: error.message || String(error) });
-      }
-    }, null, this.context.subscriptions);
   }
 }
 
@@ -834,11 +903,32 @@ async function activate(context) {
   statusBar.show();
   context.subscriptions.push(output, statusBar);
 
+  let bridgeToken = await context.secrets.get("aetherstack.cliBridgeToken");
+  const cliBridge = createCliBridge({ token: bridgeToken || undefined, cwd: workspaceRoot() || process.cwd() });
+  if (!bridgeToken) {
+    bridgeToken = cliBridge.token;
+    await context.secrets.store("aetherstack.cliBridgeToken", bridgeToken);
+  }
+  process.env.AETHER_CLI_BRIDGE_TOKEN = bridgeToken;
+  process.env.AETHER_CLI_BRIDGE_URL = "http://host.docker.internal:8767";
+  try {
+    const bridgeState = await cliBridge.start();
+    output.appendLine(`[cli-bridge] ${bridgeState.reused ? "reusing existing" : "started"} host bridge on port ${bridgeState.port}`);
+  } catch (error) {
+    output.appendLine(`[cli-bridge] unavailable: ${error.message || error}`);
+  }
+  context.subscriptions.push(new vscode.Disposable(() => cliBridge.stop()));
+
   let stackRoot = await resolveStackRoot(context, false);
   let containers = [];
   let technicalError = "";
   let stackActionInProgress = null;
   const hubChat = new HubChat(context);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider("aetherstack.chatView", hubChat, {
+      webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
 
   function updateStatusBar() {
     const active = cfg().showActiveModel && provider.inference && Array.isArray(provider.inference.active)
@@ -1060,15 +1150,15 @@ async function activate(context) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("aetherstack.openChat", async () => {
+      await hubChat.show();
       const hub = (await checkServices()).services.find((service) => service.id === "hub");
       if (!hub || !hub.ok) {
-        vscode.window.showErrorMessage(
+        vscode.window.showWarningMessage(
           `Aether Hub is not ready: ${(hub && hub.error) || "not running"}. Start all services and retry.`
         );
-        return;
       }
-      hubChat.show();
     }),
+    vscode.commands.registerCommand("aetherstack.openChatEditor", () => hubChat.showPanel()),
     vscode.commands.registerCommand("aetherstack.openHub", () =>
       vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/"))
     ),
