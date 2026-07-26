@@ -6,16 +6,21 @@ const test = require("node:test");
 
 test("chat exposes auto service selection, active graph, and model activity state", () => {
   const html = fs.readFileSync(path.resolve(__dirname, "..", "chat.html"), "utf8");
-  assert.match(html, /Auto — detect from current task/);
+  assert.match(html, /Auto — analyze my request/);
   assert.match(html, /Active preset node graph/);
   assert.match(html, /activeModels/);
   assert.match(html, /activityWords/);
   assert.match(html, /openAdvanced/);
+  assert.match(html, /Ask anything, or use \/research/);
+  assert.match(html, /message.type === 'route'/);
+  assert.match(html, /vscode\.getState/);
 });
 
 test("extension activates and registers lifecycle/control commands", async () => {
   const registered = new Map();
   let treeProvider = null;
+  let chatViewProvider = null;
+  let cliBridgeStarted = false;
   class Disposable {
     constructor(dispose = () => {}) {
       this.dispose = dispose;
@@ -71,8 +76,13 @@ test("extension activates and registers lifecycle/control commands", async () =>
         treeProvider = provider;
         return new Disposable();
       },
+      registerWebviewViewProvider: (name, provider) => {
+        if (name === "aetherstack.chatView") chatViewProvider = provider;
+        return new Disposable();
+      },
       showErrorMessage: async () => undefined,
       showInformationMessage: async () => undefined,
+      showWarningMessage: async () => undefined,
       withProgress: async (_options, task) => task({ report: () => {} }),
     },
   };
@@ -104,6 +114,16 @@ test("extension activates and registers lifecycle/control commands", async () =>
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "vscode") return vscode;
     if (request === "./stack-control" && parent && parent.filename.endsWith("extension.js")) return stackControl;
+    if (request === "./cli-bridge" && parent && parent.filename.endsWith("extension.js")) {
+      return {
+        createCliBridge: () => ({
+          token: "test-token",
+          port: 8767,
+          start: async () => { cliBridgeStarted = true; return { port: 8767, reused: false }; },
+          stop: () => {},
+        }),
+      };
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
 
@@ -120,6 +140,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
     await extension.activate(context);
     for (const command of [
       "aetherstack.openChat",
+      "aetherstack.openChatEditor",
       "aetherstack.openHub",
       "aetherstack.openControlCenter",
       "aetherstack.startAll",
@@ -131,6 +152,9 @@ test("extension activates and registers lifecycle/control commands", async () =>
       assert.equal(registered.has(command), true, `${command} was not registered`);
     }
     assert.ok(treeProvider);
+    assert.ok(chatViewProvider);
+    assert.equal(typeof chatViewProvider.resolveWebviewView, "function");
+    assert.equal(cliBridgeStarted, true);
     const roots = treeProvider.getChildren();
     assert.ok(roots.some((item) => String(item.label).includes("Open AetherStack Chat")));
     assert.ok(roots.some((item) => String(item.label).includes("AetherStack has service errors")));

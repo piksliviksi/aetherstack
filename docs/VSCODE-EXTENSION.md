@@ -47,7 +47,7 @@ code --install-extension AetherStack.aetherstack
 ```bash
 code --install-extension AetherStack.aetherstack
 # or local VSIX:
-code --install-extension packages/aetherstack-0.3.2.vsix
+code --install-extension packages/aetherstack-0.3.3.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -156,7 +156,8 @@ The value is kept in VS Code SecretStorage rather than settings JSON.
 
 | Command | When to use |
 |---------|-------------|
-| **Open Combined Chat** | Run capability-matched task services directly in a VS Code editor tab |
+| **Show Chat View** | Focus the permanent AetherStack conversation in the Activity Bar |
+| **Open Chat in Editor** | Open the same conversation as a VS Code editor tab |
 | **Open Hub UI** | Open the Simple service UI, setup helper, and update staging tool |
 | **Open Control Center** | View services, containers, available models, technical errors, and lifecycle controls |
 | **Start / Stop / Restart All Services** | Control the complete local Docker Compose backend |
@@ -194,7 +195,11 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 Enable **Show the currently running model** in the Control Center. LiteLLM then exposes the model alias currently handling a request through Hub `/api/inference/status`, and Chat shows that alias beside its rotating activity line. Telemetry contains only call id, model alias, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
 
-Chat defaults to **Auto — detect from current task**. Each message is matched against the editable service catalog, the selected service is activated, and its lead/workers/reviewer are resolved from currently available models. Chat keeps a compact flow summary beneath the lineup. Hub embeds the complete editable advanced canvas below its presets, and `/graph` opens the same selected or active tree full-page. **Advanced setup** is reserved for technical configuration and the English/Estonian/Ukrainian activity-word editor; runtime edits persist in `.aetherstack/activity_words.json`.
+Chat defaults to **Auto — analyze my request**. Each natural-language message is classified before inference, the selected service is shown immediately, and its smallest useful lead/worker/reviewer team is resolved from currently available models. `/help`, `/presets`, `/auto <goal>`, `/preset <name> <goal>`, and shortcuts such as `/research`, `/plan`, `/code`, `/test`, and `/bugfix` provide explicit control. The transcript survives view restoration, fenced code renders safely, and editable English/Estonian/Ukrainian activity text rotates while inference is running.
+
+Already authenticated Codex, Claude, and Grok host CLIs are discovered by the extension and exposed to the Hub through a Docker-reachable host bridge protected by a random bearer token stored in VS Code SecretStorage. The bridge reuses the CLI login session; it accepts only a fixed CLI alias allowlist and does not reveal the CLI path, copy credentials, create an API key, or enable browser CORS. Start or restart AetherStack from the extension after installation so the Hub receives the bridge address and token. Continue configuration remains limited to LiteLLM-backed models.
+
+Hub embeds the complete editable advanced canvas below its presets, and `/graph` opens the same selected or active tree full-page. Positions and camera state persist across both views, empty-canvas dragging pans the tree, and an agent node can carry a local Markdown behavior profile. **Advanced setup** contains technical configuration and the activity-word editor; runtime wording edits persist in `.aetherstack/activity_words.json`.
 
 **Write .vscode Settings** stores base URL / chat UI / model in the workspace. It never writes an API key; legacy plaintext settings are migrated to SecretStorage.
 

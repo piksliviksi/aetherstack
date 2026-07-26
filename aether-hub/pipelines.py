@@ -378,6 +378,14 @@ def plan_pipeline(
         pick = _pick_for_stage(snapshot, stage)
         stages_out.append(pick)
         n = int(stage.get("parallel") or 1)
+        behavior = str(stage.get("behavior_markdown") or "")[:100_000].strip()
+        system_prompt = (
+            f"You are the {stage.get('role')} in pipeline stage "
+            f"'{stage.get('label') or stage.get('id')}'. "
+            f"Purpose: {stage.get('purpose') or ''}"
+        )
+        if behavior:
+            system_prompt += f"\n\nAgent-specific behavior profile:\n{behavior}"
         for i in range(max(1, n)):
             litellm_calls.append(
                 {
@@ -390,11 +398,7 @@ def plan_pipeline(
                     "messages": [
                         {
                             "role": "system",
-                            "content": (
-                                f"You are the {stage.get('role')} in pipeline stage "
-                                f"'{stage.get('label') or stage.get('id')}'. "
-                                f"Purpose: {stage.get('purpose') or ''}"
-                            ),
+                            "content": system_prompt,
                         },
                         {
                             "role": "user",

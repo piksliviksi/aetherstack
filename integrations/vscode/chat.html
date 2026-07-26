@@ -30,38 +30,45 @@
     .graph-node { min-width: 120px; max-width: 190px; padding: 6px; text-align: center; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editor-background); }
     .graph-node code { display: block; margin-top: 2px; font-size: 11px; }
     .graph-arrow { color: var(--vscode-textLink-foreground); }
-    #inference { min-height: 22px; margin: 8px 0; color: var(--vscode-descriptionForeground); }
+    #inference { min-height: 28px; margin: 8px 0; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 7px; }
+    #inference.busy { width: fit-content; max-width: 100%; padding: 4px 9px; border: 1px solid var(--vscode-panel-border); border-radius: 12px; background: var(--vscode-editor-background); }
+    #inference.busy::before { content: '◌'; color: var(--vscode-progressBar-background); animation: spin 1s linear infinite; }
     #activeModels { color: var(--vscode-testing-iconPassed); font-weight: 600; }
     #messages { display: grid; gap: 10px; margin: 14px 0; }
     .message { white-space: pre-wrap; overflow-wrap: anywhere; }
     .message.user { border-left: 3px solid var(--vscode-button-background); }
     .message.assistant { border-left: 3px solid var(--vscode-testing-iconPassed); }
+    .message pre { overflow: auto; margin: 8px 0 0; padding: 9px; border-radius: 5px; background: var(--vscode-textCodeBlock-background); }
+    .message code { font-family: var(--vscode-editor-font-family); }
     .role { display: block; font-weight: 600; margin-bottom: 5px; }
+    #route { margin: -3px 0 10px; min-height: 20px; color: var(--vscode-textLink-foreground); }
     button { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 1px solid var(--vscode-button-border, transparent); padding: 7px 12px; cursor: pointer; }
     button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
     button:disabled { opacity: .55; cursor: wait; }
     #status { min-height: 20px; }
     .error { color: var(--vscode-errorForeground); }
+    @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 600px) { main { padding: 10px; } .toolbar { display: grid; } }
   </style>
 </head>
 <body>
 <main>
   <header>
-    <div><h1>AetherStack Chat</h1><div class="muted">A capability-matched team runs inside VS Code. Open WebUI remains optional.</div></div>
+    <div><h1>AetherStack Chat</h1><div class="muted">Ask naturally. AetherStack analyzes the intent, activates a capability-matched preset, and answers here.</div></div>
     <div><button id="refresh" class="secondary">Refresh services</button> <button id="advanced" class="secondary">Advanced setup</button></div>
   </header>
   <section class="toolbar">
-    <label>Service preset<select id="service"></select></label>
+    <label>Routing<select id="service"></select></label>
     <label>Lean delivery<select id="lean"><option value="off">Off</option><option value="balanced" selected>Balanced</option><option value="strict">Strict</option></select></label>
     <label style="display:flex;align-items:center;min-width:auto"><input id="tokenSaver" type="checkbox"> Prefer lower token cost</label>
   </section>
   <section class="agents"><strong>Dynamic team</strong><div class="muted" id="serviceDescription"></div><div id="activities" class="activities"></div><div id="agents" class="agent-list"></div><details class="graph"><summary>Active preset node graph</summary><div id="serviceGraph" class="graph-flow"></div></details></section>
+  <div id="route"></div>
   <div id="messages"></div>
   <section class="composer">
-    <textarea id="prompt" placeholder="Describe the outcome you want…"></textarea>
+    <textarea id="prompt" placeholder="Ask anything, or use /research, /plan, /code, /test, /bugfix, /help…"></textarea>
     <div id="inference"><span id="activityText"></span> <span id="activeModels"></span></div>
-    <div class="composer-actions"><button id="send">Run combined chat</button><span id="status" class="muted"></span></div>
+    <div class="composer-actions"><button id="send">Send</button><span id="status" class="muted"></span></div>
   </section>
 </main>
 <script nonce="{{NONCE}}">
@@ -72,6 +79,8 @@
   let activeServiceId = '';
   let activityTimer = null;
   let showActiveModel = false;
+  const restored = vscode.getState() || {};
+  let transcript = Array.isArray(restored.transcript) ? restored.transcript.slice(-40) : [];
   const text = (tag, value, className) => { const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
   function selected() { return services.find((item) => item.id === ($('service').value === 'auto' ? activeServiceId : $('service').value)); }
   function graphNode(agent, label) { const node = text('div', '', 'graph-node'); node.append(text('strong', label || (agent && agent.label) || 'Stage')); if (agent) node.append(text('code', agent.model || 'unresolved')); return node; }
@@ -88,15 +97,27 @@
     renderGraph(service);
   }
   function rotateActivity() { const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text); $('activityText').textContent = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : 'Combobulating the agent swarm...'; }
-  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
-  function addMessage(role, value, detail) {
+  function saveState() { vscode.setState({ transcript: transcript.slice(-40), serviceId: $('service').value || 'auto', activeServiceId }); }
+  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
+  function appendRichText(parent, value) {
+    const parts = String(value || '').split(/```/);
+    parts.forEach((part, index) => {
+      if (index % 2 === 0) parent.append(text('div', part));
+      else { const pre = document.createElement('pre'); const code = text('code', part.replace(/^\w+\s*\n/, '')); pre.append(code); parent.append(pre); }
+    });
+  }
+  function addMessage(role, value, detail, persist = true) {
     const box = text('article', '', `message ${role}`);
-    box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'), text('div', value));
+    box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
+    appendRichText(box, value);
     if (detail) box.append(text('div', detail, 'muted'));
     $('messages').append(box);
+    if (persist) { transcript.push({ role, value: String(value || ''), detail: String(detail || '') }); saveState(); }
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
-  $('service').addEventListener('change', renderTeam);
+  if (transcript.length) transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false));
+  else addMessage('assistant', 'Tell me what you want to accomplish. I will select the working preset automatically, show the active team, and keep the answer in this conversation. Type /help for direct preset commands.');
+  $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
   $('send').addEventListener('click', () => {
@@ -106,7 +127,9 @@
     $('prompt').value = '';
     vscode.postMessage({ type: 'run', serviceId: $('service').value, prompt, leanMode: $('lean').value, tokenSaver: $('tokenSaver').checked });
   });
-  $('prompt').addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') $('send').click(); });
+  $('prompt').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('send').click(); }
+  });
   window.addEventListener('message', (event) => {
     const message = event.data || {};
     if (message.type === 'state') {
@@ -114,9 +137,11 @@
       services = Array.isArray(message.services) ? message.services : [];
       activityWords = Array.isArray(message.activityWords) ? message.activityWords : [];
       showActiveModel = Boolean(message.showActiveModel);
-      const auto = text('option', 'Auto — detect from current task'); auto.value = 'auto';
+      const auto = text('option', 'Auto — analyze my request'); auto.value = 'auto';
       $('service').replaceChildren(auto, ...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
-      $('service').value = current === 'auto' || services.some((service) => service.id === current) ? current : 'auto';
+      const preferred = current || restored.serviceId || 'auto';
+      $('service').value = preferred === 'auto' || services.some((service) => service.id === preferred) ? preferred : 'auto';
+      activeServiceId = activeServiceId || restored.activeServiceId || '';
       renderTeam();
       $('status').textContent = message.notice || '';
       $('status').className = message.error ? 'error' : 'muted';
@@ -130,6 +155,15 @@
     } else if (message.type === 'inferenceSetting') {
       showActiveModel = Boolean(message.enabled);
       if (!showActiveModel) $('activeModels').textContent = '';
+    } else if (message.type === 'route') {
+      const selection = message.selection || {};
+      activeServiceId = selection.service_id || '';
+      if (selection.source === 'slash-command') $('service').value = activeServiceId || 'auto';
+      const confidence = selection.confidence && selection.confidence !== 'fixed' ? ` · ${selection.confidence} confidence` : '';
+      $('route').textContent = activeServiceId ? `Active preset: ${selection.label || activeServiceId}${confidence}` : 'Automatic intent routing is active.';
+      renderTeam(); saveState();
+    } else if (message.type === 'command') {
+      addMessage('assistant', message.content || '');
     } else if (message.type === 'result') {
       const result = message.result || {};
       activeServiceId = result.service_id || (result.selection && result.selection.service_id) || activeServiceId;
@@ -137,9 +171,10 @@
       const usage = result.usage || result.token_usage || {};
       const tokens = usage.total_tokens == null ? '' : ` · ${usage.total_tokens} tokens`;
       const team = (result.agents || []).map((agent) => agent.model).filter(Boolean).join(', ');
-      const selection = result.selection ? `Auto-selected ${result.selection.label} · ` : '';
+      const selection = result.selection ? `${result.selection.source === 'intent-analysis' ? 'Auto-selected' : 'Selected'} ${result.selection.label} · ` : '';
       addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${selection}${team || 'dynamic team'}${tokens}`);
     } else if (message.type === 'error') {
+      setBusy(false);
       $('status').textContent = message.message || 'Request failed'; $('status').className = 'error';
     }
   });

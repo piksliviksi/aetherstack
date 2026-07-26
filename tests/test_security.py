@@ -18,6 +18,7 @@ sys.path.insert(0, str(HUB))
 
 import backup  # noqa: E402
 import graph  # noqa: E402
+import pipelines  # noqa: E402
 import server as hub_server  # noqa: E402
 
 
@@ -149,6 +150,9 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertNotIn('class="graph-flow"', html)
         self.assertIn("align-items:stretch", html)
         self.assertIn("Selected service workspace", html)
+        self.assertIn("aetherstack.hub.advancedGraphOpen", html)
+        self.assertIn("aetherstack.hub.selectedService", html)
+        self.assertIn("window.addEventListener('pageshow'", html)
 
     def test_advanced_graph_loads_capability_resolved_service_trees(self) -> None:
         html = (HUB / "static" / "graph.html").read_text(encoding="utf-8")
@@ -159,6 +163,56 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn('fetch("/api/matrix")', html)
         self.assertIn("model.available", html)
         self.assertIn('node.type === "master"', html)
+        self.assertIn("aetherstack.graph.layout.v1", html)
+        self.assertIn('canvasWrap.addEventListener("mousedown"', html)
+        self.assertIn('id="btnCenter"', html)
+        self.assertIn('id="agentMdFile"', html)
+
+    def test_agent_markdown_survives_graph_pipeline_and_reaches_prompt(self) -> None:
+        profile = "# Evidence critic\n\nSTOP if evidence cannot be sourced."
+        value = graph.empty_graph("agent-md-test")
+        goal = graph.new_node("goal", data={"text": "Research a claim"})
+        worker = graph.new_node(
+            "worker",
+            data={
+                "role": "researcher",
+                "model": "test-model",
+                "instructions_md": profile,
+                "instructions_source": "Research.agent.md",
+            },
+        )
+        output = graph.new_node("output")
+        value["nodes"] = [goal, worker, output]
+        value["edges"] = [
+            {"id": "one", "from": goal["id"], "to": worker["id"]},
+            {"id": "two", "from": worker["id"], "to": output["id"]},
+        ]
+        pipeline = graph.graph_to_pipeline(value)
+        self.assertEqual(pipeline["stages"][0]["behavior_markdown"], profile)
+        self.assertEqual(pipeline["stages"][0]["behavior_source"], "Research.agent.md")
+        roundtrip = graph.pipeline_to_graph(pipeline=pipeline)
+        data = next(node["data"] for node in roundtrip["nodes"] if node["type"] == "master")
+        self.assertEqual(data["instructions_md"], profile)
+
+        pipelines.import_pipeline(pipeline, persist=False)
+        planned = pipelines.plan_pipeline(
+            pipeline["id"],
+            {
+                "models": {
+                    "test-model": {
+                        "available": True,
+                        "provider": "test",
+                        "tier": "local",
+                        "cost": 0,
+                        "capabilities": ["chat", "tools"],
+                    }
+                }
+            },
+            goal="Research a claim",
+        )
+        system_prompt = planned["litellm_calls"][0]["messages"][0]["content"]
+        self.assertIn("Agent-specific behavior profile", system_prompt)
+        self.assertIn("STOP if evidence cannot be sourced", system_prompt)
 
     def test_open_webui_and_litellm_privacy_defaults(self) -> None:
         for compose_path in (

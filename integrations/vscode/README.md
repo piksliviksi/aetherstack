@@ -2,7 +2,7 @@
 
 **One chat window. Many models underneath.**
 
-After AetherStack is set up once (Docker + keys + imported pipelines/graphs + limits), you talk to a **single gateway model** in VS Code (via Continue or similar) — same habit as Grok or Claude. Routing, multi-agent roles, tier/cost limits, and memory hygiene run in the background.
+After AetherStack is set up once, you use its permanent **Chat** view in VS Code like a normal coding assistant. AetherStack analyzes each request, activates the matching service preset, and resolves the smallest useful team from models and authenticated host CLIs available on this system. Continue and Open WebUI remain optional clients.
 
 How the system operates (full story):  
 **[What you get](https://github.com/piksliviksi/aetherstack/blob/main/README.md)** · **[Operating model](https://github.com/piksliviksi/aetherstack/blob/main/docs/OPERATING-MODEL.md)** · **[Docs index](https://github.com/piksliviksi/aetherstack/blob/main/docs/README.md)**
@@ -21,7 +21,7 @@ Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
 1. Open **AetherStack → Control & Services** and press **Start all services**.
 2. The extension checks `:3000`, `:4000`, and `:8766`, verifies capability-matrix candidates through LiteLLM provider health, then wires only responding models into a new Continue config.
-3. Open **AetherStack Chat** in the sidebar. Leave the service on **Auto** and describe the current stage: research, planning, UI/service design, frontend/backend, coding, testing, bug fixing, security review, polishing, or documentation. The matching tree activates automatically and its lead, workers, and reviewer are assigned from the live capability matrix.
+3. Open **AetherStack → Chat** in the Activity Bar. Leave routing on **Auto** and ask naturally; intent analysis activates Research, Planning, Design, Build, Test, Bug-fix, Security, Polish, or Writing. Use `/help`, `/presets`, `/research`, `/plan`, `/code`, `/test`, `/bugfix`, or `/preset <name>` when you want explicit control.
 4. In Hub, expand the complete **Advanced active-preset node graph** below the presets to edit the selected capability-resolved tree, or open `/graph` full-page. Use the separate **Advanced setup** button for technical configuration and the local multilingual inference-activity wording database. Open WebUI (`:3000`) only when you want that separate client.
 5. Scan project AI history when you want repo context recovery.
 
@@ -31,7 +31,8 @@ Open a project folder, scan prior AI chat artifacts, and continue building throu
 
 | Command | What it does |
 |---------|----------------|
-| **AetherStack: Open Combined Chat** | Opens the native VS Code chat with dynamic task services and lean/token controls |
+| **AetherStack: Show Chat View** | Focuses the persistent native VS Code conversation with automatic or slash-command service routing |
+| **AetherStack: Open Chat in Editor** | Opens the same AetherStack conversation as an editor tab |
 | **AetherStack: Open Hub UI** | Opens the Simple Hub with service presets, setup, update staging, and links to advanced tools |
 | **AetherStack: Open Control Center** | Service state, backend details, models, lifecycle controls, and optional active-model display |
 | **AetherStack: Start All Services** | Runs the complete Docker Compose stack and waits for all three HTTP services |
@@ -76,7 +77,7 @@ VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http:/
 | `aetherstack.autoWireModels` | `true` |
 | `aetherstack.showActiveModel` | `false` (opt in from the Control Center; shows live model aliases in AetherStack Chat, the sidebar, and status bar) |
 
-Provider API keys are read by Docker Compose from the AetherStack installation root `.env`. The extension reuses its existing `LITELLM_MASTER_KEY` through VS Code SecretStorage and Continue's supported global `~/.continue/.env` secret store; generated model config refers to `${{ secrets.AETHERSTACK_API_KEY }}`. It never displays or regenerates provider keys and intentionally does not scan unrelated project `.env` files.
+Provider API keys are read by Docker Compose from the AetherStack installation root `.env`. The extension also detects already authenticated Codex, Claude, and Grok host CLIs through a Docker-reachable bridge protected by a random bearer token stored in VS Code SecretStorage, so their existing login sessions work in AetherStack Chat without copying or generating provider keys. The bridge exposes only its fixed CLI allowlist and does not enable browser CORS. Continue receives only models exposed through LiteLLM. The extension intentionally does not scan unrelated project `.env` files.
 
 Open WebUI is signed in automatically through a proxy published only on
 `127.0.0.1:3000`; its authenticated backend has no host port. The sole existing

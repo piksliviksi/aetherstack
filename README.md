@@ -150,9 +150,9 @@ model lists: Hub resolves every role from the models and provider keys that are
 currently available, verifies the selected aliases through LiteLLM, and adapts
 the team when a provider is offline.
 
-The same combined chat opens as an **AetherStack Chat** editor tab in VS Code.
-Its default **Auto** mode classifies the current coding stage from the task and
-activates the matching service tree; the catalog, activities, and agent lineup
+The same combined chat is a permanent **AetherStack Chat** Activity Bar view and can also open as an editor tab in VS Code.
+Its default **Auto** mode classifies the current coding stage from natural-language intent and
+activates the matching service tree; `/help`, `/presets`, `/auto`, `/preset <name>`, and preset shortcuts provide direct control. The catalog, activities, and agent lineup
 remain data-driven and every model is resolved from live capabilities. Expand
 the collapsed full advanced canvas below the preset workspace; it loads the
 selected service's live lead, parallel workers, reviewer, synthesis, and model

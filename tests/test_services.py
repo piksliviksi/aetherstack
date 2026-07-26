@@ -4,6 +4,7 @@ import sys
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -13,6 +14,7 @@ sys.path.insert(0, str(HUB))
 
 import services  # noqa: E402
 import activity_words  # noqa: E402
+import matrix  # noqa: E402
 from agents import get_runtime  # noqa: E402
 
 
@@ -77,6 +79,32 @@ def snapshot() -> dict:
 
 
 class DynamicServiceTests(unittest.TestCase):
+    def test_authenticated_host_cli_models_join_the_live_capability_matrix(self) -> None:
+        base = matrix.annotate_availability(
+            {"version": 1, "models": {}, "capabilities": {}, "routing": {}},
+            ollama={"ok": False, "models": []},
+        )
+        merged = matrix.merge_host_cli_models(
+            base,
+            {
+                "ok": True,
+                "models": [
+                    {
+                        "alias": "codex-cli",
+                        "provider": "codex-cli",
+                        "backend": "host-cli/codex",
+                        "capabilities": ["chat", "code", "reason", "tools"],
+                        "available": True,
+                    },
+                    {"alias": "untrusted-cli", "capabilities": ["chat"], "available": True},
+                ],
+            },
+        )
+        self.assertTrue(merged["models"]["codex-cli"]["available"])
+        self.assertEqual(merged["models"]["codex-cli"]["executor"], "host_cli")
+        self.assertNotIn("untrusted-cli", merged["models"])
+        self.assertIn("codex-cli", merged["capability_index"]["code"]["any_available"])
+
     def test_catalog_has_requested_services_without_model_or_provider_pins(self) -> None:
         catalog = services.load_service_catalog()
         self.assertEqual(set(catalog["services"]), EXPECTED_SERVICES)
@@ -110,7 +138,7 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertNotIn("offline-model", resolved["models"])
         self.assertTrue(all(agent.get("available") for agent in resolved["agents"]))
 
-    def test_research_service_builds_full_editable_parallel_graph(self) -> None:
+    def test_research_service_builds_small_assurance_graph(self) -> None:
         graph = services.build_service_graph("research", snapshot())
         self.assertEqual(graph["service_id"], "research")
         labels = [node.get("data", {}).get("label") for node in graph["nodes"]]
@@ -118,7 +146,7 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertIn("Evidence critic", labels)
         self.assertIn("Final synthesis", labels)
         workers = [node for node in graph["nodes"] if node["type"] == "worker"]
-        self.assertEqual(len(workers), 3)
+        self.assertEqual(len(workers), 1)
         lead = next(node for node in graph["nodes"] if node["id"].endswith("-lead"))
         reviewer = next(node for node in graph["nodes"] if node["id"].endswith("-review"))
         outgoing = [edge for edge in graph["edges"] if edge["from"] == lead["id"]]
@@ -126,6 +154,26 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertEqual(len(outgoing), len(workers))
         self.assertEqual(len(incoming), len(workers))
         self.assertEqual(set(graph["resolved_models"]), set(graph["resolved_models"]) & set(snapshot()["models"]))
+
+    def test_agent_budget_starts_small_and_expands_only_when_needed(self) -> None:
+        simple = services.plan_service(
+            "coding", snapshot(), {"goal": "Rename this label", "verify": False}
+        )
+        self.assertEqual(simple["service"]["agent_count"], 2)
+        self.assertFalse(simple["service"]["agent_policy"]["assurance_gate"])
+
+        complex_plan = services.plan_service(
+            "coding",
+            snapshot(),
+            {"goal": "Compare multiple architecture approaches in parallel", "verify": False},
+        )
+        self.assertEqual(complex_plan["service"]["agent_count"], 3)
+        self.assertTrue(complex_plan["service"]["agent_policy"]["parallel_worker"])
+
+        full = services.plan_service(
+            "coding", snapshot(), {"goal": "Implement", "verify": False, "agent_budget": "full"}
+        )
+        self.assertGreater(full["service"]["agent_count"], simple["service"]["agent_count"])
 
     def test_health_failure_reroutes_to_another_capable_model(self) -> None:
         initial = services.resolve_service("research", snapshot())
@@ -136,6 +184,34 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertIn(failed, resolved["failed_models"])
         self.assertNotEqual(resolved["agents"][0].get("model"), failed)
 
+    def test_host_cli_completion_uses_authenticated_bridge_not_litellm(self) -> None:
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "model": "codex-cli",
+                    "choices": [{"message": {"content": "bridge answer"}}],
+                    "usage": {},
+                }).encode()
+
+        with mock.patch.object(services, "CLI_BRIDGE_TOKEN", "test-bridge-token"), mock.patch.object(
+            services.urllib.request, "urlopen", return_value=Response()
+        ) as urlopen:
+            result = services._chat_completion(
+                {"model": "codex-cli"}, [{"role": "user", "content": "hello"}]
+            )
+        request = urlopen.call_args.args[0]
+        self.assertTrue(request.full_url.startswith(services.CLI_BRIDGE_URL))
+        self.assertNotIn(services.LITELLM_BASE_URL, request.full_url)
+        self.assertEqual(result["content"], "bridge answer")
+
     def test_service_plan_carries_lean_and_safety_policy(self) -> None:
         plan = services.plan_service(
             "whitehat-pentesting",
@@ -143,7 +219,7 @@ class DynamicServiceTests(unittest.TestCase):
             {"goal": "Review an authorized local API", "verify": False, "lean_mode": "strict"},
         )
         self.assertEqual(plan["lean_mode"], "strict")
-        self.assertGreaterEqual(len(plan["litellm_calls"]), 4)
+        self.assertGreaterEqual(len(plan["litellm_calls"]), 3)
         system_text = "\n".join(
             call["messages"][0]["content"] for call in plan["litellm_calls"]
         )
@@ -151,10 +227,10 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertIn("Never remove validation", system_text)
 
     def test_combined_chat_executes_lead_workers_review_and_synthesis(self) -> None:
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, list[dict] | None]] = []
 
         def completion(call: dict, messages: list[dict] | None = None) -> dict:
-            calls.append((call.get("role", "lead"), call["model"]))
+            calls.append((call.get("role", "lead"), call["model"], messages))
             return {
                 "model": call["model"],
                 "content": f"response-{len(calls)}",
@@ -169,10 +245,12 @@ class DynamicServiceTests(unittest.TestCase):
         )
         self.assertTrue(result["ok"])
         self.assertEqual(result["answer"], f"response-{len(calls)}")
-        self.assertGreaterEqual(len(calls), 5)
+        self.assertGreaterEqual(len(calls), 4)
         self.assertEqual(result["usage"]["total_tokens"], len(calls) * 5)
         self.assertEqual(result["activation"]["service"], "planning")
         self.assertEqual(get_runtime()["service"], "planning")
+        self.assertIn("interactive coding and project copilot", calls[-1][2][0]["content"])
+        self.assertIn("instead of merely listing facts", calls[-1][2][0]["content"])
 
     def test_activity_word_database_is_locally_editable(self) -> None:
         old_path = activity_words.DB_PATH

@@ -51,6 +51,7 @@ _DEFAULT_DATA = {
     "goal": {"text": ""},
     "master": {
         "role": "mastermind",
+        "instructions_md": "",
         "maker": None,
         "model": None,
         "tier": None,
@@ -59,6 +60,7 @@ _DEFAULT_DATA = {
     },
     "worker": {
         "role": "builder",
+        "instructions_md": "",
         "maker": None,
         "model": None,
         "tier": "local",
@@ -68,6 +70,7 @@ _DEFAULT_DATA = {
     },
     "analyser": {
         "role": "critic",
+        "instructions_md": "",
         "maker": None,
         "model": None,
         "tier": None,
@@ -78,6 +81,7 @@ _DEFAULT_DATA = {
     },
     "tester": {
         "role": "tester",
+        "instructions_md": "",
         "maker": None,
         "model": None,
         "tier": "local",
@@ -389,6 +393,8 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
             "ack": bool(d.get("ack")),
             "gate": bool(d.get("gate")),
             "parallel": int(d.get("parallel") or 1),
+            "behavior_markdown": str(d.get("instructions_md") or "")[:100_000],
+            "behavior_source": str(d.get("instructions_source") or "")[:500],
         }
         # clean empty select keys
         stage["select"] = {k: v for k, v in stage["select"].items() if v not in (None, "")}
@@ -446,6 +452,8 @@ def pipeline_to_graph(pipeline_id: str | None = None, pipeline: dict | None = No
             "parallel": st.get("parallel") or 1,
             "purpose": st.get("purpose"),
             "needs": st.get("needs"),
+            "instructions_md": st.get("behavior_markdown") or "",
+            "instructions_source": st.get("behavior_source") or "",
         }
         nodes.append(new_node(ntype, x, 140, data))
         x += 200
