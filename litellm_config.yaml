@@ -473,6 +473,9 @@ model_list:
 litellm_settings:
   drop_params: true
   set_verbose: false
+  # Exposes only active/last model alias and timing to the local VS Code UI.
+  # The callback never records prompts, responses, headers, identities, or keys.
+  callbacks: aetherstack_callback.proxy_handler_instance
   # Privacy default: do not persist prompts/responses in Redis cache/AOF.
   # Operators may opt in only after documenting their retention policy.
   cache: false

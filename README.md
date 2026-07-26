@@ -18,7 +18,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 
 | Capability | Fact |
 |------------|------|
-| One surface | VS Code or browser chat for normal work |
+| One surface | AetherStack Chat in VS Code or the simple Hub for normal work; Open WebUI remains optional |
 | One façade | One base URL + one gateway master key; many models underneath |
 | **Multi-key per provider** | **Subscription/personal + enterprise API keys simultaneously** for every cloud maker (Anthropic, OpenAI, xAI, Google, Mistral). Aliases: `*-personal` / `*-enterprise` — no key swap restarts. [docs/MULTI-KEYS.md](./docs/MULTI-KEYS.md) |
 | Orchestration | Combos, pipelines, node canvas by role / tier / cost |
@@ -112,6 +112,8 @@ Deep detail: [docs/OPERATING-MODEL.md](./docs/OPERATING-MODEL.md)
 
 ## Start
 
+From VS Code, open **AetherStack → Control & Services** and press **Start all services**. The extension starts the same Compose stack, monitors `:3000`, `:4000`, and `:8766`, and reports each endpoint as `OK` or with its concrete error. The script alternatives remain available:
+
 | OS | Start | Stop | Tutorial |
 |----|--------|------|----------|
 | **Windows** | `start.bat` | `stop.bat` | [TUTORIAL-WINDOWS](./docs/TUTORIAL-WINDOWS.md) |
@@ -126,11 +128,41 @@ Deep detail: [docs/OPERATING-MODEL.md](./docs/OPERATING-MODEL.md)
 
 | Open | URL |
 |------|-----|
-| Chat | http://localhost:3000 |
+| Simple services UI | http://localhost:8766 |
+| Optional Open WebUI | http://localhost:3000 |
 | Gateway | http://localhost:4000/v1 |
-| Hub | http://localhost:8766 |
+| Advanced Hub | http://localhost:8766/advanced |
+| Node graph | http://localhost:8766/graph |
+
+The chat UI is local and does not ask for a separate password. A proxy bound
+only to `127.0.0.1:3000` signs the browser into the existing sole Open WebUI
+admin account; the authenticated backend is not exposed directly. If the
+database has multiple admins, set `AETHER_LOCAL_WEBUI_EMAIL` in the root `.env`.
 
 Procedure: [docs/QUICKSTART.md](./docs/QUICKSTART.md)
+
+### Task-first services and lean delivery
+
+The default Hub page offers Research, Planning, Service design, UI design,
+Frontend, Backend, Coding, Testing, Bug fixing, White-hat pentesting,
+Polishing, and Technical writing. These are capability blueprints, not fixed
+model lists: Hub resolves every role from the models and provider keys that are
+currently available, verifies the selected aliases through LiteLLM, and adapts
+the team when a provider is offline.
+
+The same combined chat opens as an **AetherStack Chat** editor tab in VS Code.
+Each run uses a lead, parallel workers, a reviewer, and final synthesis. Lean
+Delivery and the token saver can reduce unnecessary context and output without
+removing validation, security controls, accessibility, tests, or observability.
+The lean policy is an independent implementation inspired by
+[Ponytail](https://github.com/DietrichGebert/ponytail); no Ponytail source code
+is copied. Ponytail is MIT-licensed, so a future direct code reuse must retain
+its copyright and permission notice.
+
+The Simple Hub also includes **Update AetherStack**. It checks the official
+repository and stages a checksummed archive under `.aetherstack/updates`; it
+never overwrites a working checkout from the browser. Review local changes and
+apply the staged update from a trusted host workflow.
 
 ---
 
@@ -138,7 +170,7 @@ Procedure: [docs/QUICKSTART.md](./docs/QUICKSTART.md)
 
 | Service | Port | Role |
 |---------|------|------|
-| Open WebUI | 3000 | Browser chat |
+| Open WebUI local proxy | 3000 | Passwordless loopback browser chat |
 | LiteLLM | 4000 | OpenAI-compatible gateway |
 | Aether Hub | 8766 | Discover, routes, combos, pipelines, graph, memory, slash |
 | Redis | 6379 | Cache + agent memory |

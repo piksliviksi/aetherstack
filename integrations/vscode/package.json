@@ -2,7 +2,7 @@
   "name": "aetherstack",
   "displayName": "AetherStack",
   "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama). Windows, macOS, and Linux.",
-  "version": "0.1.2",
+  "version": "0.3.0",
   "publisher": "AetherStack",
   "license": "MIT",
   "pricing": "Free",
@@ -34,8 +34,54 @@
     "onStartupFinished"
   ],
   "main": "./extension.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "contributes": {
     "commands": [
+      {
+        "command": "aetherstack.openChat",
+        "title": "AetherStack: Open Combined Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "aetherstack.openHub",
+        "title": "AetherStack: Open Hub UI",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "aetherstack.openControlCenter",
+        "title": "AetherStack: Open Control Center",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "aetherstack.startAll",
+        "title": "AetherStack: Start All Services",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aetherstack.stopAll",
+        "title": "AetherStack: Stop All Services",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "aetherstack.restartAll",
+        "title": "AetherStack: Restart All Services",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "aetherstack.refreshServices",
+        "title": "AetherStack: Refresh Service State",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aetherstack.chooseStackPath",
+        "title": "AetherStack: Choose Installation Folder"
+      },
+      {
+        "command": "aetherstack.showLogs",
+        "title": "AetherStack: Show Backend Logs"
+      },
       {
         "command": "aetherstack.scanProject",
         "title": "AetherStack: Scan Project AI History"
@@ -96,6 +142,22 @@
           "type": "string",
           "default": "local-default",
           "description": "Default model id from AetherStack /v1/models"
+        },
+        "aetherstack.stackPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "AetherStack installation folder containing docker-compose.yml. Auto-detected when possible."
+        },
+        "aetherstack.autoWireModels": {
+          "type": "boolean",
+          "default": true,
+          "description": "After one-click startup, create a Continue config when none exists using only models marked available by the live capability matrix."
+        },
+        "aetherstack.showActiveModel": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the model currently handling inference in the AetherStack view and status bar. Only model aliases and timing are observed."
         }
       }
     },
@@ -112,16 +174,36 @@
       "aetherstack": [
         {
           "id": "aetherstack.overview",
-          "name": "Project AI Overview"
+          "name": "Control & Services"
         }
       ]
     },
     "menus": {
       "view/title": [
         {
+          "command": "aetherstack.openChat",
+          "when": "view == aetherstack.overview",
+          "group": "navigation@0"
+        },
+        {
+          "command": "aetherstack.openControlCenter",
+          "when": "view == aetherstack.overview",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aetherstack.startAll",
+          "when": "view == aetherstack.overview",
+          "group": "navigation@2"
+        },
+        {
+          "command": "aetherstack.refreshServices",
+          "when": "view == aetherstack.overview",
+          "group": "navigation@3"
+        },
+        {
           "command": "aetherstack.scanProject",
           "when": "view == aetherstack.overview",
-          "group": "navigation"
+          "group": "navigation@4"
         }
       ]
     }

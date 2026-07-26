@@ -24,14 +24,16 @@ services:
     # Keep in sync with volume schema (:main created the DB). Use TZ to reduce client loops.
     image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui@sha256:a26effeb220e132482bf7e0560b3404843e7bc40d23051144e062960df8df6b0}
     container_name: aether-open-webui
-    ports:
-      - "${AETHER_BIND_HOST:-127.0.0.1}:3000:8080"
+    expose:
+      - "8080"
     environment:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       # Also expose LiteLLM multi-model gateway as OpenAI-compatible provider
       - OPENAI_API_BASE_URL=http://litellm:4000/v1
       - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
-      - WEBUI_AUTH=${WEBUI_AUTH:-true}
+      - WEBUI_AUTH=true
+      - WEBUI_AUTH_TRUSTED_EMAIL_HEADER=X-AetherStack-Email
+      - WEBUI_AUTH_TRUSTED_NAME_HEADER=X-AetherStack-Name
       - CORS_ALLOW_ORIGIN=${CORS_ALLOW_ORIGIN:-http://127.0.0.1:3000}
       # Never place auth responses, profile data, or chats in browser/proxy caches.
       - CACHE_CONTROL=no-cache, no-store, must-revalidate, max-age=0
@@ -49,6 +51,27 @@ services:
     command: ["bash", "-lc", "umask 077; chmod -R go-rwx /app/backend/data 2>/dev/null || true; exec bash start.sh"]
     depends_on:
       - litellm
+    restart: unless-stopped
+
+  # Passwordless local session for the browser UI. The authenticated Open WebUI
+  # backend is not published directly, and this proxy is fixed to loopback.
+  open-webui-proxy:
+    build: ./open-webui-proxy
+    container_name: aether-open-webui-proxy
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - AETHER_LOCAL_WEBUI_EMAIL=${AETHER_LOCAL_WEBUI_EMAIL:-}
+    volumes:
+      - open_webui_data:/data:ro
+    depends_on:
+      open-webui:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
     restart: unless-stopped
 
   redis:
@@ -77,6 +100,9 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - AETHER_HUB_HOST=0.0.0.0
       - AETHER_HUB_PORT=8766
+      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.0}
+      - AETHERSTACK_REVISION=${AETHERSTACK_REVISION:-}
+      - AETHER_UPDATE_DIR=/host-aetherstack/updates
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
       - AETHER_EMBED_MODEL=${AETHER_EMBED_MODEL:-nomic-embed-text}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
@@ -142,6 +168,8 @@ services:
       - "${AETHER_BIND_HOST:-127.0.0.1}:4000:4000"
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
+      - ./aetherstack_callback.py:/app/aetherstack_callback.py:ro
+      - ./.aetherstack:/aetherstack-state
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -165,6 +193,7 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - AETHER_INFERENCE_STATUS_PATH=/aetherstack-state/inference-status.json
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

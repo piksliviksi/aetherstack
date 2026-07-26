@@ -14,6 +14,7 @@ LABEL org.opencontainers.image.title="AetherStack" \
 COPY metadata.json .
 COPY docker-compose.yaml .
 COPY litellm_config.yaml .
+COPY open-webui-proxy /open-webui-proxy
 COPY ui /ui
 COPY aetherstack.svg .
 

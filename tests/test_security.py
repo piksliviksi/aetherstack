@@ -108,6 +108,13 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn("${esc(j.path)}", html)
         self.assertNotIn("${j.path}</code>", html)
 
+    def test_simple_hub_renders_api_content_without_inner_html(self) -> None:
+        html = (HUB / "static" / "simple.html").read_text(encoding="utf-8")
+        self.assertNotIn(".innerHTML", html)
+        self.assertIn("textContent", html)
+        self.assertIn("/api/update/stage", html)
+        self.assertIn("/api/services/", html)
+
     def test_open_webui_and_litellm_privacy_defaults(self) -> None:
         for compose_path in (
             REPO / "docker-compose.yml",
@@ -129,6 +136,37 @@ class SecurityBoundaryTests(unittest.TestCase):
         gitignore = (REPO / ".gitignore").read_text(encoding="utf-8")
         for pattern in ("*.db", "*.sqlite", "*.sqlite3", "cache/", ".cache/"):
             self.assertIn(pattern, gitignore)
+
+    def test_inference_status_contains_model_metadata_without_prompt_content(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "inference-status.json"
+            payload = {
+                "active": [{"callId": "call-1", "model": "local-default", "startedAt": 1}],
+                "activeCount": 1,
+                "last": None,
+            }
+            status_path.write_text(json.dumps(payload), encoding="utf-8")
+            code, result = hub_server.get_inference_status(status_path)
+            self.assertEqual(code, 200)
+            self.assertEqual(result, payload)
+            self.assertNotIn("messages", json.dumps(result))
+            self.assertNotIn("response", json.dumps(result))
+
+            missing_code, missing = hub_server.get_inference_status(Path(td) / "missing.json")
+            self.assertEqual(missing_code, 200)
+            self.assertEqual(missing["activeCount"], 0)
+
+    def test_inference_status_is_a_get_endpoint(self) -> None:
+        sent = []
+        fake = SimpleNamespace(
+            path="/api/inference/status",
+            _send=lambda code, value, content_type="application/json; charset=utf-8": sent.append(
+                (code, value, content_type)
+            ),
+        )
+        hub_server.Handler.do_GET(fake)
+        self.assertEqual(sent[0][0], 200)
+        self.assertIn("activeCount", sent[0][1])
 
 
 if __name__ == "__main__":

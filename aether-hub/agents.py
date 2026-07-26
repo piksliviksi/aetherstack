@@ -23,6 +23,8 @@ MODES_PATH = Path(os.environ.get("AETHER_AGENT_MODES_PATH", str(ROOT / "agent_mo
 _runtime: dict[str, Any] = {
     "mode": "inline",
     "token_saver": False,
+    "lean_mode": "off",
+    "service": None,
     "role_overrides": {},  # role -> {model, maker, tier, strategy, max_cost}
     "preset": None,
     "updated_at": None,
@@ -61,6 +63,13 @@ def apply_runtime_update(patch: dict[str, Any], cfg: dict[str, Any] | None = Non
         _runtime["mode"] = mode
     if "token_saver" in patch and patch["token_saver"] is not None:
         _runtime["token_saver"] = bool(patch["token_saver"])
+    if "lean_mode" in patch and patch["lean_mode"] is not None:
+        lean_mode = str(patch["lean_mode"]).lower().replace("-", "_")
+        if lean_mode not in ("off", "balanced", "strict"):
+            raise ValueError("lean_mode must be off, balanced, or strict")
+        _runtime["lean_mode"] = lean_mode
+    if "service" in patch:
+        _runtime["service"] = str(patch["service"])[:80] if patch["service"] else None
     if "role_overrides" in patch and isinstance(patch["role_overrides"], dict):
         for role, ov in patch["role_overrides"].items():
             if not isinstance(ov, dict):
@@ -96,6 +105,8 @@ def init_runtime_from_config(cfg: dict[str, Any] | None = None) -> dict[str, Any
     d = cfg.get("defaults") or {}
     _runtime["mode"] = d.get("mode") or "inline"
     _runtime["token_saver"] = bool(d.get("token_saver", False))
+    _runtime["lean_mode"] = str(d.get("lean_mode") or "off")
+    _runtime["service"] = None
     _runtime["role_overrides"] = {}
     _runtime["preset"] = None
     _runtime["updated_at"] = time.time()
@@ -288,6 +299,21 @@ def token_saver_apply(text: str, role: str, cfg: dict[str, Any] | None = None) -
     }
 
 
+def lean_delivery_policy(mode: str | None) -> str:
+    """Safe minimal-delivery policy inspired by Ponytail's YAGNI ladder."""
+    normalized = str(mode or "off").lower()
+    if normalized == "off":
+        return ""
+    common = (
+        "Deliver only what the task requires. Reuse existing project code and platform primitives before adding abstractions, "
+        "dependencies, files, or configuration. Do not add speculative features or explanatory padding. "
+        "Never remove validation, error handling, security controls, accessibility, tests, or required observability to be shorter."
+    )
+    if normalized == "strict":
+        return common + " Prefer the smallest readable patch and the shortest complete answer; justify every new layer."
+    return common + " Keep the result concise, readable, and maintainable."
+
+
 def plan_event(
     snapshot: dict[str, Any],
     event: dict[str, Any],
@@ -308,12 +334,22 @@ def plan_event(
     # Temporary overrides for this event only (do not mutate global unless requested)
     saved = get_runtime()
     try:
-        if event.get("mode") is not None or event.get("token_saver") is not None or event.get("roles"):
+        if (
+            event.get("mode") is not None
+            or event.get("token_saver") is not None
+            or event.get("lean_mode") is not None
+            or event.get("service") is not None
+            or event.get("roles")
+        ):
             patch = {}
             if event.get("mode") is not None:
                 patch["mode"] = event["mode"]
             if event.get("token_saver") is not None:
                 patch["token_saver"] = event["token_saver"]
+            if event.get("lean_mode") is not None:
+                patch["lean_mode"] = event["lean_mode"]
+            if event.get("service") is not None:
+                patch["service"] = event["service"]
             if event.get("roles"):
                 patch["role_overrides"] = event["roles"]
             apply_runtime_update(patch, cfg)
@@ -321,6 +357,9 @@ def plan_event(
         mode = _runtime.get("mode") or "inline"
         saver_on = bool(_runtime.get("token_saver"))
         goal = event.get("goal") or event.get("prompt") or event.get("input") or ""
+        service_instructions = str(event.get("service_instructions") or "")[:2000]
+        lean_policy = lean_delivery_policy(_runtime.get("lean_mode"))
+        policy_suffix = "\n\n".join(part for part in (service_instructions, lean_policy) if part)
         event_id = event.get("id") or str(uuid.uuid4())
 
         saver_goal = token_saver_apply(goal, "mastermind" if mode == "multi_agent" else "inline", cfg)
@@ -352,7 +391,11 @@ def plan_event(
                         "model": pick.get("model"),
                         "role": "inline",
                         "messages": [
-                            {"role": "system", "content": "You are the sole agent for this task."},
+                            {
+                                "role": "system",
+                                "content": "You are the sole agent for this task."
+                                + (f"\n\n{policy_suffix}" if policy_suffix else ""),
+                            },
                             {"role": "user", "content": saver_goal.get("text")},
                         ],
                         "max_tokens": saver_goal.get("max_tokens"),
@@ -413,6 +456,7 @@ def plan_event(
                         "content": (
                             "You are the MASTERMIND orchestrator. Produce a short plan and "
                             "assign subtasks. Different worker models may execute them."
+                            + (f"\n\n{policy_suffix}" if policy_suffix else "")
                         ),
                     },
                     {"role": "user", "content": saver_goal.get("text")},
@@ -475,7 +519,8 @@ def plan_event(
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a WORKER agent. Do only your assigned subtask. Be concise.",
+                            "content": "You are a WORKER agent. Do only your assigned subtask. Be concise."
+                            + (f"\n\n{policy_suffix}" if policy_suffix else ""),
                         },
                         {"role": "user", "content": w_in.get("text")},
                     ],
@@ -512,7 +557,8 @@ def plan_event(
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are the SUPERVISOR. Critique worker results; list issues or approve.",
+                        "content": "You are the SUPERVISOR. Critique worker results; list issues or approve."
+                        + (f"\n\n{policy_suffix}" if policy_suffix else ""),
                     },
                     {"role": "user", "content": s_in.get("text")},
                 ],
@@ -528,6 +574,8 @@ def plan_event(
             "event_id": event_id,
             "mode": "multi_agent",
             "token_saver": saver_on,
+            "lean_mode": _runtime.get("lean_mode"),
+            "service_id": _runtime.get("service"),
             "goal": saver_goal,
             "agents": agents,
             "edges": edges,
@@ -560,6 +608,7 @@ def modes_status(snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
         "runtime": runtime,
         "defaults": cfg.get("defaults"),
         "token_saver_config": cfg.get("token_saver"),
+        "lean_modes": ["off", "balanced", "strict"],
         "presets": list((cfg.get("presets") or {}).keys()),
         "roles": {
             k: {
