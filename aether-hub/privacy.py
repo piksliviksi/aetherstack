@@ -541,25 +541,19 @@ def apply_privacy_patch(patch: dict[str, Any], *, redis_client: Any = None, mem:
       {"release": true, "project_id": "...", "purge_vault": true}
       {"bind_session": "s1", "project_id": "..."}
     """
-    if patch.get("release") or patch.get("private") is False and patch.get("project_id"):
-        if patch.get("private") is False and not patch.get("release"):
-            # explicit: only release_project leaves private state
-            return release_project(
-                str(patch["project_id"]),
-                purge_vault=bool(patch.get("purge_vault", True)),
-                mem=mem,
-                redis_client=redis_client,
-            )
-        if patch.get("release"):
-            pid = patch.get("project_id") or patch.get("id")
-            if not pid:
-                raise ValueError("project_id required for release")
-            return release_project(
-                str(pid),
-                purge_vault=bool(patch.get("purge_vault", True)),
-                mem=mem,
-                redis_client=redis_client,
-            )
+    # Release path (explicit). Operator precedence: release flag OR (private false + project_id).
+    if patch.get("release") or (
+        patch.get("private") is False and (patch.get("project_id") or patch.get("id"))
+    ):
+        pid = patch.get("project_id") or patch.get("id")
+        if not pid:
+            raise ValueError("project_id required for release")
+        return release_project(
+            str(pid),
+            purge_vault=bool(patch.get("purge_vault", True)),
+            mem=mem,
+            redis_client=redis_client,
+        )
 
     if patch.get("bind_session") and patch.get("project_id"):
         return bind_session(str(patch["bind_session"]), str(patch["project_id"]), redis_client=redis_client)
@@ -572,9 +566,13 @@ def apply_privacy_patch(patch: dict[str, Any], *, redis_client: Any = None, mem:
             redis_client=redis_client,
         )
 
-    if patch.get("private") is True or patch.get("path") or patch.get("project_id") and patch.get("private", True):
+    if (
+        patch.get("private") is True
+        or patch.get("path")
+        or (patch.get("project_id") and patch.get("private", True) is not False)
+    ):
         if patch.get("private") is False:
-            raise ValueError("Set private=false via release on project_id")
+            raise ValueError("Use release with project_id to leave private state")
         return set_project_private(
             path=patch.get("path"),
             project_id=patch.get("project_id") or patch.get("id"),

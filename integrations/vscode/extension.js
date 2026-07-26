@@ -6,6 +6,8 @@ const http = require("http");
 const https = require("https");
 const { URL } = require("url");
 
+let secretStorage = null;
+
 const SCAN_GLOBS = [
   "**/.continue/**",
   "**/.claude/**",
@@ -26,10 +28,34 @@ function cfg() {
   const c = vscode.workspace.getConfiguration("aetherstack");
   return {
     baseUrl: c.get("baseUrl") || "http://127.0.0.1:4000/v1",
-    apiKey: c.get("apiKey") || "sk-aether-local",
     chatUiUrl: c.get("chatUiUrl") || "http://127.0.0.1:3000",
     defaultModel: c.get("defaultModel") || "local-default",
   };
+}
+
+async function getApiKey() {
+  return (
+    process.env.AETHERSTACK_API_KEY ||
+    (secretStorage ? await secretStorage.get("aetherstack.apiKey") : "") ||
+    "sk-aether-local"
+  );
+}
+
+async function migrateLegacyApiKey(context) {
+  const c = vscode.workspace.getConfiguration("aetherstack");
+  const legacy = c.inspect("apiKey") || {};
+  const value = legacy.workspaceFolderValue || legacy.workspaceValue || legacy.globalValue;
+  if (typeof value === "string" && value.trim()) {
+    await context.secrets.store("aetherstack.apiKey", value.trim());
+  }
+  const targets = [
+    [legacy.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder],
+    [legacy.workspaceValue, vscode.ConfigurationTarget.Workspace],
+    [legacy.globalValue, vscode.ConfigurationTarget.Global],
+  ];
+  for (const [configured, target] of targets) {
+    if (configured !== undefined) await c.update("apiKey", undefined, target);
+  }
 }
 
 function listDirSafe(p, depth = 0, maxDepth = 3) {
@@ -261,7 +287,8 @@ function httpJson(urlStr, headers = {}) {
 }
 
 async function fetchModels() {
-  const { baseUrl, apiKey } = cfg();
+  const { baseUrl } = cfg();
+  const apiKey = await getApiKey();
   const url = baseUrl.replace(/\/$/, "") + "/models";
   return httpJson(url, { Authorization: `Bearer ${apiKey}` });
 }
@@ -414,7 +441,9 @@ function treeCmd(label, command) {
 /**
  * @param {vscode.ExtensionContext} context
  */
-function activate(context) {
+async function activate(context) {
+  secretStorage = context.secrets;
+  await migrateLegacyApiKey(context);
   const provider = new OverviewProvider();
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("aetherstack.overview", provider)
@@ -462,6 +491,16 @@ function activate(context) {
       const dir = path.join(root, ".continue");
       fs.mkdirSync(dir, { recursive: true });
       const confPath = path.join(dir, "config.yaml");
+      if (fs.existsSync(confPath)) {
+        const choice = await vscode.window.showWarningMessage(
+          "Continue config already exists. Replace it with the AetherStack template? A backup will be kept.",
+          { modal: true },
+          "Replace"
+        );
+        if (choice !== "Replace") return;
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        fs.copyFileSync(confPath, `${confPath}.bak-${stamp}`);
+      }
       fs.writeFileSync(confPath, continueConfigYaml(cfg()), "utf8");
       // Also refresh overview
       const overview = buildOverview(root);
@@ -481,33 +520,15 @@ function activate(context) {
       if (!root) return;
       const dir = path.join(root, ".vscode");
       fs.mkdirSync(dir, { recursive: true });
-      const settingsPath = path.join(dir, "settings.json");
-      let settings = {};
-      if (fs.existsSync(settingsPath)) {
-        try {
-          settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-        } catch {
-          settings = {};
-        }
-      }
       const c = cfg();
-      // Non-secret workspace settings only (safe-ish to commit)
-      settings["aetherstack.baseUrl"] = c.baseUrl;
-      settings["aetherstack.chatUiUrl"] = c.chatUiUrl;
-      settings["aetherstack.defaultModel"] = c.defaultModel;
-      settings["openai.baseUrl"] = c.baseUrl;
-      // Never write aetherstack.apiKey into workspace settings.json (leaks via git)
-      if (Object.prototype.hasOwnProperty.call(settings, "aetherstack.apiKey")) {
-        delete settings["aetherstack.apiKey"];
-      }
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-
-      // Store API key in User settings only (not workspace / not repo)
-      if (c.apiKey) {
-        await vscode.workspace
-          .getConfiguration("aetherstack")
-          .update("apiKey", c.apiKey, vscode.ConfigurationTarget.Global);
-      }
+      const uri = vscode.Uri.file(root);
+      const aetherCfg = vscode.workspace.getConfiguration("aetherstack", uri);
+      await aetherCfg.update("baseUrl", c.baseUrl, vscode.ConfigurationTarget.Workspace);
+      await aetherCfg.update("chatUiUrl", c.chatUiUrl, vscode.ConfigurationTarget.Workspace);
+      await aetherCfg.update("defaultModel", c.defaultModel, vscode.ConfigurationTarget.Workspace);
+      await vscode.workspace
+        .getConfiguration("openai", uri)
+        .update("baseUrl", c.baseUrl, vscode.ConfigurationTarget.Workspace);
 
       const recPath = path.join(dir, "extensions.json");
       let rec = { recommendations: [] };
@@ -515,18 +536,39 @@ function activate(context) {
         try {
           rec = JSON.parse(fs.readFileSync(recPath, "utf8"));
         } catch {
-          /* keep default */
+          vscode.window.showWarningMessage(
+            "Preserved .vscode/extensions.json because it contains JSONC or invalid JSON; add Continue.continue manually."
+          );
+          rec = null;
         }
       }
       const want = ["Continue.continue", "AetherStack.aetherstack"];
-      rec.recommendations = rec.recommendations || [];
-      for (const id of want) {
-        if (!rec.recommendations.includes(id)) rec.recommendations.push(id);
+      if (rec) {
+        rec.recommendations = rec.recommendations || [];
+        for (const id of want) {
+          if (!rec.recommendations.includes(id)) rec.recommendations.push(id);
+        }
+        fs.writeFileSync(recPath, JSON.stringify(rec, null, 2), "utf8");
       }
-      fs.writeFileSync(recPath, JSON.stringify(rec, null, 2), "utf8");
 
       vscode.window.showInformationMessage(
-        "Wrote .vscode settings (no API key in workspace). Key stored in User settings if set."
+        "Updated .vscode settings without writing an API key."
+      );
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("aetherstack.setApiKey", async () => {
+      const value = await vscode.window.showInputBox({
+        prompt: "AetherStack LiteLLM API key",
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (value === undefined) return;
+      if (value.trim()) await context.secrets.store("aetherstack.apiKey", value.trim());
+      else await context.secrets.delete("aetherstack.apiKey");
+      vscode.window.showInformationMessage(
+        value.trim() ? "AetherStack API key stored in VS Code SecretStorage." : "AetherStack API key cleared."
       );
     })
   );

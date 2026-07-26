@@ -2,6 +2,7 @@
 """Aether Hub — system discover, capability matrix, shared agent memory."""
 from __future__ import annotations
 
+import html as html_lib
 import json
 import os
 import sys
@@ -104,6 +105,24 @@ HOST = os.environ.get("AETHER_HUB_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AETHER_HUB_PORT", "8766"))
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 SYNC_INTERVAL = int(os.environ.get("AETHER_MATRIX_SYNC_SEC", "60"))
+MAX_JSON_BODY = int(os.environ.get("AETHER_MAX_JSON_BODY", str(1024 * 1024)))
+CORS_ORIGINS = {
+    item.strip().rstrip("/")
+    for item in os.environ.get("AETHER_CORS_ORIGINS", "").split(",")
+    if item.strip()
+}
+
+
+def _request_origin_allowed(origin: str | None, host: str) -> bool:
+    """Allow CLI requests and same-origin/configured browser requests only."""
+    if not origin:
+        return True
+    parsed = urlparse(origin)
+    normalized = origin.rstrip("/")
+    return (
+        parsed.scheme in ("http", "https")
+        and (parsed.netloc == host or normalized in CORS_ORIGINS)
+    )
 
 _state_lock = threading.Lock()
 _snapshot: dict = {}
@@ -273,24 +292,50 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin and _request_origin_allowed(origin, self.headers.get("Host", "")):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
     def _read_json(self) -> dict:
-        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError as exc:
+            raise ValueError("invalid Content-Length") from exc
         if n <= 0:
             return {}
+        if n > MAX_JSON_BODY:
+            raise ValueError(f"request body exceeds {MAX_JSON_BODY} bytes")
+        content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise ValueError("Content-Type must be application/json")
         raw = self.rfile.read(n)
         try:
-            return json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError:
-            return {}
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid JSON body") from exc
+        if not isinstance(value, dict):
+            raise ValueError("JSON body must be an object")
+        return value
+
+    def _origin_allowed(self) -> bool:
+        return _request_origin_allowed(
+            self.headers.get("Origin"),
+            self.headers.get("Host", ""),
+        )
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if not self._origin_allowed():
+            self._send(403, {"error": "cross-origin request denied"})
+            return
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
@@ -499,9 +544,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found", "paths": _paths()})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._origin_allowed():
+            self._send(403, {"error": "cross-origin request denied"})
+            return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
-        body = self._read_json()
+        try:
+            body = self._read_json()
+        except ValueError as exc:
+            self._send(400, {"error": str(exc)})
+            return
 
         if path in ("/api/backup", "/api/backups", "/api/backup/run"):
             try:
@@ -1083,6 +1135,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_DELETE(self) -> None:  # noqa: N802
+        if not self._origin_allowed():
+            self._send(403, {"error": "cross-origin request denied"})
+            return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if path.startswith("/api/memory/sessions/"):
@@ -1147,7 +1202,9 @@ def _index_html() -> bytes:
     recs = disc.get("recommendations") or []
     rows = matrix_table(snap)
     caps = [c for c in (snap.get("capabilities") or {}).keys()]
-    head = "".join(f"<th>{c}</th>" for c in caps)
+    def esc(value):
+        return html_lib.escape(str(value if value is not None else ""), quote=True)
+    head = "".join(f"<th>{esc(c)}</th>" for c in caps)
     body_rows = []
     for r in rows:
         cells = "".join(
@@ -1155,21 +1212,28 @@ def _index_html() -> bytes:
         )
         av = "ok" if r.get("available") else "off"
         body_rows.append(
-            f"<tr class='{av}'><td><code>{r['model']}</code></td>"
-            f"<td>{r.get('tier')}</td><td>{av}</td>{cells}</tr>"
+            f"<tr class='{av}'><td><code>{esc(r['model'])}</code></td>"
+            f"<td>{esc(r.get('tier'))}</td><td>{av}</td>{cells}</tr>"
         )
     table = "\n".join(body_rows)
-    rec_html = "".join(
-        f"<li class='sev-{r.get('severity')}'><b>{r.get('severity')}</b> — {r.get('action')}"
-        f"<div class='muted'>{r.get('detail') or ''}</div></li>"
-        for r in recs[:8]
-    )
+    rec_parts = []
+    for rec in recs[:8]:
+        severity = str(rec.get("severity") or "info")
+        severity_class = severity if severity in {"high", "medium", "ok", "info"} else "info"
+        rec_parts.append(
+            f"<li class='sev-{severity_class}'><b>{esc(severity)}</b> — {esc(rec.get('action'))}"
+            f"<div class='muted'>{esc(rec.get('detail') or '')}</div></li>"
+        )
+    rec_html = "".join(rec_parts)
     ollama_eps = disc.get("ollama") or {}
     ep_html = ""
     for ep in ollama_eps.get("endpoints") or []:
         st = "up" if ep.get("reachable") else "dn"
         models = ", ".join(m.get("name", "") for m in (ep.get("models") or [])[:5]) or "—"
-        ep_html += f"<div class='ep {st}'><code>{ep.get('label')}</code> {ep.get('base')} → {models}</div>"
+        ep_html += (
+            f"<div class='ep {st}'><code>{esc(ep.get('label'))}</code> "
+            f"{esc(ep.get('base'))} → {esc(models)}</div>"
+        )
 
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/>
@@ -1192,7 +1256,7 @@ def _index_html() -> bytes:
 <div class="card">
  <b>System scan</b> —
  Ollama: <b>{"OK" if dsum.get("ollama_ok") else "DOWN"}</b>
- ({dsum.get("ollama_models") or 0} models) ·
+ ({esc(dsum.get("ollama_models") or 0)} models) ·
  LiteLLM: <b>{"OK" if dsum.get("litellm_ok") else "DOWN"}</b> ·
  Redis: <b>{"OK" if dsum.get("redis_ok") else "DOWN"}</b> ·
  cloud keys: <b>{"yes" if dsum.get("cloud_keys") else "no"}</b>
@@ -1482,8 +1546,8 @@ function setPreset(p){{ postModes({{preset:p}}); }}
 refreshModes();
 </script>
 <div class="card">
- matrix live: local <b>{summary.get('local_online')}</b> · cloud <b>{summary.get('cloud_ready')}</b> · down <b>{summary.get('unavailable')}</b>
- · memory <b>{_memory.backend}</b>
+ matrix live: local <b>{esc(summary.get('local_online'))}</b> · cloud <b>{esc(summary.get('cloud_ready'))}</b> · down <b>{esc(summary.get('unavailable'))}</b>
+ · memory <b>{esc(_memory.backend)}</b>
 </div>
 <h2>Capability matrix (live availability)</h2>
 <table>

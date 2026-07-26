@@ -53,6 +53,10 @@
         "title": "AetherStack: Write .vscode Settings for AetherStack"
       },
       {
+        "command": "aetherstack.setApiKey",
+        "title": "AetherStack: Set API Key Securely"
+      },
+      {
         "command": "aetherstack.openChatUI",
         "title": "AetherStack: Open Chat UI (Open WebUI)"
       },
@@ -79,8 +83,9 @@
         },
         "aetherstack.apiKey": {
           "type": "string",
-          "default": "sk-aether-local",
-          "description": "LiteLLM master key (Authorization Bearer)"
+          "default": "",
+          "markdownDeprecationMessage": "Use **AetherStack: Set API Key Securely**. Existing values are migrated to VS Code SecretStorage.",
+          "description": "Deprecated plaintext setting; migrated to SecretStorage on activation"
         },
         "aetherstack.chatUiUrl": {
           "type": "string",

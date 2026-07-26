@@ -181,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "not found"})
                 return
             fp = (STATIC / rel).resolve()
-            if not str(fp).startswith(str(STATIC.resolve())) or not fp.is_file():
+            if not _path_under(fp, STATIC.resolve()) or not fp.is_file():
                 self._json(404, {"error": "not found"})
                 return
             ctype = (
@@ -280,7 +280,7 @@ def main() -> None:
     url = f"http://{args.host}:{args.port}/"
     if args.project:
         url += f"?project={args.project}"
-    print(f"AetherStack Project Engine → {url}")
+    print(f"AetherStack Project Engine -> {url}")
     print("API: /api/live  /api/system  /api/project?path=  /api/full  /api/roots")
     print("Project scans: cwd, home, AetherStack repo, --project only (no whole drives).")
     if Handler.engine_token:

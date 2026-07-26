@@ -172,6 +172,12 @@ function addNode(type, x, y) {
   select(n.id);
 }
 
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[ch]);
+}
+
 function select(id) {
   selected = id;
   render();
@@ -179,17 +185,18 @@ function select(id) {
   const insp = document.getElementById("insp");
   if (!n) { insp.textContent = "Select a node"; return; }
   const d = n.data || {};
-  let html = `<div style="color:${TYPES[n.type].color};font-weight:600">${TYPES[n.type].label}</div>`;
-  html += `<div class="muted">${n.id}</div>`;
+  const type = TYPES[n.type] || TYPES.worker;
+  let html = `<div style="color:${type.color};font-weight:600">${esc(type.label)}</div>`;
+  html += `<div class="muted">${esc(n.id)}</div>`;
   const fields = Object.keys(d);
   fields.forEach(k => {
     const v = d[k];
     if (typeof v === "boolean") {
-      html += `<label>${k}<br/><input type="checkbox" data-k="${k}" ${v?"checked":""}/></label>`;
+      html += `<label>${esc(k)}<br/><input type="checkbox" data-k="${esc(k)}" ${v?"checked":""}/></label>`;
     } else if (Array.isArray(v)) {
-      html += `<label>${k}<br/><input data-k="${k}" value="${v.join(", ")}"/></label>`;
+      html += `<label>${esc(k)}<br/><input data-k="${esc(k)}" value="${esc(v.join(", "))}"/></label>`;
     } else {
-      html += `<label>${k}<br/><input data-k="${k}" value="${v ?? ""}"/></label>`;
+      html += `<label>${esc(k)}<br/><input data-k="${esc(k)}" value="${esc(v ?? "")}"/></label>`;
     }
   });
   insp.innerHTML = html;
@@ -254,10 +261,10 @@ function render() {
     if (typeof sub === "string" && sub.length > 28) sub = sub.slice(0, 26) + "…";
     el.innerHTML = `
       <div class="hd" style="background:${col}33;border-bottom:1px solid ${col}55">
-        <span>${TYPES[n.type]?.label || n.type}</span>
-        <span style="opacity:.6;font-weight:400;font-size:10px">${n.type}</span>
+        <span>${esc(TYPES[n.type]?.label || n.type)}</span>
+        <span style="opacity:.6;font-weight:400;font-size:10px">${esc(n.type)}</span>
       </div>
-      <div class="bd">${sub || "—"}</div>
+      <div class="bd">${esc(sub || "—")}</div>
       ${n.type !== "goal" ? '<div class="port in" data-port="in"></div>' : ""}
       ${n.type !== "output" ? '<div class="port out" data-port="out"></div>' : ""}
     `;

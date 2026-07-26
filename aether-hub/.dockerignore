@@ -1,0 +1,15 @@
+.env
+.env.*
+__pycache__/
+*.py[cod]
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+*.err
+*.session
+*.cookie
+cache/
+.cache/
+.aetherstack/

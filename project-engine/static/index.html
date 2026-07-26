@@ -401,6 +401,16 @@
       return n == null || Number.isNaN(n) ? "—" : Number(n).toFixed(d);
     }
 
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[ch]);
+    }
+
     async function loadLive() {
       const j = await api("/api/live");
       const cpu = j.cpu?.percent;
@@ -441,7 +451,7 @@
       (j.disks || []).slice(0, 8).forEach((d) => {
         const tr = document.createElement("tr");
         const pct = d.percent ?? 0;
-        tr.innerHTML = `<td><code>${d.mount || d.device || "?"}</code></td>
+        tr.innerHTML = `<td><code>${esc(d.mount || d.device || "?")}</code></td>
           <td>${fmt(d.used_gb)}G</td><td>${fmt(d.free_gb)}G</td>
           <td style="color:${pct >= 90 ? "var(--red)" : pct >= 75 ? "var(--amber)" : "var(--green)"}">${fmt(pct, 0)}%</td>`;
         tb.appendChild(tr);
@@ -453,18 +463,18 @@
 
     async function loadSystem() {
       const j = await api("/api/system");
-      let html = `<div class="muted" style="margin-bottom:0.35rem">${(j.os || "").slice(0, 80)}</div>`;
+      let html = `<div class="muted" style="margin-bottom:0.35rem">${esc((j.os || "").slice(0, 80))}</div>`;
       html += `<table><tbody>`;
       (j.installations || []).slice(0, 14).forEach((i) => {
-        html += `<tr><td><b>${i.name || "?"}</b></td><td class="muted">${i.version || ""}</td>
-          <td>${i.size_gb != null ? i.size_gb + "G" : ""}</td>
-          <td><code>${(i.path || "").slice(0, 42)}</code></td></tr>`;
+        html += `<tr><td><b>${esc(i.name || "?")}</b></td><td class="muted">${esc(i.version || "")}</td>
+          <td>${i.size_gb != null ? esc(i.size_gb) + "G" : ""}</td>
+          <td><code>${esc((i.path || "").slice(0, 42))}</code></td></tr>`;
       });
       html += `</tbody></table>`;
       if (j.paths?.length) {
         html += `<div class="muted" style="margin-top:0.4rem">heavy paths</div><table><tbody>`;
         j.paths.slice(0, 8).forEach((p) => {
-          html += `<tr><td class="tag">${p.kind}</td><td><code>${p.path}</code></td><td>${p.size_gb ?? "—"}G</td></tr>`;
+          html += `<tr><td class="tag">${esc(p.kind)}</td><td><code>${esc(p.path)}</code></td><td>${esc(p.size_gb ?? "—")}G</td></tr>`;
         });
         html += `</tbody></table>`;
       }
@@ -482,29 +492,31 @@
       try {
         const j = await api("/api/project?path=" + encodeURIComponent(path));
         let html = `<div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:baseline;margin-bottom:0.35rem">
-          <span style="font-size:1.25rem;color:var(--green);font-weight:700">${j.total_gb ?? "?"} GB</span>
-          <span class="muted">~${j.file_count_approx} files · reclaim ~${j.reclaimable_safe_gb ?? 0} GB</span>
-          <code>${j.path}</code>
+          <span style="font-size:1.25rem;color:var(--green);font-weight:700">${esc(j.total_gb ?? "?")} GB</span>
+          <span class="muted">~${esc(j.file_count_approx)} files · reclaim ~${esc(j.reclaimable_safe_gb ?? 0)} GB</span>
+          <code>${esc(j.path)}</code>
         </div>`;
         html += `<table><thead><tr><th>name</th><th>gb</th><th></th></tr></thead><tbody>`;
         (j.top_levels || []).slice(0, 16).forEach((t) => {
-          html += `<tr><td>${t.name}</td><td>${t.size_gb ?? "—"}</td>
+          html += `<tr><td>${esc(t.name)}</td><td>${esc(t.size_gb ?? "—")}</td>
             <td>${t.heavy ? '<span class="tag warn">heavy</span>' : ""}</td></tr>`;
         });
         html += `</tbody></table>`;
         if (j.suggestions?.length) {
           html += `<div class="muted" style="margin-top:0.4rem">optimize (manual)</div><ul class="tips">`;
           j.suggestions.slice(0, 8).forEach((s) => {
-            html += `<li><span class="tag ${s.severity === "safe" ? "ok" : s.severity || ""}">${s.severity || "tip"}</span>
-              <b>${s.action}</b> <span class="muted">${s.why || ""}</span>
-              ${s.command ? `<div><code>${s.command}</code></div>` : ""}</li>`;
+            const severityClass = s.severity === "safe" ? "ok" :
+              (["warn", "bad", "info"].includes(s.severity) ? s.severity : "");
+            html += `<li><span class="tag ${severityClass}">${esc(s.severity || "tip")}</span>
+              <b>${esc(s.action)}</b> <span class="muted">${esc(s.why || "")}</span>
+              ${s.command ? `<div><code>${esc(s.command)}</code></div>` : ""}</li>`;
           });
           html += `</ul>`;
         }
         $("projBox").innerHTML = html;
         return j;
       } catch (e) {
-        $("projBox").innerHTML = `<span class="err">${e.message}</span>`;
+        $("projBox").innerHTML = `<span class="err">${esc(e.message)}</span>`;
         document.body.classList.add("glitch");
         setTimeout(() => document.body.classList.remove("glitch"), 400);
         throw e;
@@ -519,14 +531,6 @@
       $("termOut").appendChild(el);
       $("termOut").scrollTop = $("termOut").scrollHeight;
     }
-    function thtml(html) {
-      const el = document.createElement("div");
-      el.className = "line";
-      el.innerHTML = html;
-      $("termOut").appendChild(el);
-      $("termOut").scrollTop = $("termOut").scrollHeight;
-    }
-
     const BANNER = `
    ▄▄▄       ▓█████▄▄▄█████▓ ██░ ██ ▓█████  ██▀███
   ▒████▄     ▓█   ▀▓  ██▒ ▓▒▓██░ ██▒▓█   ▀ ▓██ ▒ ██▒

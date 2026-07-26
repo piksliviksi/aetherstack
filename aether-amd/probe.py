@@ -93,13 +93,33 @@ def match_profile(engines: list[dict[str, Any]], profiles: list[dict[str, Any]])
     return profiles[0] if profiles else None
 
 
+def find_ollama_rocm_dirs(lib: Path | None = None) -> list[str]:
+    """Ollama ROCm package may use lib/ollama/rocm or lib/ollama/rocm_v7_2 etc."""
+    lib = lib or Path("/usr/local/lib/ollama")
+    if not lib.is_dir():
+        return []
+    found: list[str] = []
+    for p in sorted(lib.iterdir()):
+        if not p.is_dir():
+            continue
+        name = p.name.lower()
+        if name == "rocm" or name.startswith("rocm_"):
+            # Prefer dirs that actually contain HIP ggml
+            if any(p.glob("libggml-hip*")) or any(p.glob("*hip*")) or name == "rocm":
+                found.append(str(p))
+            elif name.startswith("rocm_"):
+                found.append(str(p))
+    return found
+
+
 def ollama_backend() -> dict[str, Any]:
     lib = Path("/usr/local/lib/ollama")
-    rocm = lib / "rocm"
+    rocm_dirs = find_ollama_rocm_dirs(lib)
     return {
         "ollama_bin": bool(Path("/usr/local/bin/ollama").exists() or _run(["which", "ollama"]).strip()),
         "lib_dir": str(lib) if lib.is_dir() else None,
-        "rocm_runners": rocm.is_dir(),
+        "rocm_runners": bool(rocm_dirs),
+        "rocm_dirs": rocm_dirs,
         "lib_children": sorted(p.name for p in lib.iterdir())[:20] if lib.is_dir() else [],
         "api": _run(["curl", "-sf", "--max-time", "2", "http://127.0.0.1:11434/"]).strip()[:80],
     }

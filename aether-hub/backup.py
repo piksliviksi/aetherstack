@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -48,6 +49,15 @@ DEFAULT_LOCAL_DIR = Path(
         str(STACK_ROOT / ".aetherstack" / "backups"),
     )
 )
+BACKUP_ID_RE = re.compile(r"^aether-backup-[A-Za-z0-9_-]{1,96}$")
+
+
+def _path_under(target: Path, root: Path) -> bool:
+    try:
+        target.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 # Namespaces always treated as global common (not private vault)
 GLOBAL_NS_HINTS = (
@@ -274,17 +284,20 @@ def collect_backup_payload(
             payload["xref_registry"] = {"error": str(e)}
 
     if inc.get("project_files", True) and project_path:
-        root = Path(project_path).expanduser()
-        aether = root / ".aetherstack"
+        root = Path(project_path).expanduser().resolve(strict=True)
+        aether = (root / ".aetherstack").resolve(strict=False)
+        if not _path_under(aether, root):
+            raise ValueError("project .aetherstack directory escapes project root")
         if aether.is_dir():
             for fp in aether.rglob("*"):
-                if not fp.is_file():
+                resolved = fp.resolve(strict=False)
+                if not _path_under(resolved, aether) or not resolved.is_file():
                     continue
-                if fp.suffix.lower() not in (".md", ".json", ".yaml", ".yml", ".txt"):
+                if resolved.suffix.lower() not in (".md", ".json", ".yaml", ".yml", ".txt"):
                     continue
                 try:
-                    rel = str(fp.relative_to(root))
-                    payload["project_files"][rel] = fp.read_text(encoding="utf-8", errors="replace")[
+                    rel = str(resolved.relative_to(root))
+                    payload["project_files"][rel] = resolved.read_text(encoding="utf-8", errors="replace")[
                         :200_000
                     ]
                 except OSError:
@@ -305,7 +318,9 @@ def write_local_backup(
 ) -> dict[str, Any]:
     dest = Path(dest_dir or DEFAULT_LOCAL_DIR).expanduser()
     dest.mkdir(parents=True, exist_ok=True)
-    bid = payload.get("id") or f"backup-{uuid.uuid4().hex[:8]}"
+    bid = payload.get("id") or f"aether-backup-{uuid.uuid4().hex[:8]}"
+    if not BACKUP_ID_RE.fullmatch(str(bid)):
+        raise ValueError("invalid backup id")
     folder = dest / bid
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -321,7 +336,9 @@ def write_local_backup(
         pf = folder / "project_files"
         pf.mkdir(exist_ok=True)
         for rel, text in (payload.get("project_files") or {}).items():
-            outp = pf / rel.replace("\\", "/").replace("..", "_")
+            outp = (pf / rel.replace("\\", "/")).resolve(strict=False)
+            if not _path_under(outp, pf.resolve()):
+                raise ValueError(f"backup project file escapes destination: {rel}")
             outp.parent.mkdir(parents=True, exist_ok=True)
             outp.write_text(text, encoding="utf-8")
 

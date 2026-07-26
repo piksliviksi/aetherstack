@@ -2,30 +2,35 @@
 # Runs the same control plane as the root stack (relative build context).
 services:
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui@sha256:a26effeb220e132482bf7e0560b3404843e7bc40d23051144e062960df8df6b0}
     ports:
-      - "3000:8080"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:3000:8080"
     environment:
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - WEBUI_AUTH=false
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - WEBUI_AUTH=${WEBUI_AUTH:-true}
+      - CORS_ALLOW_ORIGIN=${CORS_ALLOW_ORIGIN:-http://127.0.0.1:3000}
+      - CACHE_CONTROL=no-cache, no-store, must-revalidate, max-age=0
+      - WEBUI_SESSION_COOKIE_SAME_SITE=strict
+      - WEBUI_AUTH_COOKIE_SAME_SITE=strict
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - open_webui_data:/app/backend/data
+    command: ["bash", "-lc", "umask 077; chmod -R go-rwx /app/backend/data 2>/dev/null || true; exec bash start.sh"]
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99}
     ports:
-      - "6379:6379"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm@sha256:de8ec5c07c62938783b59ba4ae8b3ca144ab96afd855f5f556883920d0804449}
     ports:
-      - "4000:4000"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:4000:4000"
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
@@ -34,8 +39,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      # Leave empty for open local lab; set sk-... for protected access
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
