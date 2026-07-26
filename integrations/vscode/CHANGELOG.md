@@ -5,6 +5,7 @@
 - Carry the same mark through the Hub, advanced dashboard, node graph, project engine, Docker Desktop extension, VS Code Activity Bar, browser favicons, and GitHub README branding.
 - Auto-detect the task stage in AetherStack Chat and activate a catalog-driven Research, Planning, Design, Build, Test, Bug-fix, Security, Polish, or Writing tree whose agents still resolve from the live capability matrix.
 - Show a collapsed active-preset node graph below the dynamic agent lineup and keep the full editor behind a separate Advanced setup button.
+- Replace the Hub's simplified preset-flow sketch with the complete editable advanced canvas; `/graph` and the embedded canvas now load the selected or active capability-resolved service tree with parallel workers and real model assignments.
 - Show live active model aliases in Chat when enabled and rotate editable English, Estonian, and Ukrainian inference activity wording from a local JSON database managed in Advanced Hub.
 - Avoid Windows startup crashes from non-UTF-8 console logging.
 

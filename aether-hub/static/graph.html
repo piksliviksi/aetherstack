@@ -79,7 +79,9 @@
 <body>
   <div id="toolbar">
     <img class="brand-icon" src="/aetherstack-icon.png" width="24" height="24" alt="" />
-    <strong style="color:var(--accent)">Aether Graph</strong>
+    <strong id="graphTitle" style="color:var(--accent)">Aether Graph</strong>
+    <select id="servicePreset" title="Load a live service preset"><option value="active">Active preset</option></select>
+    <button type="button" class="primary" id="btnActive">Load preset tree</button>
     <button type="button" class="primary" id="btnAuto">Auto-connect</button>
     <button type="button" id="btnTemplate">Best-practice template</button>
     <button type="button" id="btnFromPipe">From pipeline…</button>
@@ -158,9 +160,9 @@ function uid() { return "n_" + Math.random().toString(36).slice(2, 9); }
 function defaultData(t) {
   const map = {
     goal: { text: "" },
-    master: { role: "mastermind", maker: "anthropic", model: "claude-sonnet-4", max_cost: "high", strategy: "best_score" },
-    analyser: { role: "critic", maker: "openai", model: "gpt-4.1", gate: true, ack: true, max_cost: "high", strategy: "best_score" },
-    worker: { role: "builder", tier: "local", model: "local-default", strategy: "cheapest", parallel: 2, max_cost: "medium" },
+    master: { role: "mastermind", maker: null, model: null, max_cost: "high", strategy: "best_score" },
+    analyser: { role: "critic", maker: null, model: null, gate: true, ack: true, max_cost: "high", strategy: "best_score" },
+    worker: { role: "builder", tier: null, model: null, strategy: "cheapest", parallel: 2, max_cost: "medium" },
     tester: { role: "tester", strategy: "cheapest", tier: "local", max_cost: "low" },
     memory: { namespace: "default" },
     slash: { commands: ["/done all", "/compact"] },
@@ -190,7 +192,7 @@ function select(id) {
   if (!n) { insp.textContent = "Select a node"; return; }
   const d = n.data || {};
   const type = TYPES[n.type] || TYPES.worker;
-  let html = `<div style="color:${type.color};font-weight:600">${esc(type.label)}</div>`;
+  let html = `<div style="color:${type.color};font-weight:600">${esc(d.label || type.label)}</div>`;
   html += `<div class="muted">${esc(n.id)}</div>`;
   const fields = Object.keys(d);
   fields.forEach(k => {
@@ -265,7 +267,7 @@ function render() {
     if (typeof sub === "string" && sub.length > 28) sub = sub.slice(0, 26) + "…";
     el.innerHTML = `
       <div class="hd" style="background:${col}33;border-bottom:1px solid ${col}55">
-        <span>${esc(TYPES[n.type]?.label || n.type)}</span>
+        <span>${esc(d.label || TYPES[n.type]?.label || n.type)}</span>
         <span style="opacity:.6;font-weight:400;font-size:10px">${esc(n.type)}</span>
       </div>
       <div class="bd">${esc(sub || "—")}</div>
@@ -336,6 +338,36 @@ document.getElementById("btnDel").onclick = () => {
   document.getElementById("insp").textContent = "Select a node";
 };
 
+async function loadServiceGraph(serviceId, announce = true) {
+  const id = serviceId || "active";
+  const response = await fetch(`/api/services/${encodeURIComponent(id)}/graph`);
+  const body = await response.json();
+  if (!response.ok || body.error) { toast(body.error || `Cannot load ${id}`); return; }
+  graph = body;
+  selected = null;
+  document.getElementById("graphTitle").textContent = body.title || "Aether Graph";
+  if (body.service_id && [...document.getElementById("servicePreset").options].some(option => option.value === body.service_id)) {
+    document.getElementById("servicePreset").value = body.service_id;
+  }
+  render();
+  document.getElementById("insp").textContent = "Select a node";
+  if (announce) toast(`Loaded ${body.title || id}`);
+}
+
+async function loadServiceChoices() {
+  try {
+    const body = await fetch("/api/services").then(response => response.json());
+    const select = document.getElementById("servicePreset");
+    const active = document.createElement("option"); active.value = "active"; active.textContent = "Active preset";
+    select.replaceChildren(active, ...(body.services || []).map(service => {
+      const option = document.createElement("option"); option.value = service.id; option.textContent = service.label || service.id; return option;
+    }));
+  } catch { /* active endpoint remains available */ }
+}
+
+document.getElementById("btnActive").onclick = () => loadServiceGraph(document.getElementById("servicePreset").value);
+document.getElementById("servicePreset").onchange = () => loadServiceGraph(document.getElementById("servicePreset").value);
+
 document.getElementById("btnAuto").onclick = async () => {
   const j = await fetch("/api/graphs/auto-connect", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -399,8 +431,14 @@ document.getElementById("btnToPipe").onclick = async () => {
   toast("Pipeline JSON downloaded");
 };
 
-// load template on first visit
-fetch("/api/graphs/template").then(r => r.json()).then(j => { graph = j; render(); }).catch(() => render());
+// Load the requested or currently active capability-resolved service tree.
+const requestedService = new URLSearchParams(location.search).get("service") || "active";
+loadServiceChoices().then(() => {
+  if ([...document.getElementById("servicePreset").options].some(option => option.value === requestedService)) {
+    document.getElementById("servicePreset").value = requestedService;
+  }
+  return loadServiceGraph(requestedService, false);
+}).catch(() => render());
   </script>
 </body>
 </html>

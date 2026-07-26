@@ -110,6 +110,23 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertNotIn("offline-model", resolved["models"])
         self.assertTrue(all(agent.get("available") for agent in resolved["agents"]))
 
+    def test_research_service_builds_full_editable_parallel_graph(self) -> None:
+        graph = services.build_service_graph("research", snapshot())
+        self.assertEqual(graph["service_id"], "research")
+        labels = [node.get("data", {}).get("label") for node in graph["nodes"]]
+        self.assertIn("Research lead", labels)
+        self.assertIn("Evidence critic", labels)
+        self.assertIn("Final synthesis", labels)
+        workers = [node for node in graph["nodes"] if node["type"] == "worker"]
+        self.assertEqual(len(workers), 3)
+        lead = next(node for node in graph["nodes"] if node["id"].endswith("-lead"))
+        reviewer = next(node for node in graph["nodes"] if node["id"].endswith("-review"))
+        outgoing = [edge for edge in graph["edges"] if edge["from"] == lead["id"]]
+        incoming = [edge for edge in graph["edges"] if edge["to"] == reviewer["id"]]
+        self.assertEqual(len(outgoing), len(workers))
+        self.assertEqual(len(incoming), len(workers))
+        self.assertEqual(set(graph["resolved_models"]), set(graph["resolved_models"]) & set(snapshot()["models"]))
+
     def test_health_failure_reroutes_to_another_capable_model(self) -> None:
         initial = services.resolve_service("research", snapshot())
         failed = initial["agents"][0]["model"]

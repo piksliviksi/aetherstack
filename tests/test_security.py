@@ -144,6 +144,15 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn("textContent", html)
         self.assertIn("/api/update/stage", html)
         self.assertIn("/api/services/", html)
+        self.assertIn('id="serviceGraphFrame"', html)
+        self.assertIn("/graph?embed=1&service=", html)
+        self.assertNotIn('class="graph-flow"', html)
+
+    def test_advanced_graph_loads_capability_resolved_service_trees(self) -> None:
+        html = (HUB / "static" / "graph.html").read_text(encoding="utf-8")
+        self.assertIn('id="servicePreset"', html)
+        self.assertIn("/api/services/${encodeURIComponent(id)}/graph", html)
+        self.assertIn("d.label || TYPES[n.type]?.label", html)
 
     def test_open_webui_and_litellm_privacy_defaults(self) -> None:
         for compose_path in (
