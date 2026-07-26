@@ -88,7 +88,7 @@ models:
     provider: openai
     model: local-default
     apiBase: http://127.0.0.1:4000/v1
-    apiKey: sk-aether-local
+    apiKey: ${env:AETHERSTACK_API_KEY}
     roles: [chat, edit, apply]
 ```
 

@@ -62,7 +62,7 @@ VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http:/
 | Setting | Default |
 |---------|---------|
 | `aetherstack.baseUrl` | `http://127.0.0.1:4000/v1` |
-| `aetherstack.apiKey` | `sk-aether-local` |
+| API key | Command: **AetherStack: Set API Key Securely** (SecretStorage) |
 | `aetherstack.chatUiUrl` | `http://127.0.0.1:3000` |
 | `aetherstack.defaultModel` | `local-default` |
 

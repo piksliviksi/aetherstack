@@ -13,6 +13,8 @@ This page records security review notes for AetherStack and mitigations applied.
 | **Low** | Default LiteLLM master key `sk-aether-local` | Lab default | Rotate before exposure |
 | **Low** | `/api/system` discloses host install layout | Localhost | By design; token when shared |
 | **Info** | Host bind warning if not 127.0.0.1 | Config | Warning printed |
+| **Medium** | Browser/proxy cache may retain Open WebUI auth and user responses | Local browser | Mitigated — global `no-store` |
+| **Medium** | LiteLLM response cache persisted prompts/completions in Redis AOF | Local Docker volume | Mitigated — cache disabled |
 
 ---
 
@@ -77,7 +79,11 @@ API keys / gateway secrets committed to git or shared workspaces.
 | Command injection in collectors `_run` | Fixed command lists (no shell), low risk |
 | WSL `rocminfo` via `wsl -d Debian` | Fixed args; local only |
 | Docker compose secrets in repo | `.env` gitignored; `.env.example` has placeholders only |
-| Open WebUI `WEBUI_AUTH=false` | Local lab convenience; do not expose port 3000 publicly |
+| Open WebUI authentication | Enabled by default; port 3000 is loopback-only |
+| Open WebUI password storage | Bcrypt hashes in the private Docker data volume; no plaintext password cache |
+| Browser/proxy caching | `CACHE_CONTROL=no-cache, no-store, must-revalidate, max-age=0` |
+| Open WebUI data permissions | Startup applies `umask 077` and removes group/other access |
+| LiteLLM response caching | Disabled; prompts/completions are not written to Redis cache/AOF |
 
 ---
 
@@ -90,3 +96,4 @@ API keys / gateway secrets committed to git or shared workspaces.
 | Continue key | `AETHERSTACK_API_KEY` env; never commit keys |
 | Shared machines | `AETHERSTACK_ENGINE_TOKEN` before starting the engine |
 | `.continue/config.yaml` | No secrets in git; gitignore local overrides |
+| Open WebUI volume | Treat `webui.db`, WAL, uploads, and vector DB as sensitive user data |

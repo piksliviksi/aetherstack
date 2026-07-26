@@ -130,13 +130,8 @@ $env:AETHERSTACK_API_KEY = "sk-aether-local"
 export AETHERSTACK_API_KEY=sk-aether-local
 ```
 
-Or VS Code **User** settings (not workspace — safer for git):
-
-```json
-{
-  "aetherstack.apiKey": "sk-aether-local"
-}
-```
+For the AetherStack extension itself, run **AetherStack: Set API Key Securely**.
+The value is kept in VS Code SecretStorage rather than settings JSON.
 
 4. **AetherStack: List Models (API)** — confirms the gateway answers.  
 5. **AetherStack: Open Chat UI** — browser chat at `:3000`.
@@ -150,7 +145,8 @@ Or VS Code **User** settings (not workspace — safer for git):
 | **Scan Project AI History** | Start of a session; after adding chat tools |
 | **Show Project Overview** | Re-open `.aetherstack/project-overview.md` |
 | **Wire Continue.dev to AetherStack** | Point Continue at multi-model LiteLLM |
-| **Write .vscode Settings for AetherStack** | Commit-safe URLs/model in `.vscode/settings.json`; key goes to **User** settings only |
+| **Write .vscode Settings for AetherStack** | Commit-safe URLs/model in `.vscode/settings.json`; never writes a key |
+| **Set API Key Securely** | Store the gateway key in VS Code SecretStorage |
 | **List Models (API)** | Debug 401 / stack down |
 | **Open Chat UI (Open WebUI)** | Browser chat |
 | **Open Project Data Engine** | Disk/CPU dashboard (`:8765`) with `?project=<workspace>` |
@@ -167,11 +163,10 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 | Setting | Default | Notes |
 |---------|---------|--------|
 | `aetherstack.baseUrl` | `http://127.0.0.1:4000/v1` | LiteLLM OpenAI-compatible base |
-| `aetherstack.apiKey` | `sk-aether-local` | Prefer **User** scope; do not commit |
 | `aetherstack.chatUiUrl` | `http://127.0.0.1:3000` | Open WebUI |
 | `aetherstack.defaultModel` | `local-default` | Alias from LiteLLM config |
 
-**Write .vscode Settings** stores base URL / chat UI / model in the workspace and **strips** any `aetherstack.apiKey` from workspace `settings.json` so keys are less likely to land in git.
+**Write .vscode Settings** stores base URL / chat UI / model in the workspace. It never writes an API key; legacy plaintext settings are migrated to SecretStorage.
 
 ---
 
@@ -200,7 +195,7 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 1. Stack running (`start.bat` / `./start.sh`).  
 2. **Wire Continue.dev**.  
-3. Set `AETHERSTACK_API_KEY` or User `aetherstack.apiKey`.  
+3. Set `AETHERSTACK_API_KEY` for Continue, and use **AetherStack: Set API Key Securely** for the extension.
 4. Select model alias in Continue (`local-default`, `grok-4.5`, …).  
 5. Or **Open Chat UI** (`:3000`).
 
@@ -225,7 +220,7 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 ### List Models → 401
 
 - Stack not running, or wrong key.  
-- Set `aetherstack.apiKey` to your `LITELLM_MASTER_KEY` (default lab: `sk-aether-local`).  
+- Run **AetherStack: Set API Key Securely** and enter your `LITELLM_MASTER_KEY` (default lab: `sk-aether-local`).
 - Confirm:  
   `curl http://127.0.0.1:4000/v1/models -H "Authorization: Bearer sk-aether-local"`
 

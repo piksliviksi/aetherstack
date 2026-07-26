@@ -10,11 +10,11 @@ services:
   # Local OpenAI-compatible API + model manager
   # Prefer host Ollama (port 11434). Use GPU overlays when running in-container.
   ollama:
-    image: ollama/ollama:latest
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.32.4}
     container_name: aether-ollama
     profiles: ["with-ollama-container"]
     ports:
-      - "11434:11434"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
       - ../models:/models
@@ -22,16 +22,21 @@ services:
 
   open-webui:
     # Keep in sync with volume schema (:main created the DB). Use TZ to reduce client loops.
-    image: ghcr.io/open-webui/open-webui:main
+    image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui@sha256:a26effeb220e132482bf7e0560b3404843e7bc40d23051144e062960df8df6b0}
     container_name: aether-open-webui
     ports:
-      - "3000:8080"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:3000:8080"
     environment:
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       # Also expose LiteLLM multi-model gateway as OpenAI-compatible provider
       - OPENAI_API_BASE_URL=http://litellm:4000/v1
       - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
-      - WEBUI_AUTH=false
+      - WEBUI_AUTH=${WEBUI_AUTH:-true}
+      - CORS_ALLOW_ORIGIN=${CORS_ALLOW_ORIGIN:-http://127.0.0.1:3000}
+      # Never place auth responses, profile data, or chats in browser/proxy caches.
+      - CACHE_CONTROL=no-cache, no-store, must-revalidate, max-age=0
+      - WEBUI_SESSION_COOKIE_SAME_SITE=strict
+      - WEBUI_AUTH_COOKIE_SAME_SITE=strict
       - TZ=Europe/Tallinn
       - SCARF_NO_ANALYTICS=true
       - DO_NOT_TRACK=true
@@ -40,15 +45,17 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - open_webui_data:/app/backend/data
+    # Restrict the SQLite DB, WAL, uploads, and model caches to the container user.
+    command: ["bash", "-lc", "umask 077; chmod -R go-rwx /app/backend/data 2>/dev/null || true; exec bash start.sh"]
     depends_on:
       - litellm
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99}
     container_name: aether-redis
     ports:
-      - "6379:6379"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:6379:6379"
     volumes:
       - redis_data:/data
     command: ["redis-server", "--appendonly", "yes"]
@@ -64,14 +71,15 @@ services:
     build: ./aether-hub
     container_name: aether-hub
     ports:
-      - "8766:8766"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:8766:8766"
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - AETHER_HUB_HOST=0.0.0.0
       - AETHER_HUB_PORT=8766
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
       - AETHER_EMBED_MODEL=${AETHER_EMBED_MODEL:-nomic-embed-text}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_API_KEY_PERSONAL=${OPENAI_API_KEY_PERSONAL:-}
       - OPENAI_API_KEY_ENTERPRISE=${OPENAI_API_KEY_ENTERPRISE:-}
@@ -119,14 +127,19 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # Unified gateway for Grok / OpenAI / Anthropic / Gemini / Mistral / local Ollama
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm@sha256:de8ec5c07c62938783b59ba4ae8b3ca144ab96afd855f5f556883920d0804449}
     container_name: aether-litellm
     ports:
-      - "4000:4000"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:4000:4000"
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
@@ -149,6 +162,7 @@ services:
       # Required by current LiteLLM for /v1/* — browsers must send Authorization header.
       # Default is for local lab only; change if you expose the port.
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     extra_hosts:
@@ -156,6 +170,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
     restart: unless-stopped
 
 volumes:
