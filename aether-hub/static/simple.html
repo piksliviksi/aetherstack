@@ -22,9 +22,10 @@
     .statusbar { display:flex; flex-wrap:wrap; gap:.55rem; margin-bottom:1.2rem; }
     .chip { display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .6rem; border:1px solid var(--line); border-radius:999px; background:rgba(16,22,34,.75); color:var(--muted); font-size:.78rem; }
     .dot { width:8px; height:8px; border-radius:50%; background:var(--bad); } .dot.good { background:var(--good); box-shadow:0 0 10px #66e3a466; }
-    .layout { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(340px,.7fr); gap:1.2rem; align-items:start; }
+    .layout { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(340px,.7fr); gap:1.2rem; align-items:stretch; }
     .panel { border:1px solid var(--line); border-radius:15px; background:linear-gradient(145deg,rgba(21,29,44,.95),rgba(12,17,27,.95)); padding:1rem; box-shadow:0 18px 60px #0004; }
     .sectionhead { display:flex; justify-content:space-between; gap:1rem; align-items:start; margin-bottom:.9rem; } .muted { color:var(--muted); }
+    .eyebrow { margin-bottom:.25rem; color:var(--brand); font-size:.68rem; font-weight:750; letter-spacing:.08em; text-transform:uppercase; }
     .services { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:.7rem; }
     .service { text-align:left; min-height:126px; padding:.9rem; background:#111a28; border:1px solid var(--line); border-radius:12px; cursor:pointer; transition:.15s ease; }
     .service:hover,.service.selected { border-color:var(--brand); background:#152538; transform:translateY(-2px); } .service.selected { box-shadow:0 0 0 1px #73dcff44 inset; }
@@ -65,7 +66,7 @@
         <div class="services" id="services"></div>
       </section>
       <aside class="panel" id="workspace">
-        <div class="sectionhead"><div><h2 id="selectedLabel">Select a service</h2><div class="muted" id="selectedSummary">The resolved team will appear here.</div></div><span class="badge" id="selectedState">—</span></div>
+        <div class="sectionhead"><div><div class="eyebrow">Selected service workspace</div><h2 id="selectedLabel">Select a service</h2><div class="muted" id="selectedSummary">The resolved team will appear here.</div></div><span class="badge" id="selectedState">—</span></div>
         <div class="agents" id="agents"></div>
         <div class="activity-list" id="activities"></div>
         <div class="controls">

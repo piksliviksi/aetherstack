@@ -147,12 +147,18 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn('id="serviceGraphFrame"', html)
         self.assertIn("/graph?embed=1&service=", html)
         self.assertNotIn('class="graph-flow"', html)
+        self.assertIn("align-items:stretch", html)
+        self.assertIn("Selected service workspace", html)
 
     def test_advanced_graph_loads_capability_resolved_service_trees(self) -> None:
         html = (HUB / "static" / "graph.html").read_text(encoding="utf-8")
         self.assertIn('id="servicePreset"', html)
         self.assertIn("/api/services/${encodeURIComponent(id)}/graph", html)
         self.assertIn("d.label || TYPES[n.type]?.label", html)
+        self.assertIn('id="inspectorAgent"', html)
+        self.assertIn('fetch("/api/matrix")', html)
+        self.assertIn("model.available", html)
+        self.assertIn('node.type === "master"', html)
 
     def test_open_webui_and_litellm_privacy_defaults(self) -> None:
         for compose_path in (

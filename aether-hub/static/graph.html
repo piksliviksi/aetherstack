@@ -69,6 +69,11 @@
       padding: .6rem; font-size: 11px; overflow: auto;
     }
     #inspector h3 { margin: 0 0 .5rem; font-size: 12px; color: var(--muted); }
+    #insp label { display: block; margin-top: .55rem; color: var(--muted); }
+    #insp input, #insp select {
+      width: 100%; margin-top: .15rem; background: #020617; border: 1px solid var(--border);
+      color: var(--text); border-radius: 5px; padding: .3rem .4rem; font-size: 11px;
+    }
     #toast {
       position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
       background: #1e293b; border: 1px solid var(--border); padding: .4rem .8rem;
@@ -124,6 +129,8 @@ let graph = { schema: "aetherstack.graph.v1", id: "canvas-"+Date.now().toString(
 let selected = null;
 let drag = null;
 let link = null; // {from, x, y}
+const AGENT_NODE_TYPES = new Set(["master", "analyser", "worker", "tester"]);
+const liveChoices = { models: [], agents: [], roles: [] };
 
 const palette = document.getElementById("palette");
 const nodesEl = document.getElementById("nodes");
@@ -184,6 +191,53 @@ function esc(value) {
   })[ch]);
 }
 
+function option(value, label, selectedValue) {
+  return `<option value="${esc(value)}" ${String(value) === String(selectedValue ?? "") ? "selected" : ""}>${esc(label)}</option>`;
+}
+
+function selectedAgentRef(data) {
+  if (data.agent_ref) return data.agent_ref;
+  const match = liveChoices.agents.find(agent =>
+    (!data.service_id || agent.service_id === data.service_id) &&
+    agent.label === data.label && agent.role === data.role && agent.model === data.model
+  );
+  return match?.ref || "";
+}
+
+function agentOptions(data) {
+  const current = selectedAgentRef(data);
+  let html = option("", "Custom / keep current node", current);
+  const groups = new Map();
+  liveChoices.agents.forEach(agent => {
+    const items = groups.get(agent.service_label) || [];
+    items.push(agent);
+    groups.set(agent.service_label, items);
+  });
+  groups.forEach((agents, serviceLabel) => {
+    html += `<optgroup label="${esc(serviceLabel)}">`;
+    html += agents.map(agent => option(agent.ref, `${agent.label} — ${agent.model}`, current)).join("");
+    html += "</optgroup>";
+  });
+  return html;
+}
+
+function modelOptions(current) {
+  let html = option("", "Auto-resolve from capabilities", current);
+  if (current && !liveChoices.models.some(model => model.alias === current)) {
+    html += option(current, `${current} — currently unavailable`, current);
+  }
+  html += liveChoices.models.map(model =>
+    option(model.alias, `${model.alias} — ${model.provider || "unknown"} · ${model.backend || "unknown backend"}`, current)
+  ).join("");
+  return html;
+}
+
+function roleOptions(current) {
+  const roles = [...liveChoices.roles];
+  if (current && !roles.includes(current)) roles.unshift(current);
+  return roles.map(role => option(role, role, current)).join("");
+}
+
 function select(id) {
   selected = id;
   render();
@@ -194,11 +248,20 @@ function select(id) {
   const type = TYPES[n.type] || TYPES.worker;
   let html = `<div style="color:${type.color};font-weight:600">${esc(d.label || type.label)}</div>`;
   html += `<div class="muted">${esc(n.id)}</div>`;
-  const fields = Object.keys(d);
+  const isAgentNode = AGENT_NODE_TYPES.has(n.type);
+  if (isAgentNode) {
+    html += `<label>available agent<br/><select id="inspectorAgent">${agentOptions(d)}</select></label>`;
+  }
+  const fields = Object.keys(d).filter(k => k !== "agent_ref");
+  if (isAgentNode && !fields.includes("model")) fields.push("model");
   fields.forEach(k => {
     const v = d[k];
     if (typeof v === "boolean") {
       html += `<label>${esc(k)}<br/><input type="checkbox" data-k="${esc(k)}" ${v?"checked":""}/></label>`;
+    } else if (k === "model" && isAgentNode) {
+      html += `<label>model<br/><select data-k="model">${modelOptions(v)}</select></label>`;
+    } else if (k === "role" && isAgentNode) {
+      html += `<label>role<br/><select data-k="role">${roleOptions(v)}</select></label>`;
     } else if (Array.isArray(v)) {
       html += `<label>${esc(k)}<br/><input data-k="${esc(k)}" value="${esc(v.join(", "))}"/></label>`;
     } else {
@@ -206,16 +269,36 @@ function select(id) {
     }
   });
   insp.innerHTML = html;
-  insp.querySelectorAll("input").forEach(inp => {
-    inp.addEventListener("change", () => {
-      const k = inp.dataset.k;
-      if (inp.type === "checkbox") n.data[k] = inp.checked;
-      else if (Array.isArray(d[k])) n.data[k] = inp.value.split(",").map(s => s.trim()).filter(Boolean);
+  document.getElementById("inspectorAgent")?.addEventListener("change", event => {
+    const agent = liveChoices.agents.find(item => item.ref === event.target.value);
+    if (!agent) delete n.data.agent_ref;
+    else Object.assign(n.data, {
+      agent_ref: agent.ref, label: agent.label, role: agent.role, model: agent.model,
+      provider: agent.provider, backend: agent.backend, tier: agent.tier,
+      strategy: agent.strategy, needs: [...(agent.needs || [])], available: true,
+      service_id: agent.service_id,
+    });
+    select(n.id);
+  });
+  insp.querySelectorAll("[data-k]").forEach(control => {
+    control.addEventListener("change", () => {
+      const k = control.dataset.k;
+      if (control.type === "checkbox") n.data[k] = control.checked;
+      else if (Array.isArray(d[k])) n.data[k] = control.value.split(",").map(s => s.trim()).filter(Boolean);
       else {
-        const num = Number(inp.value);
-        n.data[k] = (inp.value !== "" && !Number.isNaN(num) && String(num) === inp.value) ? num : inp.value || null;
+        const num = Number(control.value);
+        n.data[k] = (control.value !== "" && !Number.isNaN(num) && String(num) === control.value) ? num : control.value || null;
+        if (k === "model" || k === "role") delete n.data.agent_ref;
+        if (k === "model") {
+          const model = liveChoices.models.find(item => item.alias === control.value);
+          if (model) Object.assign(n.data, {
+            provider: model.provider, backend: model.backend, tier: model.tier,
+            capabilities: [...(model.capabilities || [])], available: true,
+          });
+        }
       }
-      render();
+      if (k === "model" || k === "role") select(n.id);
+      else render();
     });
   });
 }
@@ -344,25 +427,38 @@ async function loadServiceGraph(serviceId, announce = true) {
   const body = await response.json();
   if (!response.ok || body.error) { toast(body.error || `Cannot load ${id}`); return; }
   graph = body;
-  selected = null;
+  selected = (body.nodes || []).find(node => node.type === "master")?.id || null;
   document.getElementById("graphTitle").textContent = body.title || "Aether Graph";
   if (body.service_id && [...document.getElementById("servicePreset").options].some(option => option.value === body.service_id)) {
     document.getElementById("servicePreset").value = body.service_id;
   }
   render();
-  document.getElementById("insp").textContent = "Select a node";
+  if (selected) select(selected);
+  else document.getElementById("insp").textContent = "Select a node";
   if (announce) toast(`Loaded ${body.title || id}`);
 }
 
 async function loadServiceChoices() {
-  try {
-    const body = await fetch("/api/services").then(response => response.json());
-    const select = document.getElementById("servicePreset");
-    const active = document.createElement("option"); active.value = "active"; active.textContent = "Active preset";
-    select.replaceChildren(active, ...(body.services || []).map(service => {
-      const option = document.createElement("option"); option.value = service.id; option.textContent = service.label || service.id; return option;
-    }));
-  } catch { /* active endpoint remains available */ }
+  const [body, matrix] = await Promise.all([
+    fetch("/api/services").then(response => response.ok ? response.json() : {}).catch(() => ({})),
+    fetch("/api/matrix").then(response => response.ok ? response.json() : {}).catch(() => ({})),
+  ]);
+  const select = document.getElementById("servicePreset");
+  const active = document.createElement("option"); active.value = "active"; active.textContent = "Active preset";
+  select.replaceChildren(active, ...(body.services || []).map(service => {
+    const option = document.createElement("option"); option.value = service.id; option.textContent = service.label || service.id; return option;
+  }));
+  liveChoices.models = Object.entries(matrix.models || {})
+    .filter(([, model]) => model.available)
+    .map(([alias, model]) => ({ alias, ...model }))
+    .sort((a, b) => a.alias.localeCompare(b.alias));
+  liveChoices.agents = (body.services || []).flatMap(service =>
+    (service.agents || []).filter(agent => agent.available).map(agent => ({
+      ...agent, service_id: service.id, service_label: service.label || service.id,
+      ref: `${service.id}:${agent.id}`,
+    }))
+  );
+  liveChoices.roles = [...new Set(liveChoices.agents.map(agent => agent.role).filter(Boolean))].sort();
 }
 
 document.getElementById("btnActive").onclick = () => loadServiceGraph(document.getElementById("servicePreset").value);
