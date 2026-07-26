@@ -3,11 +3,13 @@
 services:
   open-webui:
     image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui@sha256:a26effeb220e132482bf7e0560b3404843e7bc40d23051144e062960df8df6b0}
-    ports:
-      - "${AETHER_BIND_HOST:-127.0.0.1}:3000:8080"
+    expose:
+      - "8080"
     environment:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - WEBUI_AUTH=${WEBUI_AUTH:-true}
+      - WEBUI_AUTH=true
+      - WEBUI_AUTH_TRUSTED_EMAIL_HEADER=X-AetherStack-Email
+      - WEBUI_AUTH_TRUSTED_NAME_HEADER=X-AetherStack-Name
       - CORS_ALLOW_ORIGIN=${CORS_ALLOW_ORIGIN:-http://127.0.0.1:3000}
       - CACHE_CONTROL=no-cache, no-store, must-revalidate, max-age=0
       - WEBUI_SESSION_COOKIE_SAME_SITE=strict
@@ -17,6 +19,19 @@ services:
     volumes:
       - open_webui_data:/app/backend/data
     command: ["bash", "-lc", "umask 077; chmod -R go-rwx /app/backend/data 2>/dev/null || true; exec bash start.sh"]
+    restart: unless-stopped
+
+  open-webui-proxy:
+    build: ./open-webui-proxy
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - AETHER_LOCAL_WEBUI_EMAIL=${AETHER_LOCAL_WEBUI_EMAIL:-}
+    volumes:
+      - open_webui_data:/data:ro
+    depends_on:
+      open-webui:
+        condition: service_healthy
     restart: unless-stopped
 
   redis:

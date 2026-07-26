@@ -19,10 +19,11 @@ Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
 **[How to use the VS Code extension](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
 
-1. Start AetherStack so LiteLLM (`:4000`) is up.  
-2. Wire Continue → `http://127.0.0.1:4000/v1` + master key + **one** model alias.  
-3. Work in that one chat; optionally open Hub (`:8766`) only to change trees or limits.  
-4. Scan project AI history when you want repo context recovery.
+1. Open **AetherStack → Control & Services** and press **Start all services**.
+2. The extension checks `:3000`, `:4000`, and `:8766`, verifies capability-matrix candidates through LiteLLM provider health, then wires only responding models into a new Continue config.
+3. Open **AetherStack Chat** in the sidebar. Choose a task service; its lead, workers, and reviewer are assigned from the live capability matrix.
+4. Use the Simple Hub (`:8766`) for the same presets, setup, and staged updates; use Advanced or the node graph when you need manual orchestration. Open WebUI (`:3000`) only when you want that separate client.
+5. Scan project AI history when you want repo context recovery.
 
 Open a project folder, scan prior AI chat artifacts, and continue building through the gateway — not by juggling separate vendor apps.
 
@@ -30,20 +31,26 @@ Open a project folder, scan prior AI chat artifacts, and continue building throu
 
 | Command | What it does |
 |---------|----------------|
+| **AetherStack: Open Combined Chat** | Opens the native VS Code chat with dynamic task services and lean/token controls |
+| **AetherStack: Open Hub UI** | Opens the Simple Hub with service presets, setup, update staging, and links to advanced tools |
+| **AetherStack: Open Control Center** | Service state, backend details, models, lifecycle controls, and optional active-model display |
+| **AetherStack: Start All Services** | Runs the complete Docker Compose stack and waits for all three HTTP services |
+| **AetherStack: Stop / Restart All Services** | Controls the local Compose stack from VS Code |
+| **AetherStack: Refresh Service State** | Rechecks every URL and displays a concrete error for failures |
 | **AetherStack: Scan Project AI History** | Finds `.continue`, `.claude`, Aider history, `.waylog`, `.aetherstack` |
 | **AetherStack: Show Project Overview** | Opens `.aetherstack/project-overview.md` |
 | **AetherStack: Wire Continue.dev** | Writes `.continue/config.yaml` → LiteLLM (`localhost:4000/v1`) |
 | **AetherStack: Write .vscode Settings** | Workspace settings + recommended extensions |
 | **AetherStack: List Models** | Live list from AetherStack gateway |
-| **AetherStack: Open Chat UI** | Opens Open WebUI |
+| **AetherStack: Open Chat UI** | Opens the optional Open WebUI client |
 | **AetherStack: Open Project Data Engine** | Opens metrics dashboard (`:8765`) |
 | **AetherStack: Save Chat Snapshot Note** | Saves a markdown snapshot under `.aetherstack/snapshots/` |
 
-Sidebar: **AetherStack → Project AI Overview**.
+Sidebar: **AetherStack → Control & Services**.
 
 ## Prerequisites
 
-1. Run [AetherStack](https://github.com/piksliviksi/aetherstack) (`start.bat` / `./start.sh`) so LiteLLM (`:4000`) and Open WebUI (`:3000`) are up.
+1. Install Docker Desktop / Docker Engine and keep its daemon running. The extension starts the AetherStack services itself.
 2. Optional: [Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue) for in-editor chat.
 3. Optional: host or WSL Ollama for `local-*` models.
 
@@ -65,6 +72,16 @@ VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http:/
 | API key | Command: **AetherStack: Set API Key Securely** (SecretStorage) |
 | `aetherstack.chatUiUrl` | `http://127.0.0.1:3000` |
 | `aetherstack.defaultModel` | `local-default` |
+| `aetherstack.stackPath` | Auto-detected; choose the folder containing `docker-compose.yml` if needed |
+| `aetherstack.autoWireModels` | `true` |
+| `aetherstack.showActiveModel` | `false` (opt in from the Control Center) |
+
+Provider API keys are read by Docker Compose from the AetherStack installation root `.env`. The extension reuses its existing `LITELLM_MASTER_KEY` through VS Code SecretStorage and Continue's supported global `~/.continue/.env` secret store; generated model config refers to `${{ secrets.AETHERSTACK_API_KEY }}`. It never displays or regenerates provider keys and intentionally does not scan unrelated project `.env` files.
+
+Open WebUI is signed in automatically through a proxy published only on
+`127.0.0.1:3000`; its authenticated backend has no host port. The sole existing
+admin is reused, so chats and settings remain intact and no new password is
+needed.
 
 ## License
 

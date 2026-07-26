@@ -39,6 +39,8 @@ from combos import (  # noqa: E402
     list_combos,
     plan_with_combo,
 )
+from services import activate_service, execute_service, list_services, plan_service  # noqa: E402
+from update import stage_update, update_status  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
@@ -106,6 +108,7 @@ PORT = int(os.environ.get("AETHER_HUB_PORT", "8766"))
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 SYNC_INTERVAL = int(os.environ.get("AETHER_MATRIX_SYNC_SEC", "60"))
 MAX_JSON_BODY = int(os.environ.get("AETHER_MAX_JSON_BODY", str(1024 * 1024)))
+MAX_INFERENCE_STATUS_BYTES = 64 * 1024
 CORS_ORIGINS = {
     item.strip().rstrip("/")
     for item in os.environ.get("AETHER_CORS_ORIGINS", "").split(",")
@@ -183,6 +186,58 @@ def _load_host_scan_file() -> dict:
         except (OSError, json.JSONDecodeError):
             continue
     return {}
+
+
+def get_inference_status(status_path: Path | None = None) -> tuple[int, dict]:
+    """Read privacy-minimal LiteLLM activity state for local operator UIs."""
+    path = status_path or Path(
+        os.environ.get(
+            "AETHER_INFERENCE_STATUS_PATH",
+            "/host-aetherstack/inference-status.json",
+        )
+    )
+    try:
+        if path.stat().st_size > MAX_INFERENCE_STATUS_BYTES:
+            raise ValueError("status file exceeds size limit")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("status must be an object")
+        active = value.get("active")
+        if not isinstance(active, list) or len(active) > 256:
+            raise ValueError("active status is invalid")
+        clean_active = []
+        for entry in active:
+            if not isinstance(entry, dict):
+                raise ValueError("active entry is invalid")
+            clean_active.append(
+                {
+                    "callId": str(entry.get("callId", ""))[:256],
+                    "model": str(entry.get("model", "unknown"))[:256],
+                    "startedAt": entry.get("startedAt"),
+                }
+            )
+        last = value.get("last")
+        if last is not None and not isinstance(last, dict):
+            raise ValueError("last status is invalid")
+        clean_last = None if last is None else {
+            "callId": str(last.get("callId", ""))[:256],
+            "model": str(last.get("model", "unknown"))[:256],
+            "startedAt": last.get("startedAt"),
+            "finishedAt": last.get("finishedAt"),
+            "state": str(last.get("state", "unknown"))[:32],
+        }
+        sanitized = {
+            "active": clean_active,
+            "activeCount": len(clean_active),
+            "last": clean_last,
+        }
+        if "updatedAt" in value:
+            sanitized["updatedAt"] = value.get("updatedAt")
+        return 200, sanitized
+    except FileNotFoundError:
+        return 200, {"active": [], "activeCount": 0, "last": None}
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return 503, {"error": f"inference status unavailable: {exc}"}
 
 
 def run_discover(host_scan: dict | None = None) -> dict:
@@ -345,7 +400,14 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         qs = parse_qs(u.query)
 
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html", "/simple", "/simple.html"):
+            simple = ROOT / "static" / "simple.html"
+            if simple.is_file():
+                self._send(200, simple.read_bytes(), "text/html; charset=utf-8")
+            else:
+                self._send(404, {"error": "simple.html missing"})
+            return
+        if path in ("/advanced", "/advanced.html"):
             self._send(200, _index_html(), "text/html; charset=utf-8")
             return
         if path in ("/graph", "/graph/", "/graph.html"):
@@ -380,6 +442,10 @@ class Handler(BaseHTTPRequestHandler):
                     "discover": d.get("summary"),
                 },
             )
+            return
+        if path == "/api/inference/status":
+            code, value = get_inference_status()
+            self._send(code, value)
             return
         if path in ("/api/discover", "/api/scan"):
             force = (qs.get("refresh") or ["0"])[0] in ("1", "true", "yes")
@@ -424,6 +490,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/api/combos", "/api/combo"):
             self._send(200, list_combos())
+            return
+        if path in ("/api/services", "/api/service-presets"):
+            self._send(200, list_services(get_snapshot(), get_discover()))
+            return
+        if path in ("/api/update", "/api/updates"):
+            self._send(200, update_status())
             return
         if path == "/api/combos/guide":
             self._send(200, guide_table())
@@ -848,6 +920,45 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError) as e:
                 self._send(400, {"error": str(e)})
             return
+        if path in ("/api/services/refresh", "/api/service-presets/refresh"):
+            try:
+                self._send(200, list_services(refresh_snapshot(), run_discover()))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/update/stage", "/api/updates/stage"):
+            try:
+                self._send(200, stage_update())
+            except Exception as e:
+                self._send(502, {"error": f"update staging failed: {str(e)[:500]}"})
+            return
+        if path.startswith("/api/services/") and path.endswith("/activate"):
+            service_id = path[len("/api/services/") : -len("/activate")].strip("/")
+            try:
+                self._send(200, activate_service(service_id, get_snapshot(), body or {}))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path.startswith("/api/services/") and path.endswith("/plan"):
+            service_id = path[len("/api/services/") : -len("/plan")].strip("/")
+            try:
+                self._send(200, plan_service(service_id, get_snapshot(), body or {}))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path.startswith("/api/services/") and path.endswith("/run"):
+            service_id = path[len("/api/services/") : -len("/run")].strip("/")
+            try:
+                self._send(200, execute_service(service_id, get_snapshot(), body or {}))
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(502, {"error": f"service execution failed: {str(e)[:500]}"})
+            return
         if path.startswith("/api/combos/") and path.endswith("/launch"):
             cid = path[len("/api/combos/") : -len("/launch")].strip("/")
             try:
@@ -1154,6 +1265,12 @@ def _paths() -> list[str]:
         "GET  /api/discover/text",
         "POST /api/discover          {host_scan: {...}}",
         "GET|POST /api/modes         ← inline|multi_agent, token_saver, role pins",
+        "GET  /api/services          ← capability-driven task services",
+        "POST /api/services/{id}/activate",
+        "POST /api/services/{id}/plan",
+        "POST /api/services/{id}/run",
+        "GET  /api/update            ← check upstream",
+        "POST /api/update/stage      ← download without applying",
         "POST /api/agents/plan       ← multi-LLM event plan",
         "GET|POST /api/bootstrap     ← optional auto-install plan (off by default)",
         "POST /api/bootstrap/run     ← {confirm, dry_run, only_safe}",
@@ -1176,6 +1293,7 @@ def _paths() -> list[str]:
         "POST /api/sessions/{id}/message",
         "GET  /api/sessions/{id}/status",
         "/api/health",
+        "GET  /api/inference/status  ← active model aliases only; no prompt data",
         "/api/matrix",
         "/api/route?need=code&prefer=local",
         "/api/sync",
@@ -1262,6 +1380,7 @@ def _index_html() -> bytes:
  cloud keys: <b>{"yes" if dsum.get("cloud_keys") else "no"}</b>
  <div class="muted" style="margin-top:.35rem">{ep_html or "No Ollama endpoints probed yet — open /api/discover"}</div>
  <div style="margin-top:.5rem">
+  <a href="/"><b>simple services</b></a> ·
   <a href="/api/discover">/api/discover</a> ·
   <a href="/api/discover?refresh=1">refresh</a> ·
   <a href="/api/modes">/api/modes</a> ·

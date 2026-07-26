@@ -49,6 +49,7 @@ categories:
       - litellm
       - aether-hub
       - open-webui
+      - open-webui-proxy
 
   # Host-only (scripts/auto-install.ps1 / .sh) — hub only recommends
   host_tools:
