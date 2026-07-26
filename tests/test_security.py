@@ -4,6 +4,7 @@ import io
 import hashlib
 import importlib.util
 import json
+import sqlite3
 import struct
 import sys
 import tempfile
@@ -153,6 +154,11 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn("aetherstack.hub.advancedGraphOpen", html)
         self.assertIn("aetherstack.hub.selectedService", html)
         self.assertIn("window.addEventListener('pageshow'", html)
+        self.assertNotIn("radial-gradient", html)
+        self.assertNotIn("box-shadow", html)
+        self.assertLess(html.index(">Simple</a>"), html.index(">Advanced</a>"))
+        self.assertLess(html.index(">Advanced</a>"), html.index(">WebUI</a>"))
+        self.assertIn("How to restore the Host CLI bridge", html)
 
     def test_advanced_graph_loads_capability_resolved_service_trees(self) -> None:
         html = (HUB / "static" / "graph.html").read_text(encoding="utf-8")
@@ -168,6 +174,11 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn('id="btnCenter"', html)
         self.assertIn('id="agentMdFile"', html)
         self.assertIn("Node library", html)
+        self.assertIn("description:", html)
+        self.assertIn("#wrap { display: flex; flex: 1 1 auto; min-height: 0; }", html)
+        self.assertIn("Resolved runtime", html)
+        self.assertNotIn("#38bdf8", html)
+        self.assertNotIn("box-shadow:", html)
         self.assertRegex(html, r'id="palette"[^>]*>.*id="paletteTypes".*id="btnDel"')
         toolbar = html.split('<div id="toolbar">', 1)[1].split('<div id="wrap">', 1)[0]
         self.assertNotIn('id="btnDel"', toolbar)
@@ -239,6 +250,50 @@ class SecurityBoundaryTests(unittest.TestCase):
         gitignore = (REPO / ".gitignore").read_text(encoding="utf-8")
         for pattern in ("*.db", "*.sqlite", "*.sqlite3", "cache/", ".cache/"):
             self.assertIn(pattern, gitignore)
+
+        compose = (REPO / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("OPENAI_API_BASE_URL=http://aether-hub:8766/v1", compose)
+        self.assertIn("ENABLE_OLLAMA_API=false", compose)
+        self.assertIn("seed_openwebui.py", compose)
+
+    def test_open_webui_seed_preserves_unrelated_configuration_and_creates_backup(self) -> None:
+        seed_path = REPO / "open-webui-config" / "seed.py"
+        spec = importlib.util.spec_from_file_location("aether_openwebui_seed", seed_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "webui.db"
+            connection = sqlite3.connect(db)
+            connection.execute("CREATE TABLE config(key TEXT PRIMARY KEY, value JSON NOT NULL, updated_at BIGINT)")
+            connection.execute(
+                "INSERT INTO config(key,value,updated_at) VALUES(?,?,?)",
+                ("unrelated.setting", json.dumps({"keep": True}), 1),
+            )
+            for key, value in {
+                "openai.api_base_urls": ["https://provider.example/v1"],
+                "openai.api_keys": ["existing-secret"],
+                "openai.api_configs": {"0": {"provider": "custom"}},
+            }.items():
+                connection.execute(
+                    "INSERT INTO config(key,value,updated_at) VALUES(?,?,?)",
+                    (key, json.dumps(value), 1),
+                )
+            connection.commit()
+            connection.close()
+            self.assertTrue(module.seed(db))
+            connection = sqlite3.connect(db)
+            values = dict(connection.execute("SELECT key,value FROM config"))
+            connection.close()
+            self.assertEqual(json.loads(values["unrelated.setting"]), {"keep": True})
+            self.assertEqual(json.loads(values["ollama.enable"]), False)
+            self.assertEqual(
+                json.loads(values["openai.api_base_urls"]),
+                ["http://aether-hub:8766/v1", "https://provider.example/v1"],
+            )
+            self.assertEqual(json.loads(values["openai.api_keys"])[1], "existing-secret")
+            self.assertEqual(json.loads(values["openai.api_configs"])["1"]["provider"], "custom")
+            self.assertTrue((Path(td) / "webui.db.aetherstack-before-gateway.bak").is_file())
 
     def test_inference_status_contains_model_metadata_without_prompt_content(self) -> None:
         with tempfile.TemporaryDirectory() as td:

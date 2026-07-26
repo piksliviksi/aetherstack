@@ -222,6 +222,8 @@ def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, 
                 "needs": list(agent.get("needs") or []),
                 "available": bool(agent.get("available")),
                 "service_id": service.get("id"),
+                "instructions_md": service.get("behavior_markdown") or "",
+                "instructions_source": service.get("behavior_source") or "",
             },
         }
 

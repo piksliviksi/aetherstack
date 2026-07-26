@@ -7,62 +7,70 @@
   <link rel="icon" type="image/png" href="/aetherstack-icon.png" />
   <style>
     :root {
-      --bg: #0a0e17; --panel: #121826; --border: #1e293b; --text: #e2e8f0;
-      --muted: #64748b; --accent: #38bdf8; --port: #94a3b8;
+      --bg: #090a0b; --panel: #111315; --panel-raised: #17191b; --border: #303336;
+      --border-strong: #4b4f52; --text: #ecebe7; --muted: #969791; --accent: #d6b36a; --port: #aaa9a3;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; font-family: ui-sans-serif, system-ui, sans-serif;
       background: var(--bg); color: var(--text); overflow: hidden; }
+    body { display: flex; flex-direction: column; }
     #toolbar {
       display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
-      padding: .45rem .65rem; border-bottom: 1px solid var(--border); background: var(--panel);
-      z-index: 20; position: relative;
+      padding: .4rem .55rem; border-bottom: 1px solid var(--border); background: #0d0f10;
+      z-index: 20; position: relative; flex: 0 0 auto;
     }
     #toolbar button, #toolbar select, #toolbar input {
-      background: #0f172a; border: 1px solid var(--border); color: var(--text);
-      border-radius: 6px; padding: .3rem .55rem; font-size: 12px; cursor: pointer;
+      background: var(--panel-raised); border: 1px solid var(--border); color: var(--text);
+      border-radius: 1px; padding: .3rem .5rem; font-size: 12px; cursor: pointer;
     }
-    #toolbar button.primary { background: #0369a1; border-color: #0284c7; }
-    #toolbar button:hover { filter: brightness(1.15); }
+    #toolbar button.primary { color:#17140d; background: var(--accent); border-color: var(--accent); font-weight:700; }
+    #toolbar button:hover { border-color:var(--border-strong); background:#202326; }
+    #toolbar button.primary:hover { background:#e0c17d; border-color:#e0c17d; }
     #toolbar .grow { flex: 1; }
     #toolbar .muted { color: var(--muted); font-size: 11px; }
-    #toolbar .brand-icon { width: 24px; height: 24px; border-radius: 6px; }
-    #wrap { display: flex; height: calc(100% - 42px); }
+    #toolbar .brand-icon { width: 24px; height: 24px; border-radius: 1px; }
+    #toolbar .view-nav { display:flex; align-items:center; border:1px solid var(--border); }
+    #toolbar .view-nav a { padding:.3rem .5rem; border-right:1px solid var(--border); color:var(--muted); text-decoration:none; font-size:11px; }
+    #toolbar .view-nav a:last-child { border-right:0; }
+    #toolbar .view-nav a:hover { color:var(--text); background:var(--panel-raised); }
+    #toolbar .view-nav a.active { color:#17140d; background:var(--accent); font-weight:800; }
+    #wrap { display: flex; flex: 1 1 auto; min-height: 0; }
     #palette {
-      width: 140px; border-right: 1px solid var(--border); background: var(--panel);
+      width: 170px; flex: 0 0 170px; border-right: 1px solid var(--border); background: var(--panel);
       padding: .5rem; overflow: hidden; font-size: 12px; display: flex; flex-direction: column;
     }
     #palette h3 { margin: 0 0 .35rem; color: var(--muted); font-size: 12px; }
     #paletteTypes { flex: 1; min-height: 0; overflow: auto; }
     #palette .ptype {
-      padding: .45rem .5rem; margin: .3rem 0; border-radius: 6px; border: 1px solid var(--border);
+      padding: .42rem .48rem; margin: 0; border: 0; border-bottom: 1px solid var(--border);
       cursor: grab; user-select: none;
     }
+    #palette .ptype:hover, #palette .ptype:focus-visible { background: var(--panel-raised); outline: none; }
     #canvas-wrap { flex: 1; position: relative; overflow: hidden; cursor: grab; touch-action: none;
-      background-image: radial-gradient(circle, #1e293b 1px, transparent 1px);
+      background-image: linear-gradient(#202224 1px, transparent 1px), linear-gradient(90deg, #202224 1px, transparent 1px);
       background-size: 20px 20px; }
     #canvas-wrap.panning { cursor: grabbing; }
     #canvas-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
     #nodes { position: absolute; inset: 0; z-index: 2; }
     .node {
-      position: absolute; min-width: 150px; background: #0f172a; border: 1px solid var(--border);
-      border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.35); font-size: 12px;
+      position: absolute; min-width: 150px; background: #111315; border: 1px solid var(--border);
+      border-left: 3px solid var(--node-color, var(--border-strong)); border-radius: 1px; font-size: 12px;
       user-select: none;
     }
-    .node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .node.selected { border-color: var(--accent); outline: 1px solid var(--accent); outline-offset: 1px; }
     .node .hd {
-      padding: .35rem .5rem; border-radius: 8px 8px 0 0; font-weight: 600; cursor: move;
+      padding: .35rem .5rem; border-radius: 0; font-weight: 600; cursor: move;
       display: flex; justify-content: space-between; gap: .4rem;
     }
     .node .bd { padding: .4rem .5rem .55rem; color: var(--muted); }
     .node .bd label { display: block; font-size: 10px; margin-top: .25rem; }
     .node .bd input, .node .bd select {
-      width: 100%; background: #020617; border: 1px solid var(--border); color: var(--text);
-      border-radius: 4px; padding: .15rem .3rem; font-size: 11px;
+      width: 100%; background: #0b0c0d; border: 1px solid var(--border); color: var(--text);
+      border-radius: 1px; padding: .15rem .3rem; font-size: 11px;
     }
     .port {
       width: 12px; height: 12px; border-radius: 50%; background: var(--port);
-      border: 2px solid #0f172a; position: absolute; cursor: crosshair; z-index: 5;
+      border: 2px solid #111315; position: absolute; cursor: crosshair; z-index: 5;
     }
     .port.in { left: -7px; top: 50%; transform: translateY(-50%); }
     .port.out { right: -7px; top: 50%; transform: translateY(-50%); }
@@ -72,22 +80,25 @@
       padding: .6rem; font-size: 11px; overflow: auto;
     }
     #palette .palette-actions { padding-top: .5rem; border-top: 1px solid var(--border); }
-    #palette .palette-actions button { width: 100%; padding: .4rem; border: 1px solid #7f1d1d; border-radius: 6px; background: #2a1115; color: #fecaca; cursor: pointer; }
+    #palette .palette-actions button { width: 100%; min-height: 34px; padding: .4rem; line-height: 1.2; white-space: normal; border: 1px solid #714040; border-radius: 1px; background: #211415; color: #e4aaaa; cursor: pointer; }
     #palette .palette-actions button:hover { filter: brightness(1.18); }
     #inspector h3 { margin: 0 0 .5rem; font-size: 12px; color: var(--muted); }
     #insp label { display: block; margin-top: .55rem; color: var(--muted); }
     #insp input, #insp select, #insp textarea {
-      width: 100%; margin-top: .15rem; background: #020617; border: 1px solid var(--border);
-      color: var(--text); border-radius: 5px; padding: .3rem .4rem; font-size: 11px;
+      width: 100%; margin-top: .15rem; background: #0b0c0d; border: 1px solid var(--border);
+      color: var(--text); border-radius: 1px; padding: .3rem .4rem; font-size: 11px;
     }
     #insp textarea { min-height: 150px; resize: vertical; line-height: 1.35; }
     #insp .md-actions { display: flex; gap: .35rem; margin-top: .3rem; }
-    #insp .md-actions button { flex: 1; background: #0f172a; border: 1px solid var(--border); color: var(--text); border-radius: 5px; padding: .3rem; cursor: pointer; }
+    #insp .md-actions button { flex: 1; background: var(--panel-raised); border: 1px solid var(--border); color: var(--text); border-radius: 1px; padding: .3rem; cursor: pointer; }
+    #insp .node-help { margin: .35rem 0 .7rem; color: var(--muted); line-height: 1.35; }
+    #insp .runtime { margin-top: .7rem; padding: .45rem; border-left: 2px solid var(--accent); background:#161510; color: var(--muted); line-height: 1.4; }
     #toast {
       position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
-      background: #1e293b; border: 1px solid var(--border); padding: .4rem .8rem;
-      border-radius: 8px; font-size: 12px; display: none; z-index: 50;
+      background: var(--panel-raised); border: 1px solid var(--border); padding: .4rem .8rem;
+      border-radius: 1px; font-size: 12px; display: none; z-index: 50;
     }
+    button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,.ptype:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   </style>
 </head>
 <body>
@@ -104,9 +115,8 @@
     <button type="button" id="btnCenter">Center tree</button>
     <button type="button" id="btnToPipe">Export pipeline JSON</button>
     <span class="grow"></span>
-    <span class="muted">Drag empty canvas to pan · drag node headers to move · ports to wire</span>
-    <a class="muted" href="/" style="color:var(--accent)">← simple</a>
-    <a class="muted" href="/advanced" style="color:var(--accent)">advanced</a>
+    <span class="muted">Drag canvas to pan · node headers to move · ports to wire</span>
+    <nav class="view-nav" aria-label="AetherStack views"><a href="/">Simple</a><a class="active" href="/advanced" aria-current="page">Advanced</a><a href="http://127.0.0.1:3000/">WebUI</a></nav>
   </div>
   <div id="wrap">
     <div id="palette"><h3>Node library</h3><div id="paletteTypes"></div><div class="palette-actions"><button type="button" id="btnDel">Delete selected node</button></div></div>
@@ -124,14 +134,14 @@
   <div id="toast"></div>
   <script>
 const TYPES = {
-  goal: { label: "Goal", color: "#3b82f6" },
-  master: { label: "Master", color: "#a78bfa" },
-  analyser: { label: "Analyser", color: "#fbbf24" },
-  worker: { label: "Worker", color: "#34d399" },
-  tester: { label: "Tester", color: "#22d3ee" },
-  memory: { label: "Memory", color: "#fb7185" },
-  slash: { label: "Slash", color: "#94a3b8" },
-  output: { label: "Output", color: "#64748b" },
+  goal: { label: "Goal", color: "#8f918d", description: "Defines the objective and input passed into the agent tree." },
+  master: { label: "Lead agent", color: "#d6b36a", description: "Plans the work, delegates tasks, and owns the final direction." },
+  analyser: { label: "Reviewer", color: "#bd8c66", description: "Challenges evidence and checks an intermediate result before release." },
+  worker: { label: "Worker agent", color: "#7d9b82", description: "Executes a focused part of the active service in parallel or sequentially." },
+  tester: { label: "Test agent", color: "#789596", description: "Runs validation and reports failures back into the workflow." },
+  memory: { label: "Memory", color: "#978292", description: "Loads or stores reusable context in a named memory namespace." },
+  slash: { label: "Command", color: "#858784", description: "Runs one or more AetherStack slash commands at this point in the flow." },
+  output: { label: "Output", color: "#686b69", description: "Collects the reviewed result returned to the user." },
 };
 
 let graph = { schema: "aetherstack.graph.v1", id: "canvas-"+Date.now().toString(36), title: "Canvas", nodes: [], edges: [] };
@@ -158,6 +168,9 @@ Object.keys(TYPES).forEach(t => {
   d.className = "ptype";
   d.style.borderLeft = "3px solid " + TYPES[t].color;
   d.textContent = TYPES[t].label;
+  d.title = TYPES[t].description;
+  d.tabIndex = 0;
+  d.setAttribute("aria-label", `${TYPES[t].label}: ${TYPES[t].description}`);
   d.draggable = true;
   d.addEventListener("dragstart", e => e.dataTransfer.setData("type", t));
   palette.appendChild(d);
@@ -182,14 +195,14 @@ function uid() { return "n_" + Math.random().toString(36).slice(2, 9); }
 
 function defaultData(t) {
   const map = {
-    goal: { text: "" },
-    master: { role: "mastermind", maker: null, model: null, instructions_md: "", max_cost: "high", strategy: "best_score" },
-    analyser: { role: "critic", maker: null, model: null, instructions_md: "", gate: true, ack: true, max_cost: "high", strategy: "best_score" },
-    worker: { role: "builder", tier: null, model: null, instructions_md: "", strategy: "cheapest", parallel: 2, max_cost: "medium" },
-    tester: { role: "tester", strategy: "cheapest", tier: "local", model: null, instructions_md: "", max_cost: "low" },
-    memory: { namespace: "default" },
-    slash: { commands: ["/done all", "/compact"] },
-    output: {},
+    goal: { label: "Goal", text: "" },
+    master: { label: "Lead agent", role: "mastermind", model: null, instructions_md: "", max_cost: "high", strategy: "best_score" },
+    analyser: { label: "Reviewer", role: "critic", model: null, instructions_md: "", gate: true, ack: true, max_cost: "high", strategy: "best_score" },
+    worker: { label: "Worker agent", role: "builder", tier: null, model: null, instructions_md: "", strategy: "cheapest", parallel: 2, max_cost: "medium" },
+    tester: { label: "Test agent", role: "tester", strategy: "cheapest", tier: "local", model: null, instructions_md: "", max_cost: "low" },
+    memory: { label: "Memory", namespace: "default", action: "search" },
+    slash: { label: "Command", commands: ["/done all", "/compact"] },
+    output: { label: "Output" },
   };
   return JSON.parse(JSON.stringify(map[t] || {}));
 }
@@ -329,6 +342,36 @@ function roleOptions(current) {
   return roles.map(role => option(role, role, current)).join("");
 }
 
+const FIELD_LABELS = {
+  label: "Node name", text: "Goal or input", role: "Agent role", model: "Model",
+  instructions_md: "Behavior instructions (.md)", needs: "Required capabilities",
+  strategy: "Model selection", max_cost: "Maximum cost", tier: "Run location",
+  parallel: "Parallel workers", gate: "Block until approved", ack: "Require acknowledgement",
+  purpose: "Purpose", namespace: "Memory namespace", commands: "Slash commands", action: "Action",
+};
+const INSPECTOR_FIELDS = {
+  goal: ["label", "text"],
+  master: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "instructions_md"],
+  analyser: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "gate", "ack", "instructions_md"],
+  worker: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "instructions_md"],
+  tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "instructions_md"],
+  memory: ["label", "namespace", "action"],
+  slash: ["label", "commands"],
+  output: ["label"],
+};
+
+function fixedOptions(values, current) {
+  return values.map(value => option(value, value.replaceAll("_", " "), current)).join("");
+}
+
+function runtimeSummary(data) {
+  const details = [];
+  if (data.provider) details.push(`Provider: ${esc(data.provider)}`);
+  if (data.backend) details.push(`Backend: ${esc(data.backend)}`);
+  if (data.available !== undefined) details.push(`State: ${data.available ? "available" : "unavailable"}`);
+  return details.length ? `<div class="runtime"><strong>Resolved runtime</strong><br/>${details.join("<br/>")}</div>` : "";
+}
+
 function select(id) {
   selected = id;
   render();
@@ -338,33 +381,42 @@ function select(id) {
   const d = n.data || {};
   const type = TYPES[n.type] || TYPES.worker;
   let html = `<div style="color:${type.color};font-weight:600">${esc(d.label || type.label)}</div>`;
-  html += `<div class="muted">${esc(n.id)}</div>`;
+  html += `<div class="node-help">${esc(type.description)}</div>`;
   const isAgentNode = AGENT_NODE_TYPES.has(n.type);
   if (isAgentNode) {
-    html += `<label>available agent<br/><select id="inspectorAgent">${agentOptions(d)}</select></label>`;
-    html += `<label>load behavior profile (.md)<br/><input id="agentMdFile" type="file" accept=".md,text/markdown,text/plain"/></label>`;
+    html += `<label>Available agent preset<br/><select id="inspectorAgent">${agentOptions(d)}</select></label>`;
+    html += `<label>Load behavior profile (.md)<br/><input id="agentMdFile" type="file" accept=".md,text/markdown,text/plain"/></label>`;
     html += `<div class="md-actions"><button type="button" id="clearAgentMd">Clear profile</button></div>`;
     if (d.instructions_source) html += `<div class="muted" style="margin-top:.3rem">Loaded: ${esc(d.instructions_source)}</div>`;
   }
-  const fields = Object.keys(d).filter(k => k !== "agent_ref" && k !== "instructions_source");
-  if (isAgentNode && !fields.includes("model")) fields.push("model");
-  if (isAgentNode && !fields.includes("instructions_md")) fields.push("instructions_md");
+  const fields = INSPECTOR_FIELDS[n.type] || ["label"];
   fields.forEach(k => {
     const v = d[k];
-    if (typeof v === "boolean") {
-      html += `<label>${esc(k)}<br/><input type="checkbox" data-k="${esc(k)}" ${v?"checked":""}/></label>`;
+    const label = FIELD_LABELS[k] || k;
+    if (typeof v === "boolean" || k === "gate" || k === "ack") {
+      html += `<label>${esc(label)}<br/><input type="checkbox" data-k="${esc(k)}" ${v?"checked":""}/></label>`;
     } else if (k === "model" && isAgentNode) {
-      html += `<label>model<br/><select data-k="model">${modelOptions(v)}</select></label>`;
+      html += `<label>${esc(label)}<br/><select data-k="model">${modelOptions(v)}</select></label>`;
     } else if (k === "role" && isAgentNode) {
-      html += `<label>role<br/><select data-k="role">${roleOptions(v)}</select></label>`;
+      html += `<label>${esc(label)}<br/><select data-k="role">${roleOptions(v)}</select></label>`;
     } else if (k === "instructions_md" && isAgentNode) {
-      html += `<label>behavior instructions (.md)<br/><textarea data-k="instructions_md" placeholder="Role, workflow, constraints, stopping rules, and output format…">${esc(v ?? "")}</textarea></label>`;
-    } else if (Array.isArray(v)) {
-      html += `<label>${esc(k)}<br/><input data-k="${esc(k)}" value="${esc(v.join(", "))}"/></label>`;
+      html += `<label>${esc(label)}<br/><textarea data-k="instructions_md" placeholder="Role, workflow, constraints, stopping rules, and output format…">${esc(v ?? "")}</textarea></label>`;
+    } else if (k === "strategy") {
+      html += `<label>${esc(label)}<br/><select data-k="strategy">${option("", "Automatic", v)}${fixedOptions(["best_score", "cheapest", "fastest", "local_first"], v)}</select></label>`;
+    } else if (k === "max_cost") {
+      html += `<label>${esc(label)}<br/><select data-k="max_cost">${option("", "No node override", v)}${fixedOptions(["low", "medium", "high", "very_high"], v)}</select></label>`;
+    } else if (k === "tier") {
+      html += `<label>${esc(label)}<br/><select data-k="tier">${option("", "Any available location", v)}${fixedOptions(["local", "cloud", "host_cli"], v)}</select></label>`;
+    } else if (Array.isArray(v) || k === "needs" || k === "commands") {
+      html += `<label>${esc(label)}<br/><input data-k="${esc(k)}" data-list="true" value="${esc((Array.isArray(v) ? v : []).join(", "))}"/></label>`;
+    } else if (k === "text" || k === "purpose") {
+      html += `<label>${esc(label)}<br/><textarea data-k="${esc(k)}">${esc(v ?? "")}</textarea></label>`;
     } else {
-      html += `<label>${esc(k)}<br/><input data-k="${esc(k)}" value="${esc(v ?? "")}"/></label>`;
+      const inputType = k === "parallel" ? "number" : "text";
+      html += `<label>${esc(label)}<br/><input type="${inputType}" data-k="${esc(k)}" value="${esc(v ?? "")}"/></label>`;
     }
   });
+  html += runtimeSummary(d);
   insp.innerHTML = html;
   document.getElementById("inspectorAgent")?.addEventListener("change", event => {
     const agent = liveChoices.agents.find(item => item.ref === event.target.value);
@@ -399,7 +451,7 @@ function select(id) {
     control.addEventListener("change", () => {
       const k = control.dataset.k;
       if (control.type === "checkbox") n.data[k] = control.checked;
-      else if (Array.isArray(d[k])) n.data[k] = control.value.split(",").map(s => s.trim()).filter(Boolean);
+      else if (control.dataset.list === "true") n.data[k] = control.value.split(",").map(s => s.trim()).filter(Boolean);
       else {
         const num = Number(control.value);
         n.data[k] = (control.value !== "" && !Number.isNaN(num) && String(num) === control.value) ? num : control.value || null;
@@ -440,13 +492,13 @@ function renderEdges() {
     const p2 = portPos(b, "in");
     const mx = (p1.x + p2.x) / 2;
     parts.push(`<path d="M ${p1.x} ${p1.y} C ${mx} ${p1.y}, ${mx} ${p2.y}, ${p2.x} ${p2.y}"
-      stroke="#38bdf8" stroke-width="2" fill="none" opacity="0.85"/>`);
+      stroke="#777a77" stroke-width="2" fill="none" opacity="0.85"/>`);
   });
   if (link) {
     const a = graph.nodes.find(n => n.id === link.from);
     if (a) {
       const p1 = portPos(a, "out");
-      parts.push(`<path d="M ${p1.x} ${p1.y} L ${link.x} ${link.y}" stroke="#fbbf24" stroke-width="2" fill="none" stroke-dasharray="4 3"/>`);
+      parts.push(`<path d="M ${p1.x} ${p1.y} L ${link.x} ${link.y}" stroke="#d6b36a" stroke-width="2" fill="none" stroke-dasharray="4 3"/>`);
     }
   }
   svg.innerHTML = parts.join("");
@@ -461,11 +513,13 @@ function render() {
     el.style.left = (n.x + camera.x) + "px";
     el.style.top = (n.y + camera.y) + "px";
     const col = TYPES[n.type]?.color || "#64748b";
+    el.style.setProperty("--node-color", col);
     const d = n.data || {};
+    el.title = TYPES[n.type]?.description || "Workflow node";
     let sub = d.model || d.maker || d.tier || d.text || d.commands?.join(" ") || "";
     if (typeof sub === "string" && sub.length > 28) sub = sub.slice(0, 26) + "…";
     el.innerHTML = `
-      <div class="hd" style="background:${col}33;border-bottom:1px solid ${col}55">
+      <div class="hd" style="background:#17191b;border-bottom:1px solid var(--border)">
         <span>${esc(d.label || TYPES[n.type]?.label || n.type)}</span>
         <span style="opacity:.6;font-weight:400;font-size:10px">${esc(n.type)}</span>
       </div>

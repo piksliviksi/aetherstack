@@ -72,6 +72,8 @@ try {
   await ready();
   await waitFor(() => evaluate("Boolean(document.getElementById('advancedGraph') && state.selected)"));
   assert.equal(await evaluate("document.getElementById('runtime').textContent.includes('Host CLI bridge')"), true, "Host CLI bridge state is hidden");
+  assert.equal(await evaluate("[...document.querySelectorAll('header nav a')].map(a=>a.textContent).join('|')"), "Simple|Advanced|WebUI", "Hub navigation order is wrong");
+  assert.equal(await evaluate("document.querySelector('header nav a.active')?.textContent"), "Simple", "Simple mode is not highlighted");
   await evaluate("localStorage.clear(); advancedPanel.open=true; advancedPanel.dispatchEvent(new Event('toggle')); true");
   assert.equal(await evaluate("localStorage.getItem(HUB_GRAPH_OPEN_KEY)"), "1");
 
@@ -87,6 +89,11 @@ try {
       markdown: Boolean(document.getElementById('agentMdFile') && document.querySelector('[data-k="instructions_md"]')),
       deleteInLibrary: Boolean(document.querySelector('#palette #btnDel')),
       deleteInToolbar: Boolean(document.querySelector('#toolbar #btnDel')),
+      deleteFits: (() => { const button=document.getElementById('btnDel').getBoundingClientRect(); const palette=document.getElementById('palette').getBoundingClientRect(); return button.top >= palette.top && button.bottom <= palette.bottom; })(),
+      descriptions: [...document.querySelectorAll('#palette .ptype')].every(node => node.title.length > 20),
+      friendlyLabels: document.getElementById('insp').textContent.includes('Node name') && document.getElementById('insp').textContent.includes('Resolved runtime'),
+      rawMakerHidden: !document.getElementById('insp').textContent.includes('maker'),
+      profileLoaded: document.querySelector('[data-k="instructions_md"]').value.length > 20,
     };
   })()`);
   assert.ok(inspector.models > 1, "model dropdown was not populated");
@@ -95,6 +102,11 @@ try {
   assert.equal(inspector.markdown, true, "agent Markdown controls are missing");
   assert.equal(inspector.deleteInLibrary, true, "delete button is not in the Node library");
   assert.equal(inspector.deleteInToolbar, false, "delete button is still in the toolbar");
+  assert.equal(inspector.deleteFits, true, "delete button is clipped by the Node library viewport");
+  assert.equal(inspector.descriptions, true, "Node library hover descriptions are missing");
+  assert.equal(inspector.friendlyLabels, true, "Inspector does not use friendly controls");
+  assert.equal(inspector.rawMakerHidden, true, "Inspector leaks a raw maker field");
+  assert.equal(inspector.profileLoaded, true, "service behavior profile is not loaded into agent nodes");
 
   const layout = await evaluate(`(() => {
     const node = graph.nodes[0];
@@ -116,8 +128,19 @@ try {
   await waitFor(() => evaluate("Boolean(graph.nodes && graph.nodes.length)"));
   assert.equal(await evaluate("graph.nodes[0].x"), layout.expectedX, "node position was not restored");
   assert.equal(await evaluate("camera.x"), layout.cameraX, "camera position was not restored");
+  await navigate("http://127.0.0.1:3000/");
+  const webuiModels = await waitFor(() => evaluate(`(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    const response = await fetch('/api/models', {headers:{Authorization:'Bearer '+token}});
+    if (!response.ok) return null;
+    const body = await response.json();
+    return (body.data || []).map(model => model.id);
+  })()`), 60000);
+  assert.ok(webuiModels.includes("local-default"), "Open WebUI did not load AetherStack gateway aliases");
+  assert.equal(webuiModels.includes("tinyllama:latest"), false, "Open WebUI still exposes raw Ollama models");
   socket.close();
-  console.log(JSON.stringify({ ok: true, inspector, layout }));
+  console.log(JSON.stringify({ ok: true, inspector, layout, webuiModels }));
 } finally {
   if (!browser.killed) browser.kill();
   await Promise.race([

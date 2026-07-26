@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.5
+
+- Route Open WebUI through AetherHub's authenticated OpenAI-compatible facade so its Base Model list follows the live capability matrix, including authenticated host CLIs, while raw Ollama model entries are hidden.
+- Correct TinyLlama's capability metadata and remove unsupported tool-call fields before inference instead of failing with `does not support tools`.
+- Repair the embedded graph layout so its Node library delete control is never clipped; add concise hover descriptions and replace raw internal Inspector fields with clear task-oriented controls.
+- Add editable default Markdown behavior profiles for every built-in service and load them into each generated agent node.
+- Explain how to recover a missing Host CLI bridge and standardize Hub navigation as **Simple · Advanced · WebUI** with the current view highlighted.
+- Redesign the Hub as a low-clutter, sharp-cornered dark operations console.
+
 ## 0.3.4
 
 - Fix the host-CLI lifecycle gap that left capability resolution with Ollama only when Hub was already running: activation now detects authenticated Codex, Claude, and Grok CLIs, safely recreates only `aether-hub` when its bridge environment is stale, and refreshes the live matrix.

@@ -19,6 +19,7 @@ from matrix import _score_model
 
 ROOT = Path(__file__).resolve().parent
 CATALOG_PATH = Path(os.environ.get("AETHER_SERVICE_CATALOG", str(ROOT / "service_catalog.yaml")))
+PROFILE_DIR = Path(os.environ.get("AETHER_SERVICE_PROFILE_DIR", str(ROOT / "profiles" / "services")))
 LITELLM_BASE_URL = os.environ.get("LITELLM_INTERNAL_URL", "http://litellm:4000").rstrip("/")
 CLI_BRIDGE_URL = os.environ.get("AETHER_CLI_BRIDGE_URL", "http://host.docker.internal:8767").rstrip("/")
 CLI_BRIDGE_TOKEN = os.environ.get("AETHER_CLI_BRIDGE_TOKEN", "")
@@ -36,6 +37,19 @@ def load_service_catalog(path: Path | None = None) -> dict[str, Any]:
     if not isinstance(value, dict) or not isinstance(value.get("services"), dict):
         raise ValueError("invalid service_catalog.yaml")
     return value
+
+
+def load_service_profile(service_id: str, profile_dir: Path | None = None) -> tuple[str, str]:
+    """Load a bounded, editable built-in service behavior profile."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", service_id):
+        raise ValueError("invalid service profile id")
+    path = (profile_dir or PROFILE_DIR) / f"{service_id}.md"
+    if not path.is_file():
+        return "", ""
+    content = path.read_text(encoding="utf-8")
+    if len(content) > 100_000:
+        raise ValueError(f"service profile {service_id!r} exceeds 100000 characters")
+    return content, path.name
 
 
 def _cost_rank(value: Any) -> int:
@@ -211,6 +225,7 @@ def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]
     if not service:
         raise ValueError(f"unknown service: {service_id}")
     defaults = catalog.get("defaults") or {}
+    behavior_markdown, behavior_source = load_service_profile(service_id)
     used_models: set[str] = set()
     used_providers: set[str] = set()
     agents = [
@@ -231,6 +246,8 @@ def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]
         "activities": list(service.get("activities") or []),
         "accent": service.get("accent") or "blue",
         "instructions": service.get("instructions") or "",
+        "behavior_markdown": behavior_markdown,
+        "behavior_source": behavior_source,
         "mode": service.get("mode") or defaults.get("mode") or "multi_agent",
         "lean_mode": service.get("lean_mode") or defaults.get("lean_mode") or "balanced",
         "token_saver": bool(service.get("token_saver", defaults.get("token_saver", False))),
@@ -502,7 +519,9 @@ def plan_service(
             "token_saver": bool(event.get("token_saver", resolved["token_saver"])),
             "lean_mode": event.get("lean_mode") or resolved["lean_mode"],
             "service": service_id,
-            "service_instructions": resolved["instructions"],
+            "service_instructions": "\n\n".join(
+                value for value in (resolved["instructions"], resolved.get("behavior_markdown")) if value
+            ),
             "roles": roles,
             "workers": max(1, len(tasks)),
             "tasks": tasks or None,

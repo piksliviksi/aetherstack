@@ -15,6 +15,7 @@ sys.path.insert(0, str(HUB))
 import services  # noqa: E402
 import activity_words  # noqa: E402
 import matrix  # noqa: E402
+import openai_gateway  # noqa: E402
 from agents import get_runtime  # noqa: E402
 
 
@@ -274,6 +275,77 @@ class DynamicServiceTests(unittest.TestCase):
                 self.assertEqual(activity_words.list_words()["words"], [])
             finally:
                 activity_words.DB_PATH = old_path
+
+
+class OpenAIGatewayTests(unittest.TestCase):
+    def test_models_only_expose_available_chat_aliases_with_capabilities(self) -> None:
+        value = openai_gateway.model_list(snapshot())
+        ids = {item["id"] for item in value["data"]}
+        self.assertIn("local-code", ids)
+        self.assertNotIn("offline-model", ids)
+        local = next(item for item in value["data"] if item["id"] == "local-code")
+        self.assertTrue(local["aetherstack"]["supports_tools"])
+
+    def test_unsupported_tool_fields_are_removed_before_backend_call(self) -> None:
+        snap = snapshot()
+        snap["models"]["plain-chat"] = {
+            "available": True,
+            "provider": "ollama",
+            "tier": "local",
+            "capabilities": ["chat"],
+        }
+        captured = {}
+
+        def proxy(payload: dict) -> dict:
+            captured.update(payload)
+            return {"id": "one", "model": payload["model"], "choices": [{"message": {"content": "ok"}}]}
+
+        value, wanted_stream = openai_gateway.chat_completion(
+            {
+                "model": "plain-chat",
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                "tool_choice": "auto",
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            },
+            snap,
+            proxy=proxy,
+        )
+        self.assertTrue(wanted_stream)
+        self.assertNotIn("tools", captured)
+        self.assertNotIn("tool_choice", captured)
+        self.assertNotIn("stream_options", captured)
+        self.assertIn("does not support tool calls", captured["messages"][0]["content"])
+        self.assertEqual(value["choices"][0]["message"]["content"], "ok")
+
+    def test_host_cli_completion_uses_bridge_and_can_be_encoded_as_sse(self) -> None:
+        snap = snapshot()
+        snap["models"]["codex-cli"] = {
+            "available": True,
+            "provider": "codex-cli",
+            "executor": "host_cli",
+            "capabilities": ["chat", "code", "tools"],
+        }
+        value, wanted_stream = openai_gateway.chat_completion(
+            {"model": "codex-cli", "messages": [{"role": "user", "content": "hello"}], "stream": True},
+            snap,
+            cli_completion=lambda payload: {"model": payload["model"], "content": "bridge answer", "usage": {}},
+        )
+        self.assertTrue(wanted_stream)
+        stream = openai_gateway.stream_bytes(value).decode("utf-8")
+        self.assertIn("bridge answer", stream)
+        self.assertTrue(stream.endswith("data: [DONE]\n\n"))
+
+    def test_each_service_has_editable_markdown_loaded_into_graph_nodes(self) -> None:
+        for service_id in EXPECTED_SERVICES:
+            resolved = services.resolve_service(service_id, snapshot())
+            self.assertTrue(resolved["behavior_markdown"], service_id)
+            self.assertEqual(resolved["behavior_source"], f"{service_id}.md")
+            graph = services.build_service_graph(service_id, snapshot())
+            agents = [node for node in graph["nodes"] if node["type"] in {"master", "worker", "analyser"}]
+            self.assertTrue(agents)
+            self.assertTrue(all(node["data"]["instructions_md"] for node in agents))
 
 
 if __name__ == "__main__":
