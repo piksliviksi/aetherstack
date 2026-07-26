@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AetherStack · Node Graph</title>
+  <link rel="icon" type="image/png" href="/aetherstack-icon.png" />
   <style>
     :root {
       --bg: #0a0e17; --panel: #121826; --border: #1e293b; --text: #e2e8f0;
@@ -25,6 +26,7 @@
     #toolbar button:hover { filter: brightness(1.15); }
     #toolbar .grow { flex: 1; }
     #toolbar .muted { color: var(--muted); font-size: 11px; }
+    #toolbar .brand-icon { width: 24px; height: 24px; border-radius: 6px; }
     #wrap { display: flex; height: calc(100% - 42px); }
     #palette {
       width: 140px; border-right: 1px solid var(--border); background: var(--panel);
@@ -76,6 +78,7 @@
 </head>
 <body>
   <div id="toolbar">
+    <img class="brand-icon" src="/aetherstack-icon.png" width="24" height="24" alt="" />
     <strong style="color:var(--accent)">Aether Graph</strong>
     <button type="button" class="primary" id="btnAuto">Auto-connect</button>
     <button type="button" id="btnTemplate">Best-practice template</button>

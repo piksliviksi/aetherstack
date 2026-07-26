@@ -3,7 +3,7 @@ LABEL org.opencontainers.image.title="AetherStack" \
       org.opencontainers.image.description="Multi-model LLM control plane for Docker Desktop" \
       org.opencontainers.image.vendor="piksliviksi" \
       com.docker.desktop.extension.api.version=">= 0.2.3" \
-      com.docker.desktop.extension.icon="https://raw.githubusercontent.com/piksliviksi/aetherstack/main/aetherstack.jpg" \
+      com.docker.desktop.extension.icon="https://raw.githubusercontent.com/piksliviksi/aetherstack/main/aetherstack-icon.png" \
       com.docker.extension.screenshots="" \
       com.docker.extension.detailed-description="Start Open WebUI, LiteLLM, and Redis. Connect host Ollama for local GPU inference (NVIDIA, AMD, Intel)." \
       com.docker.extension.publisher-url="https://github.com/piksliviksi/aetherstack" \
@@ -16,6 +16,6 @@ COPY docker-compose.yaml .
 COPY litellm_config.yaml .
 COPY open-webui-proxy /open-webui-proxy
 COPY ui /ui
-COPY aetherstack.svg .
+COPY aetherstack.png .
 
 WORKDIR /

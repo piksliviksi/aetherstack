@@ -34,7 +34,7 @@ VS Code  ──HTTP──►  LiteLLM :4000  ──HTTP──►  Ollama (host o
 | Path | Command |
 |------|---------|
 | Marketplace | `code --install-extension AetherStack.aetherstack` |
-| Local VSIX | `code --install-extension packages/aetherstack-0.3.0.vsix` |
+| Local VSIX | `code --install-extension packages/aetherstack-0.3.1.vsix` |
 | Dev folder | `code --install-extension path/to/integrations/vscode` |
 
 Listing: https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack

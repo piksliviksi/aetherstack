@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -21,6 +22,10 @@ CATALOG_PATH = Path(os.environ.get("AETHER_SERVICE_CATALOG", str(ROOT / "service
 LITELLM_BASE_URL = os.environ.get("LITELLM_INTERNAL_URL", "http://litellm:4000").rstrip("/")
 VERIFY_TTL_SECONDS = 5 * 60
 _verify_cache: dict[str, tuple[float, bool]] = {}
+_MATCH_STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in",
+    "into", "is", "it", "of", "on", "or", "that", "the", "this", "to", "with",
+}
 
 
 def load_service_catalog(path: Path | None = None) -> dict[str, Any]:
@@ -82,6 +87,78 @@ def _offline_suggestion(snapshot: dict[str, Any], needs: list[str]) -> dict[str,
         "provider": meta.get("provider"),
         "backend": meta.get("backend"),
         "reason": meta.get("availability_reason") or "not available",
+    }
+
+
+def _words(value: Any) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+        if len(token) > 1 and token not in _MATCH_STOP_WORDS
+    }
+
+
+def _phrase_present(phrase: str, value: str) -> bool:
+    tokens = re.findall(r"[a-z0-9]+", phrase.lower())
+    if not tokens:
+        return False
+    pattern = r"\b" + r"\W+".join(re.escape(token) for token in tokens) + r"\b"
+    return re.search(pattern, value.lower()) is not None
+
+
+def classify_service(goal: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Choose a catalog service from task language without pinning models or providers."""
+    goal = str(goal or "").strip()
+    if not goal:
+        raise ValueError("goal is required for automatic service selection")
+    catalog = load_service_catalog()
+    goal_lower = goal.lower()
+    goal_words = _words(goal)
+    ranked: list[tuple[float, str, list[str]]] = []
+    for service_id, service in (catalog.get("services") or {}).items():
+        score = 0.0
+        matches: list[str] = []
+        label = str(service.get("label") or service_id)
+        identity_phrases = {service_id.replace("-", " "), label.lower()}
+        for phrase in identity_phrases:
+            if phrase and _phrase_present(phrase, goal_lower):
+                score += 14.0
+                matches.append(phrase)
+        for phrase_value in service.get("match") or []:
+            phrase = str(phrase_value).strip().lower()
+            if phrase and phrase not in matches and _phrase_present(phrase, goal_lower):
+                score += 8.0 + min(4, len(_words(phrase)))
+                matches.append(phrase)
+        label_overlap = goal_words & _words(label)
+        activity_overlap = goal_words & _words(" ".join(service.get("activities") or []))
+        context_overlap = goal_words & _words(
+            f"{service.get('summary', '')} {service.get('instructions', '')}"
+        )
+        score += 5.0 * len(label_overlap)
+        score += 2.0 * len(activity_overlap)
+        score += 0.5 * len(context_overlap)
+        ranked.append((score, service_id, sorted(set(matches) | label_overlap | activity_overlap)))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    default_id = str((catalog.get("defaults") or {}).get("default_service") or "")
+    if not ranked:
+        raise ValueError("service catalog is empty")
+    best = ranked[0]
+    if best[0] <= 0 and default_id in (catalog.get("services") or {}):
+        best = next(item for item in ranked if item[1] == default_id)
+    runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+    margin = max(0.0, best[0] - runner_up)
+    confidence = "high" if best[0] >= 18 and margin >= 6 else "medium" if best[0] >= 8 else "fallback"
+    return {
+        "service_id": best[1],
+        "label": (catalog["services"][best[1]] or {}).get("label") or best[1],
+        "confidence": confidence,
+        "score": round(best[0], 2),
+        "matched_terms": best[2],
+        "candidates": [
+            {"service_id": service_id, "score": round(score, 2)}
+            for score, service_id, _matches in ranked[:3]
+        ],
+        "service": resolve_service(best[1], snapshot),
     }
 
 
@@ -149,6 +226,7 @@ def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]
         "id": service_id,
         "label": service.get("label") or service_id,
         "summary": service.get("summary") or "",
+        "activities": list(service.get("activities") or []),
         "accent": service.get("accent") or "blue",
         "instructions": service.get("instructions") or "",
         "mode": service.get("mode") or defaults.get("mode") or "multi_agent",
@@ -247,18 +325,29 @@ def activate_service(
         if options.get("verify", True)
         else resolve_service(service_id, snapshot)
     )
-    picks = {agent["role"]: {"model": agent["model"]} for agent in resolved["agents"] if agent.get("available") and agent["role"] in {"mastermind", "supervisor", "worker"}}
+    runtime = _activate_resolved_service(resolved, options)
+    return {"ok": resolved.get("ready") or resolved.get("degraded"), "service": resolved, "runtime": runtime}
+
+
+def _activate_resolved_service(
+    resolved: dict[str, Any], options: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    options = options or {}
+    picks = {
+        agent["role"]: {"model": agent["model"]}
+        for agent in resolved["agents"]
+        if agent.get("available") and agent["role"] in {"mastermind", "supervisor", "worker"}
+    }
     apply_runtime_update({"clear_overrides": True})
-    runtime = apply_runtime_update(
+    return apply_runtime_update(
         {
             "mode": resolved["mode"],
             "token_saver": bool(options.get("token_saver", resolved["token_saver"])),
             "lean_mode": options.get("lean_mode") or resolved["lean_mode"],
-            "service": service_id,
+            "service": resolved["id"],
             "role_overrides": picks,
         }
     )
-    return {"ok": resolved.get("ready") or resolved.get("degraded"), "service": resolved, "runtime": runtime}
 
 
 def plan_service(
@@ -359,6 +448,7 @@ def execute_service(
         raise ValueError("goal exceeds 100000 characters")
     completion = completion or _chat_completion
     plan = plan_service(service_id, snapshot, event)
+    activation = _activate_resolved_service(plan["service"], event)
     calls = plan.get("litellm_calls") or []
     lead_call = next((call for call in calls if call.get("role") == "mastermind"), None)
     supervisor_call = next((call for call in calls if call.get("role") == "supervisor"), None)
@@ -453,4 +543,5 @@ def execute_service(
         "usage": usage,
         "lean_mode": plan.get("lean_mode"),
         "token_saver": plan.get("token_saver"),
+        "activation": activation,
     }

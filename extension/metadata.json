@@ -1,7 +1,7 @@
 {
   "name": "AetherStack",
   "provider": "piksliviksi",
-  "icon": "aetherstack.svg",
+  "icon": "aetherstack.png",
   "vm": {
     "composefile": "docker-compose.yaml",
     "exposes": {

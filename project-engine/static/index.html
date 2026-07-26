@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AetherStack · Engine</title>
+  <link rel="icon" type="image/png" href="/static/aetherstack-icon.png" />
   <style>
     :root {
       --bg: #070a0f;
@@ -76,12 +77,16 @@
       background: var(--panel);
     }
     .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
       color: var(--green);
       font-weight: 700;
       letter-spacing: 0.04em;
       white-space: nowrap;
     }
     .logo span { color: var(--dim); font-weight: 400; }
+    .logo img { width: 24px; height: 24px; border-radius: 6px; }
     .pulse {
       width: 7px; height: 7px; border-radius: 50%;
       background: var(--green);
@@ -282,7 +287,7 @@
   <div class="shell">
     <header>
       <div class="pulse" title="live"></div>
-      <div class="logo">AETHER<span>/engine</span></div>
+      <div class="logo"><img src="/static/aetherstack-icon.png" width="24" height="24" alt="">AETHER<span>/engine</span></div>
       <div class="tabs">
         <button class="tab on" data-view="dash" type="button">dash</button>
         <button class="tab" data-view="term" type="button">term</button>

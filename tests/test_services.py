@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -10,6 +12,8 @@ HUB = REPO / "aether-hub"
 sys.path.insert(0, str(HUB))
 
 import services  # noqa: E402
+import activity_words  # noqa: E402
+from agents import get_runtime  # noqa: E402
 
 
 EXPECTED_SERVICES = {
@@ -82,6 +86,22 @@ class DynamicServiceTests(unittest.TestCase):
                 self.assertNotIn("model", blueprint)
                 self.assertNotIn("provider", blueprint)
                 self.assertNotIn("maker", blueprint)
+            self.assertTrue(service.get("activities"))
+            self.assertTrue(service.get("match"))
+
+    def test_auto_selection_follows_catalog_task_language(self) -> None:
+        cases = {
+            "Research current primary sources and fact-check the evidence": "research",
+            "Plan milestones and dependencies for this delivery": "planning",
+            "Design an accessible UI flow and design system": "ui-design",
+            "Research and design the UI for a local service": "ui-design",
+            "Reproduce this crash, isolate the root cause, and fix the bug": "bugfixing",
+        }
+        for goal, expected in cases.items():
+            with self.subTest(goal=goal):
+                result = services.classify_service(goal, snapshot())
+                self.assertEqual(result["service_id"], expected)
+                self.assertIn(result["confidence"], {"high", "medium"})
 
     def test_resolution_uses_only_currently_available_models(self) -> None:
         resolved = services.resolve_service("coding", snapshot())
@@ -134,6 +154,25 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertEqual(result["answer"], f"response-{len(calls)}")
         self.assertGreaterEqual(len(calls), 5)
         self.assertEqual(result["usage"]["total_tokens"], len(calls) * 5)
+        self.assertEqual(result["activation"]["service"], "planning")
+        self.assertEqual(get_runtime()["service"], "planning")
+
+    def test_activity_word_database_is_locally_editable(self) -> None:
+        old_path = activity_words.DB_PATH
+        with tempfile.TemporaryDirectory() as td:
+            try:
+                activity_words.DB_PATH = Path(td) / "activity_words.json"
+                activity_words.DB_PATH.write_text(
+                    json.dumps({"schema": "test", "words": []}), encoding="utf-8"
+                )
+                item = activity_words.add_word(
+                    {"text": "Mõtteid mudimas...", "language": "et", "tone": "playful"}
+                )
+                self.assertEqual(activity_words.list_words()["words"][0]["text"], "Mõtteid mudimas...")
+                self.assertTrue(activity_words.delete_word(item["id"])["ok"])
+                self.assertEqual(activity_words.list_words()["words"], [])
+            finally:
+                activity_words.DB_PATH = old_path
 
 
 if __name__ == "__main__":

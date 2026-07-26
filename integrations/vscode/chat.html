@@ -21,6 +21,17 @@
     .agents { margin-bottom: 12px; }
     .agent-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
     .agent { border: 1px solid var(--vscode-panel-border); border-radius: 12px; padding: 3px 8px; }
+    .activities { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .activity { border: 1px solid var(--vscode-panel-border); border-radius: 10px; padding: 2px 7px; color: var(--vscode-descriptionForeground); }
+    details.graph { border-top: 1px solid var(--vscode-panel-border); margin-top: 10px; padding-top: 8px; }
+    details.graph summary { cursor: pointer; color: var(--vscode-textLink-foreground); }
+    .graph-flow { display: grid; justify-items: center; gap: 5px; padding: 10px 0 2px; }
+    .graph-row { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; width: 100%; }
+    .graph-node { min-width: 120px; max-width: 190px; padding: 6px; text-align: center; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editor-background); }
+    .graph-node code { display: block; margin-top: 2px; font-size: 11px; }
+    .graph-arrow { color: var(--vscode-textLink-foreground); }
+    #inference { min-height: 22px; margin: 8px 0; color: var(--vscode-descriptionForeground); }
+    #activeModels { color: var(--vscode-testing-iconPassed); font-weight: 600; }
     #messages { display: grid; gap: 10px; margin: 14px 0; }
     .message { white-space: pre-wrap; overflow-wrap: anywhere; }
     .message.user { border-left: 3px solid var(--vscode-button-background); }
@@ -38,17 +49,18 @@
 <main>
   <header>
     <div><h1>AetherStack Chat</h1><div class="muted">A capability-matched team runs inside VS Code. Open WebUI remains optional.</div></div>
-    <button id="refresh" class="secondary">Refresh services</button>
+    <div><button id="refresh" class="secondary">Refresh services</button> <button id="advanced" class="secondary">Advanced setup</button></div>
   </header>
   <section class="toolbar">
     <label>Service preset<select id="service"></select></label>
     <label>Lean delivery<select id="lean"><option value="off">Off</option><option value="balanced" selected>Balanced</option><option value="strict">Strict</option></select></label>
     <label style="display:flex;align-items:center;min-width:auto"><input id="tokenSaver" type="checkbox"> Prefer lower token cost</label>
   </section>
-  <section class="agents"><strong>Dynamic team</strong><div class="muted" id="serviceDescription"></div><div id="agents" class="agent-list"></div></section>
+  <section class="agents"><strong>Dynamic team</strong><div class="muted" id="serviceDescription"></div><div id="activities" class="activities"></div><div id="agents" class="agent-list"></div><details class="graph"><summary>Active preset node graph</summary><div id="serviceGraph" class="graph-flow"></div></details></section>
   <div id="messages"></div>
   <section class="composer">
     <textarea id="prompt" placeholder="Describe the outcome you want…"></textarea>
+    <div id="inference"><span id="activityText"></span> <span id="activeModels"></span></div>
     <div class="composer-actions"><button id="send">Run combined chat</button><span id="status" class="muted"></span></div>
   </section>
 </main>
@@ -56,17 +68,27 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   let services = [];
+  let activityWords = [];
+  let activeServiceId = '';
+  let activityTimer = null;
+  let showActiveModel = false;
   const text = (tag, value, className) => { const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
-  function selected() { return services.find((item) => item.id === $('service').value); }
+  function selected() { return services.find((item) => item.id === ($('service').value === 'auto' ? activeServiceId : $('service').value)); }
+  function graphNode(agent, label) { const node = text('div', '', 'graph-node'); node.append(text('strong', label || (agent && agent.label) || 'Stage')); if (agent) node.append(text('code', agent.model || 'unresolved')); return node; }
+  function renderGraph(service) { const agents = (service && service.agents) || []; const lead = agents.find((a) => a.role === 'mastermind'); const reviewer = agents.find((a) => a.role === 'supervisor'); const workers = agents.filter((a) => a.role === 'worker'); const flow = $('serviceGraph'); flow.replaceChildren(graphNode(lead, (lead && lead.label) || 'Lead'), text('div', '↓', 'graph-arrow')); const row = text('div', '', 'graph-row'); row.append(...(workers.length ? workers.map((agent) => graphNode(agent, agent.label)) : [graphNode(null, 'Workers resolve after task detection')])); flow.append(row, text('div', '↓', 'graph-arrow'), graphNode(reviewer, (reviewer && reviewer.label) || 'Review'), text('div', '↓', 'graph-arrow'), graphNode(lead, 'Synthesis')); }
   function renderTeam() {
     const service = selected();
     $('agents').replaceChildren();
-    $('serviceDescription').textContent = service ? service.summary || '' : 'No service presets are available.';
+    $('serviceDescription').textContent = service ? service.summary || '' : $('service').value === 'auto' ? 'Describe the current coding stage; AetherStack selects and activates the matching live team.' : 'No service presets are available.';
+    $('activities').replaceChildren(...((service && service.activities) || []).map((value) => text('span', value, 'activity')));
     for (const agent of (service && service.agents) || []) {
       const gaps = (agent.missing_capabilities || []).length ? ` · missing ${agent.missing_capabilities.join(', ')}` : '';
       $('agents').append(text('span', `${agent.role}: ${agent.model || 'unresolved'}${agent.backend ? ` (${agent.backend})` : ''}${gaps}`, 'agent'));
     }
+    renderGraph(service);
   }
+  function rotateActivity() { const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text); $('activityText').textContent = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : 'Combobulating the agent swarm...'; }
+  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
   function addMessage(role, value, detail) {
     const box = text('article', '', `message ${role}`);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'), text('div', value));
@@ -76,6 +98,7 @@
   }
   $('service').addEventListener('change', renderTeam);
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
+  $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
   $('send').addEventListener('click', () => {
     const prompt = $('prompt').value.trim();
     if (!prompt || !$('service').value) return;
@@ -89,20 +112,33 @@
     if (message.type === 'state') {
       const current = $('service').value;
       services = Array.isArray(message.services) ? message.services : [];
-      $('service').replaceChildren(...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
-      if (services.some((service) => service.id === current)) $('service').value = current;
+      activityWords = Array.isArray(message.activityWords) ? message.activityWords : [];
+      showActiveModel = Boolean(message.showActiveModel);
+      const auto = text('option', 'Auto — detect from current task'); auto.value = 'auto';
+      $('service').replaceChildren(auto, ...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
+      $('service').value = current === 'auto' || services.some((service) => service.id === current) ? current : 'auto';
       renderTeam();
       $('status').textContent = message.notice || '';
       $('status').className = message.error ? 'error' : 'muted';
     } else if (message.type === 'busy') {
       $('send').disabled = Boolean(message.value); $('refresh').disabled = Boolean(message.value);
       $('status').textContent = message.value ? 'The agent team is working…' : '';
+      setBusy(Boolean(message.value));
+    } else if (message.type === 'inference') {
+      const models = showActiveModel ? (((message.inference || {}).active || []).map((item) => item.model).filter(Boolean)) : [];
+      $('activeModels').textContent = models.length ? `Active: ${models.join(', ')}` : '';
+    } else if (message.type === 'inferenceSetting') {
+      showActiveModel = Boolean(message.enabled);
+      if (!showActiveModel) $('activeModels').textContent = '';
     } else if (message.type === 'result') {
       const result = message.result || {};
+      activeServiceId = result.service_id || (result.selection && result.selection.service_id) || activeServiceId;
+      renderTeam();
       const usage = result.usage || result.token_usage || {};
       const tokens = usage.total_tokens == null ? '' : ` · ${usage.total_tokens} tokens`;
       const team = (result.agents || []).map((agent) => agent.model).filter(Boolean).join(', ');
-      addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${team || 'dynamic team'}${tokens}`);
+      const selection = result.selection ? `Auto-selected ${result.selection.label} · ` : '';
+      addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${selection}${team || 'dynamic team'}${tokens}`);
     } else if (message.type === 'error') {
       $('status').textContent = message.message || 'Request failed'; $('status').className = 'error';
     }

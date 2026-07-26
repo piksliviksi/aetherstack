@@ -710,6 +710,7 @@ class HubChat {
     this.panel = null;
     this.services = [];
     this.history = [];
+    this.activityWords = [];
   }
 
   async hubRequest(pathname, options = {}) {
@@ -726,16 +727,37 @@ class HubChat {
     const options = force ? { method: "POST", body: {} } : {};
     const body = await this.hubRequest(pathname, options);
     this.services = Array.isArray(body.services) ? body.services : [];
+    try {
+      const activity = await this.hubRequest("/api/activity-words");
+      this.activityWords = Array.isArray(activity.words) ? activity.words.filter((item) => item.enabled !== false) : [];
+    } catch {
+      this.activityWords = [];
+    }
     await this.postState(this.services.length ? "" : "No capability-matched services are currently available.");
   }
 
   async run(message) {
     const serviceId = String(message.serviceId || "");
-    if (!this.services.some((service) => service.id === serviceId)) throw new Error("Select a valid service preset.");
+    if (serviceId !== "auto" && !this.services.some((service) => service.id === serviceId)) throw new Error("Select a valid service preset.");
     const prompt = String(message.prompt || "").trim();
     if (!prompt) throw new Error("Enter a goal first.");
+    await this.panel.webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
     await this.panel.webview.postMessage({ type: "busy", value: true });
+    let inferenceTimer = null;
+    const publishInference = async () => {
+      if (!cfg().showActiveModel || !this.panel) return;
+      try {
+        const inference = await fetchInferenceStatus();
+        await this.panel.webview.postMessage({ type: "inference", inference });
+      } catch {
+        /* The normal service result will still report the models used. */
+      }
+    };
     try {
+      if (cfg().showActiveModel) {
+        inferenceTimer = setInterval(publishInference, 1200);
+        await publishInference();
+      }
       const result = await this.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
         method: "POST",
         body: {
@@ -748,13 +770,22 @@ class HubChat {
       this.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
       await this.panel.webview.postMessage({ type: "result", result });
     } finally {
+      if (inferenceTimer) clearInterval(inferenceTimer);
+      if (this.panel) await this.panel.webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
       await this.panel.webview.postMessage({ type: "busy", value: false });
     }
   }
 
   async postState(notice = "", error = false) {
     if (!this.panel) return;
-    await this.panel.webview.postMessage({ type: "state", services: this.services, notice, error });
+    await this.panel.webview.postMessage({
+      type: "state",
+      services: this.services,
+      activityWords: this.activityWords,
+      showActiveModel: cfg().showActiveModel,
+      notice,
+      error,
+    });
   }
 
   show() {
@@ -779,6 +810,7 @@ class HubChat {
         if (message.type === "ready") await this.loadServices();
         else if (message.type === "refresh") await this.loadServices(true);
         else if (message.type === "run") await this.run(message);
+        else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
       } catch (error) {
         if (this.panel) await this.panel.webview.postMessage({ type: "error", message: error.message || String(error) });
       }

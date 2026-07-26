@@ -21,8 +21,8 @@ Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
 1. Open **AetherStack → Control & Services** and press **Start all services**.
 2. The extension checks `:3000`, `:4000`, and `:8766`, verifies capability-matrix candidates through LiteLLM provider health, then wires only responding models into a new Continue config.
-3. Open **AetherStack Chat** in the sidebar. Choose a task service; its lead, workers, and reviewer are assigned from the live capability matrix.
-4. Use the Simple Hub (`:8766`) for the same presets, setup, and staged updates; use Advanced or the node graph when you need manual orchestration. Open WebUI (`:3000`) only when you want that separate client.
+3. Open **AetherStack Chat** in the sidebar. Leave the service on **Auto** and describe the current stage: research, planning, UI/service design, frontend/backend, coding, testing, bug fixing, security review, polishing, or documentation. The matching tree activates automatically and its lead, workers, and reviewer are assigned from the live capability matrix.
+4. Expand **Active preset node graph** beneath the team when you want to inspect the selected flow. Use the separate **Advanced setup** button for manual orchestration and for editing the local multilingual inference-activity wording database. Open WebUI (`:3000`) only when you want that separate client.
 5. Scan project AI history when you want repo context recovery.
 
 Open a project folder, scan prior AI chat artifacts, and continue building through the gateway — not by juggling separate vendor apps.
@@ -74,7 +74,7 @@ VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http:/
 | `aetherstack.defaultModel` | `local-default` |
 | `aetherstack.stackPath` | Auto-detected; choose the folder containing `docker-compose.yml` if needed |
 | `aetherstack.autoWireModels` | `true` |
-| `aetherstack.showActiveModel` | `false` (opt in from the Control Center) |
+| `aetherstack.showActiveModel` | `false` (opt in from the Control Center; shows live model aliases in AetherStack Chat, the sidebar, and status bar) |
 
 Provider API keys are read by Docker Compose from the AetherStack installation root `.env`. The extension reuses its existing `LITELLM_MASTER_KEY` through VS Code SecretStorage and Continue's supported global `~/.continue/.env` secret store; generated model config refers to `${{ secrets.AETHERSTACK_API_KEY }}`. It never displays or regenerates provider keys and intentionally does not scan unrelated project `.env` files.
 

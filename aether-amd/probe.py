@@ -174,7 +174,7 @@ def main() -> int:
     rep = build_report()
     print(json.dumps(rep, indent=2))
     print(file=sys.stderr)
-    print("Aether AMD adapter (userspace — not a kernel driver)", file=sys.stderr)
+    print("Aether AMD adapter (userspace - not a kernel driver)", file=sys.stderr)
     if rep.get("engines"):
         for e in rep["engines"]:
             print(
@@ -186,7 +186,7 @@ def main() -> int:
     print(f"  Ollama ROCm runners: {rep['ollama'].get('rocm_runners')}", file=sys.stderr)
     print(f"  compute_ready: {rep.get('compute_ready')}", file=sys.stderr)
     for a in rep.get("actions") or []:
-        print(f"  → {a}", file=sys.stderr)
+        print(f"  -> {a}", file=sys.stderr)
     return 0 if rep.get("engines") else 1
 
 

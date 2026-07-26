@@ -1,7 +1,17 @@
 const assert = require("node:assert/strict");
 const Module = require("module");
+const fs = require("fs");
 const path = require("path");
 const test = require("node:test");
+
+test("chat exposes auto service selection, active graph, and model activity state", () => {
+  const html = fs.readFileSync(path.resolve(__dirname, "..", "chat.html"), "utf8");
+  assert.match(html, /Auto — detect from current task/);
+  assert.match(html, /Active preset node graph/);
+  assert.match(html, /activeModels/);
+  assert.match(html, /activityWords/);
+  assert.match(html, /openAdvanced/);
+});
 
 test("extension activates and registers lifecycle/control commands", async () => {
   const registered = new Map();

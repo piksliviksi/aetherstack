@@ -1,0 +1,16 @@
+{
+  "schema": "aetherstack.activity-words.v1",
+  "words": [
+    {"id": "en-combobulating", "text": "Combobulating the agent swarm...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "en-fishermongering", "text": "Fishermongering for useful tokens...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "en-damn-tokens", "text": "Wrangling the damn tokens...", "language": "en", "tone": "mild-vulgar", "enabled": true},
+    {"id": "en-gremlins", "text": "Negotiating with inference gremlins...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "et-thoughts", "text": "Mõtteid mudimas...", "language": "et", "tone": "playful", "enabled": true},
+    {"id": "et-code", "text": "Koodi kammimas ja vigu taga ajamas...", "language": "et", "tone": "playful", "enabled": true},
+    {"id": "et-damn", "text": "Kuradi hästi arvutamas...", "language": "et", "tone": "mild-vulgar", "enabled": true},
+    {"id": "uk-magic", "text": "Чаклуємо над токенами...", "language": "uk", "tone": "playful", "enabled": true},
+    {"id": "uk-thoughts", "text": "Збираємо думки докупи...", "language": "uk", "tone": "playful", "enabled": true},
+    {"id": "uk-hot", "text": "Мізки киплять, відповідь готується...", "language": "uk", "tone": "playful", "enabled": true},
+    {"id": "uk-bliaha", "text": "Бляха, рахуємо далі...", "language": "uk", "tone": "mild-vulgar", "enabled": true}
+  ]
+}

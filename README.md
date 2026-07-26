@@ -1,6 +1,6 @@
 # AetherStack
 
-![AetherStack](./aetherstack.jpg)
+<img src="./aetherstack-icon.png" alt="AetherStack" width="128" height="128">
 
 **One setup. One chat window. Many models underneath.**
 
@@ -151,13 +151,24 @@ currently available, verifies the selected aliases through LiteLLM, and adapts
 the team when a provider is offline.
 
 The same combined chat opens as an **AetherStack Chat** editor tab in VS Code.
-Each run uses a lead, parallel workers, a reviewer, and final synthesis. Lean
+Its default **Auto** mode classifies the current coding stage from the task and
+activates the matching service tree; the catalog, activities, and agent lineup
+remain data-driven and every model is resolved from live capabilities. Expand
+the collapsed active-preset graph below the lineup, or use the separate
+Advanced setup button for the full editor. Each run uses a lead, parallel
+workers, a reviewer, and final synthesis. Lean
 Delivery and the token saver can reduce unnecessary context and output without
 removing validation, security controls, accessibility, tests, or observability.
 The lean policy is an independent implementation inspired by
 [Ponytail](https://github.com/DietrichGebert/ponytail); no Ponytail source code
 is copied. Ponytail is MIT-licensed, so a future direct code reuse must retain
 its copyright and permission notice.
+
+When active-model display is enabled, VS Code Chat shows the aliases currently
+inferring alongside rotating English, Estonian, and Ukrainian activity text.
+The tracked defaults live in `aether-hub/activity_words.json`; the running
+container seeds a persistent `.aetherstack/activity_words.json`, which can be
+added to or deleted from Advanced Hub.
 
 The Simple Hub also includes **Update AetherStack**. It checks the official
 repository and stages a checksummed archive under `.aetherstack/updates`; it

@@ -5,11 +5,14 @@ defaults:
   mode: multi_agent
   lean_mode: balanced
   token_saver: false
+  default_service: coding
 
 services:
   research:
     label: Research
     summary: Find evidence, challenge it, and synthesize a sourced conclusion.
+    activities: [discover sources, compare evidence, fact-check claims, synthesize findings]
+    match: [research, investigate, evidence, sources, literature review, fact check]
     accent: violet
     instructions: Separate evidence from inference, compare sources, surface uncertainty, and preserve citations.
     lead: {label: Research lead, needs: [reason, long_context, tools, chat], prefer: cloud, max_cost: high}
@@ -22,6 +25,8 @@ services:
   planning:
     label: Planning
     summary: Turn an objective into a sequenced, risk-aware execution plan.
+    activities: [clarify scope, map dependencies, sequence milestones, identify risks]
+    match: [plan, planning, roadmap, milestones, dependencies, implementation plan]
     accent: blue
     instructions: Produce concrete milestones, dependencies, decision points, owners, risks, and verification gates.
     lead: {label: Planning lead, needs: [reason, tools, chat], prefer: auto, max_cost: high}
@@ -33,6 +38,8 @@ services:
   service-design:
     label: Service design
     summary: Design journeys, operations, touchpoints, and measurable service outcomes.
+    activities: [map journeys, design touchpoints, define operations, plan recovery]
+    match: [service design, user journey, touchpoints, backstage, service blueprint]
     accent: cyan
     instructions: Cover user journey, frontstage, backstage, failure recovery, accessibility, and service metrics.
     lead: {label: Service architect, needs: [reason, long_context, chat], prefer: auto, max_cost: high}
@@ -44,6 +51,8 @@ services:
   ui-design:
     label: UI design
     summary: Create clear, accessible interaction and visual-system decisions.
+    activities: [research interactions, design flows, define visual system, review accessibility]
+    match: [ui design, design ui, design the ui, designing ui, user interface, interface design, interaction design, wireframe, visual design, design system, ux]
     accent: pink
     instructions: Prefer familiar interaction patterns; cover responsive states, accessibility, empty states, errors, and design tokens.
     lead: {label: UI design lead, needs: [vision, reason, chat], prefer: auto, max_cost: high}
@@ -55,6 +64,8 @@ services:
   frontend:
     label: Frontend
     summary: Build responsive, accessible interfaces integrated with real APIs.
+    activities: [build components, integrate APIs, implement responsive states, test accessibility]
+    match: [frontend, front end, react, vue, svelte, css, responsive interface, web component]
     accent: teal
     token_saver: true
     instructions: Reuse the project stack, preserve accessibility and responsive behavior, and verify real backend states.
@@ -68,6 +79,8 @@ services:
   backend:
     label: Backend
     summary: Build maintainable APIs, data flows, jobs, and operational controls.
+    activities: [define contracts, implement APIs, build data flows, verify operations]
+    match: [backend, back end, api, database, data flow, migration, server, job queue]
     accent: green
     token_saver: true
     instructions: Define contracts first; cover validation, authorization, concurrency, observability, migrations, and failure recovery.
@@ -81,6 +94,8 @@ services:
   coding:
     label: Coding
     summary: Implement a focused feature or refactor with tests and review.
+    activities: [inspect code, implement change, add tests, review integration]
+    match: [code, coding, implement, refactor, feature, function, class, module]
     accent: indigo
     token_saver: true
     instructions: Inspect existing code first, make the smallest coherent change, preserve conventions, and verify behavior.
@@ -93,6 +108,8 @@ services:
   testing:
     label: Testing
     summary: Design and run efficient unit, integration, edge, and regression coverage.
+    activities: [define cases, run unit tests, exercise integrations, check regressions]
+    match: [test, testing, coverage, unit test, integration test, regression, edge case]
     accent: lime
     token_saver: true
     instructions: Test observable behavior and boundaries; reproduce failures before changing code; report untested assumptions.
@@ -106,6 +123,8 @@ services:
   bugfixing:
     label: Bug fixing
     summary: Reproduce, isolate, repair, and regression-test defects.
+    activities: [reproduce failure, isolate root cause, implement repair, add regression test]
+    match: [bug, bugfix, fix error, crash, broken, defect, root cause, reproduce failure]
     accent: orange
     token_saver: true
     instructions: Establish a reproduction and root cause before editing; avoid symptom patches; add a regression test.
@@ -119,6 +138,8 @@ services:
   whitehat-pentesting:
     label: White-hat pentesting
     summary: Authorized defensive review, boundary testing, and remediation planning.
+    activities: [confirm scope, inspect boundaries, test defensively, plan remediation]
+    match: [pentest, penetration test, security audit, vulnerability, white hat, authorization bypass]
     accent: red
     instructions: Work only within explicit authorization; use non-destructive checks; protect secrets; provide reproducible remediation and regression tests.
     lead: {label: Security lead, needs: [reason, code, tools], prefer: auto, max_cost: high}
@@ -131,6 +152,8 @@ services:
   polishing:
     label: Polishing
     summary: Simplify, improve consistency, and finish production details.
+    activities: [remove friction, align consistency, refine details, perform final review]
+    match: [polish, cleanup, simplify, consistency, finishing, production ready, refine]
     accent: amber
     token_saver: true
     lean_mode: strict
@@ -144,6 +167,8 @@ services:
   technical-writing:
     label: Technical writing
     summary: Produce accurate, structured documentation for the intended reader.
+    activities: [inspect implementation, structure explanation, draft examples, verify accuracy]
+    match: [documentation, technical writing, readme, tutorial, guide, explain, release notes]
     accent: slate
     token_saver: true
     instructions: Ground claims in the implementation, define prerequisites, include tested examples, and separate facts from assumptions.

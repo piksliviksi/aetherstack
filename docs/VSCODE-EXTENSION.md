@@ -21,7 +21,7 @@
 
 Chat path after wiring:
 
-1. AetherStack Chat → capability-resolved service team in VS Code
+1. AetherStack Chat → automatic stage selection or an explicit service preset, then a capability-resolved team in VS Code
 2. Continue (or equivalent) → one base URL + key + model id
 3. Simple Hub `:8766` → the same presets, setup, and update staging
 4. Open WebUI `:3000` → optional separate browser client
@@ -47,7 +47,7 @@ code --install-extension AetherStack.aetherstack
 ```bash
 code --install-extension AetherStack.aetherstack
 # or local VSIX:
-code --install-extension packages/aetherstack-0.3.0.vsix
+code --install-extension packages/aetherstack-0.3.1.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -188,11 +188,13 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 | `aetherstack.defaultModel` | `local-default` | Alias from LiteLLM config |
 | `aetherstack.stackPath` | empty / auto-detect | Folder containing the AetherStack Compose installation |
 | `aetherstack.autoWireModels` | `true` | Create a missing Continue config from live available matrix models after startup |
-| `aetherstack.showActiveModel` | `false` | Show active model alias in the AetherStack tree and status bar |
+| `aetherstack.showActiveModel` | `false` | Show live active model aliases in AetherStack Chat, the tree, and status bar |
 
 ### Active-model display
 
-Enable **Show the currently running model** in the Control Center. LiteLLM then exposes the model alias currently handling a request through Hub `/api/inference/status`. Telemetry contains only call id, model alias, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
+Enable **Show the currently running model** in the Control Center. LiteLLM then exposes the model alias currently handling a request through Hub `/api/inference/status`, and Chat shows that alias beside its rotating activity line. Telemetry contains only call id, model alias, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
+
+Chat defaults to **Auto — detect from current task**. Each message is matched against the editable service catalog, the selected service is activated, and its lead/workers/reviewer are resolved from currently available models. Expand **Active preset node graph** beneath the agent lineup to inspect the current flow. The full editor and the English/Estonian/Ukrainian activity-word editor remain under **Advanced setup** in Hub; runtime edits persist in `.aetherstack/activity_words.json`.
 
 **Write .vscode Settings** stores base URL / chat UI / model in the workspace. It never writes an API key; legacy plaintext settings are migrated to SecretStorage.
 
