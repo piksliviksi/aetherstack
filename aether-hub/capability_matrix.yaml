@@ -55,7 +55,7 @@ models:
     tier: local
     provider: ollama
     backend: ollama/tinyllama
-    capabilities: [chat, code, tools, private, cheap, fast]
+    capabilities: [chat, code, private, cheap, fast]
     context: 2048
     cost: 0
     latency: very_low
@@ -65,7 +65,7 @@ models:
     tier: local
     provider: ollama
     backend: ollama/tinyllama
-    capabilities: [chat, code, tools, private, cheap]
+    capabilities: [chat, code, private, cheap]
     context: 2048
     cost: 0
     latency: very_low

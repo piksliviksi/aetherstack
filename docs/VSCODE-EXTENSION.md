@@ -47,7 +47,7 @@ code --install-extension AetherStack.aetherstack
 ```bash
 code --install-extension AetherStack.aetherstack
 # or local VSIX:
-code --install-extension packages/aetherstack-0.3.4.vsix
+code --install-extension packages/aetherstack-0.3.5.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -87,6 +87,13 @@ Open WebUI does not require a second local login. A loopback-only proxy reuses
 the existing sole admin account, strips browser-supplied identity headers, and
 keeps the authenticated backend off host ports. With multiple existing admins,
 set `AETHER_LOCAL_WEBUI_EMAIL` in the same root `.env`.
+
+Open WebUI connects to `http://aether-hub:8766/v1` inside Compose. Its Base
+Model list therefore contains only models currently available in AetherStack's
+capability matrix, including authenticated Codex, Claude, and Grok host CLIs
+when the VS Code extension bridge is active. Direct raw Ollama discovery is
+disabled; AetherStack aliases such as `local-default` remain available and
+unsupported tool fields are removed for models such as TinyLlama.
 
 ### 2. Open a **folder** in VS Code
 

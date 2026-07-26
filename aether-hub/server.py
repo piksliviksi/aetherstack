@@ -113,6 +113,14 @@ from backup import (  # noqa: E402
     run_backup,
     set_auto_config,
 )
+from openai_gateway import (  # noqa: E402
+    GatewayError,
+    authorized as gateway_authorized,
+    chat_completion as gateway_chat_completion,
+    error_body as gateway_error_body,
+    model_list as gateway_model_list,
+    stream_bytes as gateway_stream_bytes,
+)
 
 try:
     import redis as redis_lib
@@ -440,6 +448,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, icon.read_bytes(), "image/png")
             else:
                 self._send(404, {"error": "aetherstack-icon.png missing"})
+            return
+        if path == "/v1/models":
+            if not gateway_authorized(self.headers.get("Authorization")):
+                self._send(401, {"error": {"message": "invalid AetherStack API key", "type": "authentication_error"}})
+                return
+            self._send(200, gateway_model_list(get_snapshot()))
             return
         if path == "/api/health":
             d = get_discover()
@@ -962,6 +976,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, {"error": str(e)})
             return
+
+        if path == "/v1/chat/completions":
+            if not gateway_authorized(self.headers.get("Authorization")):
+                self._send(401, {"error": {"message": "invalid AetherStack API key", "type": "authentication_error"}})
+                return
+            try:
+                completion, wants_stream = gateway_chat_completion(body, get_snapshot())
+                if wants_stream:
+                    self._send(200, gateway_stream_bytes(completion), "text/event-stream; charset=utf-8")
+                else:
+                    self._send(200, completion)
+            except GatewayError as exc:
+                self._send(exc.status, gateway_error_body(exc))
+            except Exception as exc:
+                self._send(502, gateway_error_body(GatewayError(str(exc), 502, "backend_error")))
+            return
         if path == "/api/services/classify":
             try:
                 self._send(200, classify_service(body.get("goal") or body.get("prompt"), get_snapshot()))
@@ -1428,20 +1458,27 @@ def _index_html() -> bytes:
 <title>Aether Hub — discover · matrix · memory</title>
 <link rel="icon" type="image/png" href="/aetherstack-icon.png"/>
 <style>
- body{{font-family:ui-monospace,Consolas,monospace;background:#0b1020;color:#e8eefc;margin:1rem;font-size:13px}}
- h1{{font-size:1.1rem;color:#7dd3a7}} h2{{font-size:.85rem;color:#9db0d0;margin:1rem 0 .4rem}}
- a{{color:#7aa2f7}}
+ :root{{color-scheme:dark;--bg:#090a0b;--panel:#111315;--raised:#17191b;--line:#303336;--line-strong:#4b4f52;--text:#ecebe7;--muted:#9b9b95;--accent:#d6b36a;--good:#76b98a;--warn:#d6a85f;--bad:#d87575}}
+ *{{box-sizing:border-box}}
+ body{{font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--text);margin:3.7rem max(1rem,3vw) 2rem;font-size:13px;line-height:1.45}}
+ h1{{font-size:1.08rem;color:var(--text);letter-spacing:.01em}} h2{{font-size:.76rem;color:var(--muted);margin:1rem 0 .35rem;text-transform:uppercase;letter-spacing:.08em}}
+ a{{color:var(--accent)}} code,pre{{font-family:ui-monospace,Consolas,monospace}}
  table{{border-collapse:collapse;width:100%;margin-top:.5rem}}
- th,td{{border:1px solid #243056;padding:.25rem .4rem;text-align:center}}
- th{{color:#9db0d0;font-weight:600}} td:first-child{{text-align:left}}
- tr.off{{opacity:.45}} .y{{color:#4ade80}} .n{{color:#334155}}
- .card{{background:#141b2f;border:1px solid #243056;border-radius:8px;padding:.75rem;margin:.5rem 0}}
- code{{color:#5ccfe6}} .muted{{color:#9db0d0;font-size:12px}}
+ th,td{{border:1px solid var(--line);padding:.28rem .4rem;text-align:center}}
+ th{{color:var(--muted);font-weight:600;background:#0d0f10}} td:first-child{{text-align:left}} tbody tr:nth-child(even){{background:#0d0f10}}
+ tr.off{{opacity:.45}} .y{{color:var(--good)}} .n{{color:#55585a}}
+ .card{{background:var(--panel);border:1px solid var(--line);border-radius:1px;padding:.7rem;margin:.45rem 0}}
+ code{{color:#d7c48f}} .muted{{color:var(--muted);font-size:12px}}
  ul.rec{{margin:.3rem 0;padding-left:1.1rem}}
- .sev-high{{color:#f87171}} .sev-medium{{color:#fbbf24}} .sev-ok{{color:#4ade80}} .sev-info{{color:#9db0d0}}
- .ep{{margin:.2rem 0}} .ep.up{{color:#4ade80}} .ep.dn{{color:#64748b}}
- .brand{{display:flex;align-items:center;gap:.55rem}} .brand img{{width:32px;height:32px;border-radius:8px}}
+ .sev-high{{color:var(--bad)}} .sev-medium{{color:var(--warn)}} .sev-ok{{color:var(--good)}} .sev-info{{color:var(--muted)}}
+ .ep{{margin:.2rem 0}} .ep.up{{color:var(--good)}} .ep.dn{{color:#666965}}
+ .brand{{display:flex;align-items:center;gap:.55rem}} .brand img{{width:30px;height:30px;border-radius:1px}}
+ .top-nav{{position:fixed;z-index:20;top:0;left:0;right:0;display:flex;justify-content:flex-end;gap:0;padding:.65rem max(1rem,3vw);background:#0d0f10;border-bottom:1px solid var(--line)}}
+ .top-nav a{{padding:.4rem .68rem;border:1px solid var(--line);border-right:0;color:var(--muted);text-decoration:none}} .top-nav a:last-child{{border-right:1px solid var(--line)}} .top-nav a:hover{{color:var(--text);background:var(--raised)}} .top-nav a.active{{background:var(--accent);color:#17140d;font-weight:800}}
+ input,button,select,textarea{{font:inherit;color:var(--text);background:#0b0c0d!important;border:1px solid var(--line)!important;border-radius:1px!important;padding:.32rem .5rem!important}} button{{background:var(--raised)!important;cursor:pointer}} button:hover{{border-color:var(--line-strong)!important;background:#202326!important}}
+ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{{outline:2px solid var(--accent);outline-offset:2px}}
 </style></head><body>
+<nav class="top-nav" aria-label="AetherStack views"><a href="/">Simple</a><a class="active" aria-current="page" href="/advanced">Advanced</a><a href="http://127.0.0.1:3000/">WebUI</a></nav>
 <h1 class="brand"><img src="/aetherstack-icon.png" width="32" height="32" alt=""/>Aether Hub · scan first, then route</h1>
 <div class="card">
  <b>System scan</b> —

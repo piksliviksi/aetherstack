@@ -19,7 +19,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Capability | Fact |
 |------------|------|
 | One surface | AetherStack Chat in VS Code or the simple Hub for normal work; Open WebUI remains optional |
-| One façade | One base URL + one gateway master key; many models underneath |
+| One façade | One base URL + one gateway master key; many models underneath, including Open WebUI's dynamic Base Model list |
 | **Multi-key per provider** | **Subscription/personal + enterprise API keys simultaneously** for every cloud maker (Anthropic, OpenAI, xAI, Google, Mistral). Aliases: `*-personal` / `*-enterprise` — no key swap restarts. [docs/MULTI-KEYS.md](./docs/MULTI-KEYS.md) |
 | Orchestration | Combos, pipelines, node canvas by role / tier / cost |
 | Spend control | Token saver, tier caps, `/done` → `/clear` |
@@ -165,6 +165,17 @@ The lean policy is an independent implementation inspired by
 [Ponytail](https://github.com/DietrichGebert/ponytail); no Ponytail source code
 is copied. Ponytail is MIT-licensed, so a future direct code reuse must retain
 its copyright and permission notice.
+
+Every built-in service also loads an editable behavior profile from
+`aether-hub/profiles/services/<service-id>.md`. The same profile appears on its
+generated agent nodes and can be refined in the graph Inspector without pinning
+the service to a model provider.
+
+Open WebUI is connected through AetherHub rather than directly to Ollama. Its
+Base Model selector therefore tracks only live capability-resolved aliases and
+authenticated host CLIs. Models without tool-call support, including the
+default TinyLlama backend, are marked correctly and receive no unsupported tool
+payload.
 
 When active-model display is enabled, VS Code Chat shows the aliases currently
 inferring alongside rotating English, Estonian, and Ukrainian activity text.

@@ -28,9 +28,12 @@ services:
       - "8080"
     environment:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      # Also expose LiteLLM multi-model gateway as OpenAI-compatible provider
-      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - ENABLE_OLLAMA_API=false
+      # AetherHub filters this to live capability-resolved aliases and bridges authenticated host CLIs.
+      - OPENAI_API_BASE_URL=http://aether-hub:8766/v1
       - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - AETHER_OPENAI_BASE_URL=http://aether-hub:8766/v1
+      - MODELS_CACHE_TTL=5
       - WEBUI_AUTH=true
       - WEBUI_AUTH_TRUSTED_EMAIL_HEADER=X-AetherStack-Email
       - WEBUI_AUTH_TRUSTED_NAME_HEADER=X-AetherStack-Name
@@ -47,10 +50,14 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - open_webui_data:/app/backend/data
+      - ./open-webui-config/seed.py:/aetherstack/seed_openwebui.py:ro
     # Restrict the SQLite DB, WAL, uploads, and model caches to the container user.
-    command: ["bash", "-lc", "umask 077; chmod -R go-rwx /app/backend/data 2>/dev/null || true; exec bash start.sh"]
+    command: ["bash", "-lc", "umask 077; chmod -R go-rwx /app/backend/data 2>/dev/null || true; python /aetherstack/seed_openwebui.py; exec bash start.sh"]
     depends_on:
-      - litellm
+      aether-hub:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
     restart: unless-stopped
 
   # Passwordless local session for the browser UI. The authenticated Open WebUI
@@ -100,7 +107,7 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - AETHER_HUB_HOST=0.0.0.0
       - AETHER_HUB_PORT=8766
-      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.2}
+      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.5}
       - AETHERSTACK_REVISION=${AETHERSTACK_REVISION:-}
       - AETHER_UPDATE_DIR=/host-aetherstack/updates
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
@@ -146,6 +153,7 @@ services:
       - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
       - ./aether-hub/agent_modes.yaml:/app/agent_modes.yaml:ro
       - ./aether-hub/bootstrap.yaml:/app/bootstrap.yaml:ro
+      - ./aether-hub/profiles:/app/profiles:ro
       - ./aether-hub/static:/app/static:ro
       - ./combos:/combos:ro
       - ./pipelines:/pipelines
