@@ -71,6 +71,7 @@ try {
   await send("Page.enable");
   await ready();
   await waitFor(() => evaluate("Boolean(document.getElementById('advancedGraph') && state.selected)"));
+  assert.equal(await evaluate("document.getElementById('runtime').textContent.includes('Host CLI bridge')"), true, "Host CLI bridge state is hidden");
   await evaluate("localStorage.clear(); advancedPanel.open=true; advancedPanel.dispatchEvent(new Event('toggle')); true");
   assert.equal(await evaluate("localStorage.getItem(HUB_GRAPH_OPEN_KEY)"), "1");
 
@@ -84,12 +85,16 @@ try {
       agents: document.querySelectorAll('#inspectorAgent option').length,
       roles: document.querySelectorAll('[data-k="role"] option').length,
       markdown: Boolean(document.getElementById('agentMdFile') && document.querySelector('[data-k="instructions_md"]')),
+      deleteInLibrary: Boolean(document.querySelector('#palette #btnDel')),
+      deleteInToolbar: Boolean(document.querySelector('#toolbar #btnDel')),
     };
   })()`);
   assert.ok(inspector.models > 1, "model dropdown was not populated");
   assert.ok(inspector.agents > 1, "agent dropdown was not populated");
   assert.ok(inspector.roles > 0, "role dropdown was not populated");
   assert.equal(inspector.markdown, true, "agent Markdown controls are missing");
+  assert.equal(inspector.deleteInLibrary, true, "delete button is not in the Node library");
+  assert.equal(inspector.deleteInToolbar, false, "delete button is still in the toolbar");
 
   const layout = await evaluate(`(() => {
     const node = graph.nodes[0];

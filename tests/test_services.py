@@ -117,6 +117,12 @@ class DynamicServiceTests(unittest.TestCase):
             self.assertTrue(service.get("activities"))
             self.assertTrue(service.get("match"))
 
+    def test_service_catalog_reports_host_cli_bridge_state(self) -> None:
+        snap = snapshot()
+        snap["host_cli"] = {"ok": False, "models": [], "reason": "bridge token not configured"}
+        catalog = services.list_services(snap)
+        self.assertEqual(catalog["host_cli"]["reason"], "bridge token not configured")
+
     def test_auto_selection_follows_catalog_task_language(self) -> None:
         cases = {
             "Research current primary sources and fact-check the evidence": "research",

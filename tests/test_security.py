@@ -167,6 +167,10 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn('canvasWrap.addEventListener("mousedown"', html)
         self.assertIn('id="btnCenter"', html)
         self.assertIn('id="agentMdFile"', html)
+        self.assertIn("Node library", html)
+        self.assertRegex(html, r'id="palette"[^>]*>.*id="paletteTypes".*id="btnDel"')
+        toolbar = html.split('<div id="toolbar">', 1)[1].split('<div id="wrap">', 1)[0]
+        self.assertNotIn('id="btnDel"', toolbar)
 
     def test_agent_markdown_survives_graph_pipeline_and_reaches_prompt(self) -> None:
         profile = "# Evidence critic\n\nSTOP if evidence cannot be sourced."

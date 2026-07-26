@@ -47,7 +47,7 @@ code --install-extension AetherStack.aetherstack
 ```bash
 code --install-extension AetherStack.aetherstack
 # or local VSIX:
-code --install-extension packages/aetherstack-0.3.3.vsix
+code --install-extension packages/aetherstack-0.3.4.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -197,7 +197,7 @@ Enable **Show the currently running model** in the Control Center. LiteLLM then 
 
 Chat defaults to **Auto — analyze my request**. Each natural-language message is classified before inference, the selected service is shown immediately, and its smallest useful lead/worker/reviewer team is resolved from currently available models. `/help`, `/presets`, `/auto <goal>`, `/preset <name> <goal>`, and shortcuts such as `/research`, `/plan`, `/code`, `/test`, and `/bugfix` provide explicit control. The transcript survives view restoration, fenced code renders safely, and editable English/Estonian/Ukrainian activity text rotates while inference is running.
 
-Already authenticated Codex, Claude, and Grok host CLIs are discovered by the extension and exposed to the Hub through a Docker-reachable host bridge protected by a random bearer token stored in VS Code SecretStorage. The bridge reuses the CLI login session; it accepts only a fixed CLI alias allowlist and does not reveal the CLI path, copy credentials, create an API key, or enable browser CORS. Start or restart AetherStack from the extension after installation so the Hub receives the bridge address and token. Continue configuration remains limited to LiteLLM-backed models.
+Already authenticated Codex, Claude, and Grok host CLIs are discovered by the extension and exposed to the Hub through a Docker-reachable host bridge protected by a random bearer token stored in VS Code SecretStorage. The bridge reuses the CLI login session; it accepts only a fixed CLI alias allowlist and does not reveal the CLI path, copy credentials, create an API key, or enable browser CORS. If Hub is already running with stale bridge settings, extension activation recreates only `aether-hub` and refreshes the matrix automatically. Continue configuration remains limited to LiteLLM-backed models.
 
 Hub embeds the complete editable advanced canvas below its presets, and `/graph` opens the same selected or active tree full-page. Positions and camera state persist across both views, empty-canvas dragging pans the tree, and an agent node can carry a local Markdown behavior profile. **Advanced setup** contains technical configuration and the activity-word editor; runtime wording edits persist in `.aetherstack/activity_words.json`.
 

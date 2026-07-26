@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- Fix the host-CLI lifecycle gap that left capability resolution with Ollama only when Hub was already running: activation now detects authenticated Codex, Claude, and Grok CLIs, safely recreates only `aether-hub` when its bridge environment is stale, and refreshes the live matrix.
+- Show the Host CLI bridge state and concrete failure reason in Hub Runtime & setup instead of silently hiding unavailable subscription providers.
+- Move **Delete selected node** from the graph toolbar to the bottom of the left Node library card.
+
 ## 0.3.3
 
 - Replace the separate monochrome Activity Bar glyph with the same flat blue/white AetherStack mark used by the packaged extension icon.

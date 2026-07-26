@@ -77,7 +77,7 @@ VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http:/
 | `aetherstack.autoWireModels` | `true` |
 | `aetherstack.showActiveModel` | `false` (opt in from the Control Center; shows live model aliases in AetherStack Chat, the sidebar, and status bar) |
 
-Provider API keys are read by Docker Compose from the AetherStack installation root `.env`. The extension also detects already authenticated Codex, Claude, and Grok host CLIs through a Docker-reachable bridge protected by a random bearer token stored in VS Code SecretStorage, so their existing login sessions work in AetherStack Chat without copying or generating provider keys. The bridge exposes only its fixed CLI allowlist and does not enable browser CORS. Continue receives only models exposed through LiteLLM. The extension intentionally does not scan unrelated project `.env` files.
+Provider API keys are read by Docker Compose from the AetherStack installation root `.env`. The extension also detects already authenticated Codex, Claude, and Grok host CLIs through a Docker-reachable bridge protected by a random bearer token stored in VS Code SecretStorage, so their existing login sessions work in AetherStack Chat without copying or generating provider keys. If a running Hub lacks those aliases, extension activation recreates only `aether-hub` with the bridge settings and refreshes the matrix automatically. The bridge exposes only its fixed CLI allowlist and does not enable browser CORS. Continue receives only models exposed through LiteLLM. The extension intentionally does not scan unrelated project `.env` files.
 
 Open WebUI is signed in automatically through a proxy published only on
 `127.0.0.1:3000`; its authenticated backend has no host port. The sole existing
