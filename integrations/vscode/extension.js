@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { createCliBridge } = require("./cli-bridge");
+const { reconcileHostCliBridge } = require("./cli-sync");
 const { parseChatInput, commandHelp } = require("./chat-routing");
 const {
   SERVICES,
@@ -14,6 +15,7 @@ const {
   isStackRoot,
   normalizeLocalUiUrl,
   request,
+  runCompose,
   restartCompose,
   selectAvailableModels,
   startCompose,
@@ -920,6 +922,14 @@ async function activate(context) {
   context.subscriptions.push(new vscode.Disposable(() => cliBridge.stop()));
 
   let stackRoot = await resolveStackRoot(context, false);
+  if (stackRoot) {
+    try {
+      const bridgeSync = await reconcileHostCliBridge({ stackRoot, cliBridge, request, runCompose });
+      output.appendLine(`[cli-bridge] ${bridgeSync.reason}${bridgeSync.aliases.length ? `: ${bridgeSync.aliases.join(", ")}` : ""}`);
+    } catch (error) {
+      output.appendLine(`[cli-bridge] Hub synchronization failed: ${error.message || error}`);
+    }
+  }
   let containers = [];
   let technicalError = "";
   let stackActionInProgress = null;

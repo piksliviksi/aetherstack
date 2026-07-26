@@ -398,6 +398,9 @@ def list_services(snapshot: dict[str, Any], discover: dict[str, Any] | None = No
         "available_providers": sorted(
             {meta.get("provider") for meta in (snapshot.get("models") or {}).values() if meta.get("available") and meta.get("provider")}
         ),
+        "host_cli": copy.deepcopy(snapshot.get("host_cli") or {
+            "ok": False, "models": [], "reason": "bridge status unavailable"
+        }),
         "runtime": (discover or {}).get("services") or {},
         "cloud": (discover or {}).get("cloud_keys") or {},
         "note": "Agents are resolved from live capabilities. The catalog contains no model or provider pins.",

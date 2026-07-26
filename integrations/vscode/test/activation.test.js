@@ -103,6 +103,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
     findStackRoot: () => "D:\\llm\\stack",
     isStackRoot: () => true,
     request: async () => ({ status: 503, body: {} }),
+    runCompose: async () => ({ stdout: "", stderr: "" }),
     restartCompose: async () => ({ stdout: "", stderr: "" }),
     selectAvailableModels: () => [],
     startCompose: async () => ({ stdout: "", stderr: "" }),
@@ -120,6 +121,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
           token: "test-token",
           port: 8767,
           start: async () => { cliBridgeStarted = true; return { port: 8767, reused: false }; },
+          models: async () => ({ "codex-cli": {} }),
           stop: () => {},
         }),
       };
