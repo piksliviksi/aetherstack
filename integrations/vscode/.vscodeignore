@@ -1,6 +1,6 @@
 .vscode/**
 .vscode-test/**
-.gitignore
+test/**
+**/*.vsix
 **/*.map
 **/.DS_Store
-**/*.vsix

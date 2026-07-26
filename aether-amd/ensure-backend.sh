@@ -49,12 +49,19 @@ if [[ -f "$ROOT/dids/rx6600xt.conf" ]]; then
   done
 fi
 
-# Force Ollama ROCm package (real compute runner)
-if [[ ! -d /usr/local/lib/ollama/rocm ]]; then
+# Force Ollama ROCm package (real compute runner).
+# Layout may be lib/ollama/rocm or lib/ollama/rocm_v7_2 (newer packages).
+has_rocm=0
+if [[ -d /usr/local/lib/ollama/rocm ]]; then
+  has_rocm=1
+elif compgen -G "/usr/local/lib/ollama/rocm_*" >/dev/null 2>&1; then
+  has_rocm=1
+fi
+if [[ "$has_rocm" -eq 0 ]]; then
   echo "Ollama ROCm runners missing — installing..."
   bash "$STACK/scripts/install-ollama-rocm-wsl.sh"
 else
-  echo "Ollama ROCm runners: present"
+  echo "Ollama ROCm runners: present ($(ls -d /usr/local/lib/ollama/rocm* 2>/dev/null | tr '\n' ' '))"
   # still refresh systemd drop-in
   mkdir -p /etc/systemd/system/ollama.service.d
   cat >/etc/systemd/system/ollama.service.d/aether-amd-compute.conf <<EOF
@@ -68,6 +75,8 @@ Environment=PATH=/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 Environment=HIP_VISIBLE_DEVICES=0
 Environment=ROCR_VISIBLE_DEVICES=0
 Environment=OLLAMA_VULKAN=false
+# llama.cpp automatic memory fitting hangs on ROCm/DXG before model load.
+Environment=LLAMA_ARG_FIT=off
 EOF
   systemctl daemon-reload
   systemctl restart ollama || true

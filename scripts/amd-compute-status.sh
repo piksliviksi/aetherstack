@@ -36,9 +36,10 @@ else
 fi
 
 echo "--- Ollama runner libs ---"
-if [[ -d /usr/local/lib/ollama/rocm ]]; then
-  echo "ROCm package: YES (/usr/local/lib/ollama/rocm)"
-  ls /usr/local/lib/ollama/rocm 2>/dev/null | head -8
+if [[ -d /usr/local/lib/ollama/rocm ]] || compgen -G "/usr/local/lib/ollama/rocm_*" >/dev/null 2>&1; then
+  echo "ROCm package: YES"
+  ls -d /usr/local/lib/ollama/rocm* 2>/dev/null
+  ls /usr/local/lib/ollama/rocm* 2>/dev/null | head -8
 else
   echo "ROCm package: NO — run scripts/install-ollama-rocm-wsl.sh"
   ls /usr/local/lib/ollama 2>/dev/null | head -15 || true

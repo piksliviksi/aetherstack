@@ -2,6 +2,7 @@
 """Aether Hub — system discover, capability matrix, shared agent memory."""
 from __future__ import annotations
 
+import html as html_lib
 import json
 import os
 import sys
@@ -38,6 +39,8 @@ from combos import (  # noqa: E402
     list_combos,
     plan_with_combo,
 )
+from services import activate_service, execute_service, list_services, plan_service  # noqa: E402
+from update import stage_update, update_status  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import annotate_availability, load_matrix, matrix_table, route  # noqa: E402
 from memory import MemoryStore  # noqa: E402
@@ -104,6 +107,25 @@ HOST = os.environ.get("AETHER_HUB_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AETHER_HUB_PORT", "8766"))
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 SYNC_INTERVAL = int(os.environ.get("AETHER_MATRIX_SYNC_SEC", "60"))
+MAX_JSON_BODY = int(os.environ.get("AETHER_MAX_JSON_BODY", str(1024 * 1024)))
+MAX_INFERENCE_STATUS_BYTES = 64 * 1024
+CORS_ORIGINS = {
+    item.strip().rstrip("/")
+    for item in os.environ.get("AETHER_CORS_ORIGINS", "").split(",")
+    if item.strip()
+}
+
+
+def _request_origin_allowed(origin: str | None, host: str) -> bool:
+    """Allow CLI requests and same-origin/configured browser requests only."""
+    if not origin:
+        return True
+    parsed = urlparse(origin)
+    normalized = origin.rstrip("/")
+    return (
+        parsed.scheme in ("http", "https")
+        and (parsed.netloc == host or normalized in CORS_ORIGINS)
+    )
 
 _state_lock = threading.Lock()
 _snapshot: dict = {}
@@ -164,6 +186,58 @@ def _load_host_scan_file() -> dict:
         except (OSError, json.JSONDecodeError):
             continue
     return {}
+
+
+def get_inference_status(status_path: Path | None = None) -> tuple[int, dict]:
+    """Read privacy-minimal LiteLLM activity state for local operator UIs."""
+    path = status_path or Path(
+        os.environ.get(
+            "AETHER_INFERENCE_STATUS_PATH",
+            "/host-aetherstack/inference-status.json",
+        )
+    )
+    try:
+        if path.stat().st_size > MAX_INFERENCE_STATUS_BYTES:
+            raise ValueError("status file exceeds size limit")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("status must be an object")
+        active = value.get("active")
+        if not isinstance(active, list) or len(active) > 256:
+            raise ValueError("active status is invalid")
+        clean_active = []
+        for entry in active:
+            if not isinstance(entry, dict):
+                raise ValueError("active entry is invalid")
+            clean_active.append(
+                {
+                    "callId": str(entry.get("callId", ""))[:256],
+                    "model": str(entry.get("model", "unknown"))[:256],
+                    "startedAt": entry.get("startedAt"),
+                }
+            )
+        last = value.get("last")
+        if last is not None and not isinstance(last, dict):
+            raise ValueError("last status is invalid")
+        clean_last = None if last is None else {
+            "callId": str(last.get("callId", ""))[:256],
+            "model": str(last.get("model", "unknown"))[:256],
+            "startedAt": last.get("startedAt"),
+            "finishedAt": last.get("finishedAt"),
+            "state": str(last.get("state", "unknown"))[:32],
+        }
+        sanitized = {
+            "active": clean_active,
+            "activeCount": len(clean_active),
+            "last": clean_last,
+        }
+        if "updatedAt" in value:
+            sanitized["updatedAt"] = value.get("updatedAt")
+        return 200, sanitized
+    except FileNotFoundError:
+        return 200, {"active": [], "activeCount": 0, "last": None}
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return 503, {"error": f"inference status unavailable: {exc}"}
 
 
 def run_discover(host_scan: dict | None = None) -> dict:
@@ -273,24 +347,50 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin and _request_origin_allowed(origin, self.headers.get("Host", "")):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
     def _read_json(self) -> dict:
-        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError as exc:
+            raise ValueError("invalid Content-Length") from exc
         if n <= 0:
             return {}
+        if n > MAX_JSON_BODY:
+            raise ValueError(f"request body exceeds {MAX_JSON_BODY} bytes")
+        content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise ValueError("Content-Type must be application/json")
         raw = self.rfile.read(n)
         try:
-            return json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError:
-            return {}
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("invalid JSON body") from exc
+        if not isinstance(value, dict):
+            raise ValueError("JSON body must be an object")
+        return value
+
+    def _origin_allowed(self) -> bool:
+        return _request_origin_allowed(
+            self.headers.get("Origin"),
+            self.headers.get("Host", ""),
+        )
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if not self._origin_allowed():
+            self._send(403, {"error": "cross-origin request denied"})
+            return
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
@@ -300,7 +400,14 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip("/") or "/"
         qs = parse_qs(u.query)
 
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html", "/simple", "/simple.html"):
+            simple = ROOT / "static" / "simple.html"
+            if simple.is_file():
+                self._send(200, simple.read_bytes(), "text/html; charset=utf-8")
+            else:
+                self._send(404, {"error": "simple.html missing"})
+            return
+        if path in ("/advanced", "/advanced.html"):
             self._send(200, _index_html(), "text/html; charset=utf-8")
             return
         if path in ("/graph", "/graph/", "/graph.html"):
@@ -335,6 +442,10 @@ class Handler(BaseHTTPRequestHandler):
                     "discover": d.get("summary"),
                 },
             )
+            return
+        if path == "/api/inference/status":
+            code, value = get_inference_status()
+            self._send(code, value)
             return
         if path in ("/api/discover", "/api/scan"):
             force = (qs.get("refresh") or ["0"])[0] in ("1", "true", "yes")
@@ -379,6 +490,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/api/combos", "/api/combo"):
             self._send(200, list_combos())
+            return
+        if path in ("/api/services", "/api/service-presets"):
+            self._send(200, list_services(get_snapshot(), get_discover()))
+            return
+        if path in ("/api/update", "/api/updates"):
+            self._send(200, update_status())
             return
         if path == "/api/combos/guide":
             self._send(200, guide_table())
@@ -499,9 +616,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found", "paths": _paths()})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._origin_allowed():
+            self._send(403, {"error": "cross-origin request denied"})
+            return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
-        body = self._read_json()
+        try:
+            body = self._read_json()
+        except ValueError as exc:
+            self._send(400, {"error": str(exc)})
+            return
 
         if path in ("/api/backup", "/api/backups", "/api/backup/run"):
             try:
@@ -796,6 +920,45 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError) as e:
                 self._send(400, {"error": str(e)})
             return
+        if path in ("/api/services/refresh", "/api/service-presets/refresh"):
+            try:
+                self._send(200, list_services(refresh_snapshot(), run_discover()))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path in ("/api/update/stage", "/api/updates/stage"):
+            try:
+                self._send(200, stage_update())
+            except Exception as e:
+                self._send(502, {"error": f"update staging failed: {str(e)[:500]}"})
+            return
+        if path.startswith("/api/services/") and path.endswith("/activate"):
+            service_id = path[len("/api/services/") : -len("/activate")].strip("/")
+            try:
+                self._send(200, activate_service(service_id, get_snapshot(), body or {}))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path.startswith("/api/services/") and path.endswith("/plan"):
+            service_id = path[len("/api/services/") : -len("/plan")].strip("/")
+            try:
+                self._send(200, plan_service(service_id, get_snapshot(), body or {}))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path.startswith("/api/services/") and path.endswith("/run"):
+            service_id = path[len("/api/services/") : -len("/run")].strip("/")
+            try:
+                self._send(200, execute_service(service_id, get_snapshot(), body or {}))
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(502, {"error": f"service execution failed: {str(e)[:500]}"})
+            return
         if path.startswith("/api/combos/") and path.endswith("/launch"):
             cid = path[len("/api/combos/") : -len("/launch")].strip("/")
             try:
@@ -1083,6 +1246,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_DELETE(self) -> None:  # noqa: N802
+        if not self._origin_allowed():
+            self._send(403, {"error": "cross-origin request denied"})
+            return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if path.startswith("/api/memory/sessions/"):
@@ -1099,6 +1265,12 @@ def _paths() -> list[str]:
         "GET  /api/discover/text",
         "POST /api/discover          {host_scan: {...}}",
         "GET|POST /api/modes         ← inline|multi_agent, token_saver, role pins",
+        "GET  /api/services          ← capability-driven task services",
+        "POST /api/services/{id}/activate",
+        "POST /api/services/{id}/plan",
+        "POST /api/services/{id}/run",
+        "GET  /api/update            ← check upstream",
+        "POST /api/update/stage      ← download without applying",
         "POST /api/agents/plan       ← multi-LLM event plan",
         "GET|POST /api/bootstrap     ← optional auto-install plan (off by default)",
         "POST /api/bootstrap/run     ← {confirm, dry_run, only_safe}",
@@ -1121,6 +1293,7 @@ def _paths() -> list[str]:
         "POST /api/sessions/{id}/message",
         "GET  /api/sessions/{id}/status",
         "/api/health",
+        "GET  /api/inference/status  ← active model aliases only; no prompt data",
         "/api/matrix",
         "/api/route?need=code&prefer=local",
         "/api/sync",
@@ -1147,7 +1320,9 @@ def _index_html() -> bytes:
     recs = disc.get("recommendations") or []
     rows = matrix_table(snap)
     caps = [c for c in (snap.get("capabilities") or {}).keys()]
-    head = "".join(f"<th>{c}</th>" for c in caps)
+    def esc(value):
+        return html_lib.escape(str(value if value is not None else ""), quote=True)
+    head = "".join(f"<th>{esc(c)}</th>" for c in caps)
     body_rows = []
     for r in rows:
         cells = "".join(
@@ -1155,21 +1330,28 @@ def _index_html() -> bytes:
         )
         av = "ok" if r.get("available") else "off"
         body_rows.append(
-            f"<tr class='{av}'><td><code>{r['model']}</code></td>"
-            f"<td>{r.get('tier')}</td><td>{av}</td>{cells}</tr>"
+            f"<tr class='{av}'><td><code>{esc(r['model'])}</code></td>"
+            f"<td>{esc(r.get('tier'))}</td><td>{av}</td>{cells}</tr>"
         )
     table = "\n".join(body_rows)
-    rec_html = "".join(
-        f"<li class='sev-{r.get('severity')}'><b>{r.get('severity')}</b> — {r.get('action')}"
-        f"<div class='muted'>{r.get('detail') or ''}</div></li>"
-        for r in recs[:8]
-    )
+    rec_parts = []
+    for rec in recs[:8]:
+        severity = str(rec.get("severity") or "info")
+        severity_class = severity if severity in {"high", "medium", "ok", "info"} else "info"
+        rec_parts.append(
+            f"<li class='sev-{severity_class}'><b>{esc(severity)}</b> — {esc(rec.get('action'))}"
+            f"<div class='muted'>{esc(rec.get('detail') or '')}</div></li>"
+        )
+    rec_html = "".join(rec_parts)
     ollama_eps = disc.get("ollama") or {}
     ep_html = ""
     for ep in ollama_eps.get("endpoints") or []:
         st = "up" if ep.get("reachable") else "dn"
         models = ", ".join(m.get("name", "") for m in (ep.get("models") or [])[:5]) or "—"
-        ep_html += f"<div class='ep {st}'><code>{ep.get('label')}</code> {ep.get('base')} → {models}</div>"
+        ep_html += (
+            f"<div class='ep {st}'><code>{esc(ep.get('label'))}</code> "
+            f"{esc(ep.get('base'))} → {esc(models)}</div>"
+        )
 
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/>
@@ -1192,12 +1374,13 @@ def _index_html() -> bytes:
 <div class="card">
  <b>System scan</b> —
  Ollama: <b>{"OK" if dsum.get("ollama_ok") else "DOWN"}</b>
- ({dsum.get("ollama_models") or 0} models) ·
+ ({esc(dsum.get("ollama_models") or 0)} models) ·
  LiteLLM: <b>{"OK" if dsum.get("litellm_ok") else "DOWN"}</b> ·
  Redis: <b>{"OK" if dsum.get("redis_ok") else "DOWN"}</b> ·
  cloud keys: <b>{"yes" if dsum.get("cloud_keys") else "no"}</b>
  <div class="muted" style="margin-top:.35rem">{ep_html or "No Ollama endpoints probed yet — open /api/discover"}</div>
  <div style="margin-top:.5rem">
+  <a href="/"><b>simple services</b></a> ·
   <a href="/api/discover">/api/discover</a> ·
   <a href="/api/discover?refresh=1">refresh</a> ·
   <a href="/api/modes">/api/modes</a> ·
@@ -1482,8 +1665,8 @@ function setPreset(p){{ postModes({{preset:p}}); }}
 refreshModes();
 </script>
 <div class="card">
- matrix live: local <b>{summary.get('local_online')}</b> · cloud <b>{summary.get('cloud_ready')}</b> · down <b>{summary.get('unavailable')}</b>
- · memory <b>{_memory.backend}</b>
+ matrix live: local <b>{esc(summary.get('local_online'))}</b> · cloud <b>{esc(summary.get('cloud_ready'))}</b> · down <b>{esc(summary.get('unavailable'))}</b>
+ · memory <b>{esc(_memory.backend)}</b>
 </div>
 <h2>Capability matrix (live availability)</h2>
 <table>

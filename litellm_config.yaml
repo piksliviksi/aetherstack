@@ -9,23 +9,23 @@ model_list:
   - model_name: local-default
     litellm_params:
       model: ollama/tinyllama
-      api_base: http://host.docker.internal:11434
+      api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-llama
     litellm_params:
       model: ollama/tinyllama
-      api_base: http://host.docker.internal:11434
+      api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-tiny
     litellm_params:
       model: ollama/tinyllama
-      api_base: http://host.docker.internal:11434
+      api_base: os.environ/OLLAMA_BASE_URL
 
   # Optional larger local models (pull first: ollama pull llama3.1:8b)
   - model_name: local-llama31-8b
     litellm_params:
       model: ollama/llama3.1:8b
-      api_base: http://host.docker.internal:11434
+      api_base: os.environ/OLLAMA_BASE_URL
 
   # ── xAI / Grok (latest first) ─────────────────────────────────────
   - model_name: grok
@@ -186,7 +186,7 @@ model_list:
   - model_name: local-embed
     litellm_params:
       model: ollama/nomic-embed-text
-      api_base: http://host.docker.internal:11434
+      api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: openai-embed
     litellm_params:
@@ -473,13 +473,12 @@ model_list:
 litellm_settings:
   drop_params: true
   set_verbose: false
-  # Shared Redis: response cache across workers/clients (lab-friendly)
-  cache: true
-  cache_params:
-    type: redis
-    host: redis
-    port: 6379
-    ttl: 600
+  # Exposes only active/last model alias and timing to the local VS Code UI.
+  # The callback never records prompts, responses, headers, identities, or keys.
+  callbacks: aetherstack_callback.proxy_handler_instance
+  # Privacy default: do not persist prompts/responses in Redis cache/AOF.
+  # Operators may opt in only after documenting their retention policy.
+  cache: false
   # Prefer failing with a clear auth/model error over silent wrong defaults
   # request_timeout: 600
 

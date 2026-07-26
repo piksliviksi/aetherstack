@@ -183,6 +183,7 @@ def build_install_plan(discover: dict[str, Any], cfg: dict[str, Any] | None = No
         "litellm": "aether-litellm",
         "aether-hub": "aether-hub",
         "open-webui": "aether-open-webui",
+        "open-webui-proxy": "aether-open-webui-proxy",
     }
     if containers:
         for svc in wanted:

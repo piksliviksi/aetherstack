@@ -367,7 +367,7 @@ def build_recommendations(report: dict[str, Any]) -> list[dict[str, str]]:
                     "severity": "high",
                     "code": "likely_cpu_ollama",
                     "action": "sudo bash aether-amd/ensure-backend.sh",
-                    "detail": "Host scan: ROCm runner libs missing under /usr/local/lib/ollama/rocm while Radeon is visible.",
+                    "detail": "Host scan: ROCm runner libs missing under /usr/local/lib/ollama/rocm* while Radeon is visible.",
                 }
             )
 

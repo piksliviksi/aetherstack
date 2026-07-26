@@ -2,6 +2,9 @@
 
 Docker Desktop extension panel with links to the AetherStack control plane.
 
+This is a separate OCI/Docker Desktop artifact. It is not the VS Code `.vsix`
+stored in `packages/` or attached to GitHub releases.
+
 | Extension piece | Mapping |
 |-----------------|---------|
 | UI panel | Status links to `:3000` / `:4000` |

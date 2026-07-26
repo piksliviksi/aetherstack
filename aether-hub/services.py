@@ -1,0 +1,456 @@
+"""Task-first services resolved dynamically against the live capability matrix."""
+from __future__ import annotations
+
+import copy
+import json
+import os
+import time
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Callable
+
+import yaml
+
+from agents import apply_runtime_update, plan_event
+from matrix import _score_model
+
+ROOT = Path(__file__).resolve().parent
+CATALOG_PATH = Path(os.environ.get("AETHER_SERVICE_CATALOG", str(ROOT / "service_catalog.yaml")))
+LITELLM_BASE_URL = os.environ.get("LITELLM_INTERNAL_URL", "http://litellm:4000").rstrip("/")
+VERIFY_TTL_SECONDS = 5 * 60
+_verify_cache: dict[str, tuple[float, bool]] = {}
+
+
+def load_service_catalog(path: Path | None = None) -> dict[str, Any]:
+    with open(path or CATALOG_PATH, encoding="utf-8") as handle:
+        value = yaml.safe_load(handle)
+    if not isinstance(value, dict) or not isinstance(value.get("services"), dict):
+        raise ValueError("invalid service_catalog.yaml")
+    return value
+
+
+def _cost_rank(value: Any) -> int:
+    return {0: 0, "0": 0, "low": 1, "medium": 2, "high": 3, "very_high": 4}.get(value, 2)
+
+
+def _candidate_models(
+    snapshot: dict[str, Any],
+    blueprint: dict[str, Any],
+    used_models: set[str],
+    used_providers: set[str],
+) -> list[tuple[float, str, dict[str, Any]]]:
+    needs = set(str(item) for item in (blueprint.get("needs") or ["chat"]))
+    prefer = str(blueprint.get("prefer") or "auto")
+    max_cost = _cost_rank(blueprint.get("max_cost", "very_high"))
+    strategy = str(blueprint.get("strategy") or "best_score")
+    ranked = []
+    for alias, meta in (snapshot.get("models") or {}).items():
+        if not meta.get("available") or _cost_rank(meta.get("cost")) > max_cost:
+            continue
+        score = _score_model(meta, needs, prefer)
+        if score < 0:
+            continue
+        if strategy == "cheapest":
+            score += 45 - 15 * _cost_rank(meta.get("cost"))
+            if meta.get("tier") == "local":
+                score += 15
+        if alias not in used_models:
+            score += 6
+        if meta.get("provider") and meta.get("provider") not in used_providers:
+            score += 4
+        ranked.append((score, alias, meta))
+    return sorted(ranked, key=lambda item: (-item[0], item[1]))
+
+
+def _offline_suggestion(snapshot: dict[str, Any], needs: list[str]) -> dict[str, Any] | None:
+    need_set = set(needs or ["chat"])
+    ranked = []
+    for alias, meta in (snapshot.get("models") or {}).items():
+        caps = set(meta.get("capabilities") or [])
+        if need_set and not (need_set & caps):
+            continue
+        fake = dict(meta)
+        fake["available"] = True
+        ranked.append((_score_model(fake, need_set, "auto"), alias, meta))
+    if not ranked:
+        return None
+    _, alias, meta = sorted(ranked, key=lambda item: (-item[0], item[1]))[0]
+    return {
+        "model": alias,
+        "provider": meta.get("provider"),
+        "backend": meta.get("backend"),
+        "reason": meta.get("availability_reason") or "not available",
+    }
+
+
+def _resolve_agent(
+    snapshot: dict[str, Any],
+    agent_id: str,
+    role: str,
+    blueprint: dict[str, Any],
+    used_models: set[str],
+    used_providers: set[str],
+) -> dict[str, Any]:
+    candidates = _candidate_models(snapshot, blueprint, used_models, used_providers)
+    needs = list(blueprint.get("needs") or ["chat"])
+    base = {
+        "id": agent_id,
+        "role": role,
+        "label": blueprint.get("label") or role.title(),
+        "needs": needs,
+        "strategy": blueprint.get("strategy") or "best_score",
+    }
+    if not candidates:
+        return {**base, "available": False, "suggestion": _offline_suggestion(snapshot, needs)}
+    score, alias, meta = candidates[0]
+    capabilities = list(meta.get("capabilities") or [])
+    missing_capabilities = sorted(set(needs) - set(capabilities))
+    used_models.add(alias)
+    if meta.get("provider"):
+        used_providers.add(str(meta["provider"]))
+    return {
+        **base,
+        "available": True,
+        "model": alias,
+        "provider": meta.get("provider"),
+        "backend": meta.get("backend"),
+        "tier": meta.get("tier"),
+        "cost": meta.get("cost"),
+        "capabilities": capabilities,
+        "missing_capabilities": missing_capabilities,
+        "capability_fit": "full" if not missing_capabilities else "partial",
+        "availability_reason": meta.get("availability_reason"),
+        "score": round(score, 2),
+    }
+
+
+def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    catalog = load_service_catalog()
+    service = (catalog.get("services") or {}).get(service_id)
+    if not service:
+        raise ValueError(f"unknown service: {service_id}")
+    defaults = catalog.get("defaults") or {}
+    used_models: set[str] = set()
+    used_providers: set[str] = set()
+    agents = [
+        _resolve_agent(snapshot, "lead", "mastermind", service.get("lead") or {}, used_models, used_providers),
+        _resolve_agent(snapshot, "reviewer", "supervisor", service.get("reviewer") or {}, used_models, used_providers),
+    ]
+    for index, stream in enumerate(service.get("workstreams") or []):
+        agents.append(
+            _resolve_agent(snapshot, f"worker-{index + 1}", "worker", stream, used_models, used_providers)
+        )
+    available = [agent for agent in agents if agent.get("available")]
+    missing = [agent for agent in agents if not agent.get("available")]
+    partial = [agent for agent in available if agent.get("missing_capabilities")]
+    return {
+        "id": service_id,
+        "label": service.get("label") or service_id,
+        "summary": service.get("summary") or "",
+        "accent": service.get("accent") or "blue",
+        "instructions": service.get("instructions") or "",
+        "mode": service.get("mode") or defaults.get("mode") or "multi_agent",
+        "lean_mode": service.get("lean_mode") or defaults.get("lean_mode") or "balanced",
+        "token_saver": bool(service.get("token_saver", defaults.get("token_saver", False))),
+        "agents": agents,
+        "ready": not missing and not partial and bool(available),
+        "degraded": bool(available) and bool(missing or partial),
+        "available_agents": len(available),
+        "agent_count": len(agents),
+        "models": sorted({agent.get("model") for agent in available if agent.get("model")}),
+        "providers": sorted({agent.get("provider") for agent in available if agent.get("provider")}),
+        "backends": sorted({agent.get("backend") for agent in available if agent.get("backend")}),
+        "missing": missing,
+        "partial": partial,
+        "verification": "not_run",
+    }
+
+
+def _verify_model(alias: str) -> bool:
+    cached = _verify_cache.get(alias)
+    if cached and time.time() - cached[0] < VERIFY_TTL_SECONDS:
+        return cached[1]
+    key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    url = f"{LITELLM_BASE_URL}/health?model={urllib.parse.quote(alias)}"
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+    ok = False
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        ok = (
+            response.status == 200
+            and int(body.get("healthy_count") or 0) > 0
+            and int(body.get("unhealthy_count") or 0) == 0
+        )
+    except Exception:
+        ok = False
+    _verify_cache[alias] = (time.time(), ok)
+    return ok
+
+
+def resolve_verified_service(
+    service_id: str,
+    snapshot: dict[str, Any],
+    verifier: Callable[[str], bool] | None = None,
+) -> dict[str, Any]:
+    verifier = verifier or _verify_model
+    working = copy.deepcopy(snapshot)
+    checked: dict[str, bool] = {}
+    resolved = resolve_service(service_id, working)
+    for _ in range(3):
+        aliases = sorted({a.get("model") for a in resolved["agents"] if a.get("model") and a.get("available")})
+        pending = [alias for alias in aliases if alias not in checked]
+        if pending:
+            with ThreadPoolExecutor(max_workers=min(6, len(pending))) as pool:
+                results = list(pool.map(verifier, pending))
+            checked.update(dict(zip(pending, results)))
+        failed = [alias for alias in aliases if not checked.get(alias, False)]
+        if not failed:
+            break
+        for alias in failed:
+            if alias in (working.get("models") or {}):
+                working["models"][alias]["available"] = False
+                working["models"][alias]["availability_reason"] = "LiteLLM provider health failed"
+        resolved = resolve_service(service_id, working)
+    resolved["verification"] = "passed" if resolved.get("ready") else "degraded"
+    resolved["verified_models"] = sorted(alias for alias, ok in checked.items() if ok)
+    resolved["failed_models"] = sorted(alias for alias, ok in checked.items() if not ok)
+    return resolved
+
+
+def list_services(snapshot: dict[str, Any], discover: dict[str, Any] | None = None) -> dict[str, Any]:
+    catalog = load_service_catalog()
+    services = [resolve_service(service_id, snapshot) for service_id in catalog["services"]]
+    return {
+        "schema": catalog.get("schema"),
+        "services": services,
+        "available_model_count": sum(1 for meta in (snapshot.get("models") or {}).values() if meta.get("available")),
+        "available_providers": sorted(
+            {meta.get("provider") for meta in (snapshot.get("models") or {}).values() if meta.get("available") and meta.get("provider")}
+        ),
+        "runtime": (discover or {}).get("services") or {},
+        "cloud": (discover or {}).get("cloud_keys") or {},
+        "note": "Agents are resolved from live capabilities. The catalog contains no model or provider pins.",
+    }
+
+
+def activate_service(
+    service_id: str,
+    snapshot: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    options = options or {}
+    resolved = (
+        resolve_verified_service(service_id, snapshot)
+        if options.get("verify", True)
+        else resolve_service(service_id, snapshot)
+    )
+    picks = {agent["role"]: {"model": agent["model"]} for agent in resolved["agents"] if agent.get("available") and agent["role"] in {"mastermind", "supervisor", "worker"}}
+    apply_runtime_update({"clear_overrides": True})
+    runtime = apply_runtime_update(
+        {
+            "mode": resolved["mode"],
+            "token_saver": bool(options.get("token_saver", resolved["token_saver"])),
+            "lean_mode": options.get("lean_mode") or resolved["lean_mode"],
+            "service": service_id,
+            "role_overrides": picks,
+        }
+    )
+    return {"ok": resolved.get("ready") or resolved.get("degraded"), "service": resolved, "runtime": runtime}
+
+
+def plan_service(
+    service_id: str,
+    snapshot: dict[str, Any],
+    event: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    event = dict(event or {})
+    resolved = (
+        resolve_verified_service(service_id, snapshot)
+        if event.get("verify", True)
+        else resolve_service(service_id, snapshot)
+    )
+    roles = {}
+    tasks = []
+    for agent in resolved["agents"]:
+        if not agent.get("available"):
+            continue
+        if agent["role"] in ("mastermind", "supervisor"):
+            roles[agent["role"]] = {"model": agent["model"]}
+        elif agent["role"] == "worker":
+            tasks.append(
+                {
+                    "id": agent["id"],
+                    "description": agent["label"],
+                    "need": agent["needs"],
+                    "model": agent["model"],
+                }
+            )
+    plan = plan_event(
+        snapshot,
+        {
+            **event,
+            "mode": resolved["mode"],
+            "token_saver": bool(event.get("token_saver", resolved["token_saver"])),
+            "lean_mode": event.get("lean_mode") or resolved["lean_mode"],
+            "service": service_id,
+            "service_instructions": resolved["instructions"],
+            "roles": roles,
+            "workers": max(1, len(tasks)),
+            "tasks": tasks or None,
+        },
+    )
+    plan["service"] = resolved
+    return plan
+
+
+def _chat_completion(call: dict[str, Any], messages: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    payload = {
+        "model": call.get("model"),
+        "messages": messages or call.get("messages") or [],
+        "max_tokens": call.get("max_tokens") or 1600,
+    }
+    request = urllib.request.Request(
+        f"{LITELLM_BASE_URL}/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=180) as response:
+        value = json.loads(response.read().decode("utf-8"))
+    choices = value.get("choices") or []
+    content = (((choices[0] if choices else {}).get("message") or {}).get("content") or "")
+    return {
+        "model": value.get("model") or call.get("model"),
+        "content": str(content),
+        "usage": value.get("usage") or {},
+    }
+
+
+def _history_block(history: Any) -> str:
+    if not isinstance(history, list):
+        return ""
+    lines = []
+    for item in history[-8:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "user")[:20]
+        content = str(item.get("content") or "")[:4000]
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n\n".join(lines)[-16000:]
+
+
+def execute_service(
+    service_id: str,
+    snapshot: dict[str, Any],
+    event: dict[str, Any] | None = None,
+    completion: Callable[[dict[str, Any], list[dict[str, str]] | None], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Execute a bounded lead -> workers -> review -> synthesis service run."""
+    event = dict(event or {})
+    goal = str(event.get("goal") or event.get("prompt") or "").strip()
+    if not goal:
+        raise ValueError("goal is required")
+    if len(goal) > 100_000:
+        raise ValueError("goal exceeds 100000 characters")
+    completion = completion or _chat_completion
+    plan = plan_service(service_id, snapshot, event)
+    calls = plan.get("litellm_calls") or []
+    lead_call = next((call for call in calls if call.get("role") == "mastermind"), None)
+    supervisor_call = next((call for call in calls if call.get("role") == "supervisor"), None)
+    worker_calls = [call for call in calls if call.get("role") == "worker"][:6]
+    if not lead_call or not lead_call.get("model"):
+        raise ValueError("no available lead model for this service")
+
+    history = _history_block(event.get("history"))
+    lead_messages = copy.deepcopy(lead_call.get("messages") or [])
+    if history:
+        lead_messages.append({"role": "user", "content": f"Recent conversation:\n{history}"})
+    lead = completion(lead_call, lead_messages)
+
+    def run_worker(call: dict[str, Any]) -> dict[str, Any]:
+        messages = copy.deepcopy(call.get("messages") or [])
+        messages.append({"role": "user", "content": f"Lead plan:\n{lead['content'][:12000]}"})
+        try:
+            result = completion(call, messages)
+            return {"ok": True, "role": "worker", "task_id": call.get("task_id"), **result}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "role": "worker",
+                "task_id": call.get("task_id"),
+                "model": call.get("model"),
+                "error": str(exc)[:500],
+            }
+
+    workers = []
+    if worker_calls:
+        with ThreadPoolExecutor(max_workers=len(worker_calls)) as pool:
+            workers = list(pool.map(run_worker, worker_calls))
+    worker_text = "\n\n".join(
+        f"[{item.get('task_id') or 'worker'} / {item.get('model')}]\n{item.get('content') or item.get('error') or ''}"
+        for item in workers
+    )[-40000:]
+
+    review = None
+    if supervisor_call and supervisor_call.get("model"):
+        review_messages = copy.deepcopy(supervisor_call.get("messages") or [])
+        review_messages.append(
+            {
+                "role": "user",
+                "content": f"Goal:\n{goal}\n\nLead plan:\n{lead['content'][:10000]}\n\nWorker results:\n{worker_text}",
+            }
+        )
+        try:
+            review = completion(supervisor_call, review_messages)
+        except Exception as exc:
+            review = {"model": supervisor_call.get("model"), "content": "", "error": str(exc)[:500], "usage": {}}
+
+    final_call = dict(lead_call)
+    final_call["max_tokens"] = lead_call.get("max_tokens") or 2000
+    final_messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are the service lead. Synthesize the final answer from the plan, worker results, and review. "
+                "Resolve conflicts, do not mention orchestration mechanics unless useful, and clearly state remaining uncertainty."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Goal:\n{goal}\n\nLead plan:\n{lead['content'][:10000]}\n\n"
+                f"Worker results:\n{worker_text}\n\nSupervisor review:\n{(review or {}).get('content', '')[:10000]}"
+            ),
+        },
+    ]
+    final = completion(final_call, final_messages)
+    steps = [
+        {"role": "lead-plan", "model": lead.get("model"), "content": lead.get("content")},
+        *workers,
+    ]
+    if review:
+        steps.append({"role": "review", **review})
+    usage_items = [lead.get("usage") or {}, final.get("usage") or {}]
+    usage_items.extend(item.get("usage") or {} for item in workers)
+    if review:
+        usage_items.append(review.get("usage") or {})
+    usage = {
+        key: sum(int(item.get(key) or 0) for item in usage_items)
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+    }
+    return {
+        "ok": True,
+        "service_id": service_id,
+        "answer": final.get("content"),
+        "model": final.get("model"),
+        "agents": plan.get("service", {}).get("agents") or [],
+        "steps": steps,
+        "usage": usage,
+        "lean_mode": plan.get("lean_mode"),
+        "token_saver": plan.get("token_saver"),
+    }

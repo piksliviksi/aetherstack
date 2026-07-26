@@ -1,0 +1,154 @@
+version: 1
+schema: aetherstack.services.v1
+
+defaults:
+  mode: multi_agent
+  lean_mode: balanced
+  token_saver: false
+
+services:
+  research:
+    label: Research
+    summary: Find evidence, challenge it, and synthesize a sourced conclusion.
+    accent: violet
+    instructions: Separate evidence from inference, compare sources, surface uncertainty, and preserve citations.
+    lead: {label: Research lead, needs: [reason, long_context, tools, chat], prefer: cloud, max_cost: high}
+    reviewer: {label: Evidence critic, needs: [reason, chat], prefer: auto, max_cost: high}
+    workstreams:
+      - {label: Source scout, needs: [tools, long_context, chat], strategy: best_score}
+      - {label: Analyst, needs: [reason, chat], strategy: best_score}
+      - {label: Fact checker, needs: [reason, tools, chat], strategy: cheapest}
+
+  planning:
+    label: Planning
+    summary: Turn an objective into a sequenced, risk-aware execution plan.
+    accent: blue
+    instructions: Produce concrete milestones, dependencies, decision points, owners, risks, and verification gates.
+    lead: {label: Planning lead, needs: [reason, tools, chat], prefer: auto, max_cost: high}
+    reviewer: {label: Risk reviewer, needs: [reason, chat], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Dependency mapper, needs: [reason, chat], strategy: best_score}
+      - {label: Delivery planner, needs: [chat, tools], strategy: cheapest}
+
+  service-design:
+    label: Service design
+    summary: Design journeys, operations, touchpoints, and measurable service outcomes.
+    accent: cyan
+    instructions: Cover user journey, frontstage, backstage, failure recovery, accessibility, and service metrics.
+    lead: {label: Service architect, needs: [reason, long_context, chat], prefer: auto, max_cost: high}
+    reviewer: {label: Journey critic, needs: [reason, chat], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Journey mapper, needs: [chat, long_context], strategy: best_score}
+      - {label: Operations designer, needs: [reason, tools, chat], strategy: best_score}
+
+  ui-design:
+    label: UI design
+    summary: Create clear, accessible interaction and visual-system decisions.
+    accent: pink
+    instructions: Prefer familiar interaction patterns; cover responsive states, accessibility, empty states, errors, and design tokens.
+    lead: {label: UI design lead, needs: [vision, reason, chat], prefer: auto, max_cost: high}
+    reviewer: {label: Accessibility reviewer, needs: [vision, reason, chat], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Interaction designer, needs: [vision, chat], strategy: best_score}
+      - {label: Design-system builder, needs: [code, vision, chat], strategy: best_score}
+
+  frontend:
+    label: Frontend
+    summary: Build responsive, accessible interfaces integrated with real APIs.
+    accent: teal
+    token_saver: true
+    instructions: Reuse the project stack, preserve accessibility and responsive behavior, and verify real backend states.
+    lead: {label: Frontend lead, needs: [code, reason, tools], prefer: auto, max_cost: high}
+    reviewer: {label: UX and code reviewer, needs: [code, vision, reason], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: UI implementer, needs: [code, vision], strategy: best_score}
+      - {label: Integration builder, needs: [code, tools], strategy: cheapest}
+      - {label: Accessibility tester, needs: [code, vision, chat], strategy: cheapest}
+
+  backend:
+    label: Backend
+    summary: Build maintainable APIs, data flows, jobs, and operational controls.
+    accent: green
+    token_saver: true
+    instructions: Define contracts first; cover validation, authorization, concurrency, observability, migrations, and failure recovery.
+    lead: {label: Backend architect, needs: [code, reason, tools], prefer: auto, max_cost: high}
+    reviewer: {label: Reliability reviewer, needs: [code, reason, tools], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: API builder, needs: [code, tools], strategy: best_score}
+      - {label: Data and jobs builder, needs: [code, reason], strategy: cheapest}
+      - {label: Operations tester, needs: [code, tools], strategy: cheapest}
+
+  coding:
+    label: Coding
+    summary: Implement a focused feature or refactor with tests and review.
+    accent: indigo
+    token_saver: true
+    instructions: Inspect existing code first, make the smallest coherent change, preserve conventions, and verify behavior.
+    lead: {label: Coding lead, needs: [code, reason, tools], prefer: auto, max_cost: high}
+    reviewer: {label: Code reviewer, needs: [code, reason], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Implementer, needs: [code, tools], strategy: best_score}
+      - {label: Test author, needs: [code, tools], strategy: cheapest}
+
+  testing:
+    label: Testing
+    summary: Design and run efficient unit, integration, edge, and regression coverage.
+    accent: lime
+    token_saver: true
+    instructions: Test observable behavior and boundaries; reproduce failures before changing code; report untested assumptions.
+    lead: {label: Test strategist, needs: [code, reason, tools], prefer: auto, max_cost: medium}
+    reviewer: {label: Coverage critic, needs: [code, reason], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Unit tester, needs: [code, tools], strategy: cheapest}
+      - {label: Integration tester, needs: [code, tools], strategy: cheapest}
+      - {label: Edge-case tester, needs: [code, reason], strategy: best_score}
+
+  bugfixing:
+    label: Bug fixing
+    summary: Reproduce, isolate, repair, and regression-test defects.
+    accent: orange
+    token_saver: true
+    instructions: Establish a reproduction and root cause before editing; avoid symptom patches; add a regression test.
+    lead: {label: Debug lead, needs: [code, reason, tools], prefer: auto, max_cost: high}
+    reviewer: {label: Root-cause critic, needs: [code, reason], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Reproducer, needs: [code, tools], strategy: cheapest}
+      - {label: Fix implementer, needs: [code, reason, tools], strategy: best_score}
+      - {label: Regression tester, needs: [code, tools], strategy: cheapest}
+
+  whitehat-pentesting:
+    label: White-hat pentesting
+    summary: Authorized defensive review, boundary testing, and remediation planning.
+    accent: red
+    instructions: Work only within explicit authorization; use non-destructive checks; protect secrets; provide reproducible remediation and regression tests.
+    lead: {label: Security lead, needs: [reason, code, tools], prefer: auto, max_cost: high}
+    reviewer: {label: Safety and scope reviewer, needs: [reason, code, chat], prefer: auto, max_cost: high}
+    workstreams:
+      - {label: Boundary analyst, needs: [code, reason, tools], strategy: best_score}
+      - {label: Defensive tester, needs: [code, tools], strategy: best_score}
+      - {label: Remediation engineer, needs: [code, reason], strategy: cheapest}
+
+  polishing:
+    label: Polishing
+    summary: Simplify, improve consistency, and finish production details.
+    accent: amber
+    token_saver: true
+    lean_mode: strict
+    instructions: Remove accidental complexity and inconsistency without widening scope; retain safety, accessibility, and behavior.
+    lead: {label: Polish lead, needs: [code, reason, chat], prefer: auto, max_cost: medium}
+    reviewer: {label: Quality reviewer, needs: [code, vision, chat], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Simplifier, needs: [code, reason], strategy: cheapest}
+      - {label: Consistency editor, needs: [code, vision, chat], strategy: cheapest}
+
+  technical-writing:
+    label: Technical writing
+    summary: Produce accurate, structured documentation for the intended reader.
+    accent: slate
+    token_saver: true
+    instructions: Ground claims in the implementation, define prerequisites, include tested examples, and separate facts from assumptions.
+    lead: {label: Documentation lead, needs: [long_context, reason, chat], prefer: auto, max_cost: medium}
+    reviewer: {label: Technical editor, needs: [reason, chat], prefer: auto, max_cost: medium}
+    workstreams:
+      - {label: Code and fact reader, needs: [code, tools, long_context], strategy: best_score}
+      - {label: Draft writer, needs: [chat, long_context], strategy: cheapest}

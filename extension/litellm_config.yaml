@@ -7,18 +7,18 @@ model_list:
   # ── Local (host Ollama; WSL ROCm recommended on AMD) ──────────────
   - model_name: local-default
     litellm_params:
-      model: ollama/llama3.1:8b
-      api_base: http://host.docker.internal:11434
+      model: ollama/tinyllama
+      api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-llama
     litellm_params:
-      model: ollama/llama3.1:8b
-      api_base: http://host.docker.internal:11434
+      model: ollama/tinyllama
+      api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-tiny
     litellm_params:
       model: ollama/tinyllama
-      api_base: http://host.docker.internal:11434
+      api_base: os.environ/OLLAMA_BASE_URL
 
   # ── xAI / Grok (latest first) ─────────────────────────────────────
   - model_name: grok

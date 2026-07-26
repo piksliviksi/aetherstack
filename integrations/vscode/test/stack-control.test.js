@@ -1,0 +1,112 @@
+const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const test = require("node:test");
+
+const { findStackRoot, normalizeLocalUiUrl, request, selectAvailableModels } = require("../stack-control");
+
+test("findStackRoot walks up from a workspace nested in AetherStack", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-extension-"));
+  const nested = path.join(temp, "project", "nested");
+  fs.mkdirSync(path.join(temp, "aether-hub"), { recursive: true });
+  fs.mkdirSync(nested, { recursive: true });
+  fs.writeFileSync(path.join(temp, "docker-compose.yml"), "services: {}\n");
+  fs.writeFileSync(path.join(temp, "litellm_config.yaml"), "model_list: []\n");
+  try {
+    assert.equal(findStackRoot({ workspacePaths: [nested] }), temp);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("selectAvailableModels only wires live, gateway-exposed chat models in matrix priority", () => {
+  const matrix = {
+    models: {
+      "local-default": { available: true, capabilities: ["chat", "code"], tier: "local" },
+      "cloud-ready": { available: true, capabilities: ["reason"], tier: "cloud" },
+      offline: { available: false, capabilities: ["chat"], tier: "cloud" },
+      embedding: { available: true, capabilities: ["embed"], tier: "local" },
+    },
+    routing: { fallbacks: { chat: ["offline", "local-default"], reason: ["cloud-ready"] } },
+  };
+
+  assert.deepEqual(
+    selectAvailableModels(matrix, ["local-default", "cloud-ready", "offline", "embedding"]).map((model) => model.alias),
+    ["local-default", "cloud-ready"]
+  );
+});
+
+test("selectAvailableModels limits Continue presets to eight entries", () => {
+  const models = {};
+  for (let index = 0; index < 12; index += 1) {
+    models[`model-${index}`] = { available: true, capabilities: ["chat"] };
+  }
+  assert.equal(selectAvailableModels({ models }, Object.keys(models)).length, 8);
+});
+
+test("selectAvailableModels excludes configured models that fail live provider health", () => {
+  const matrix = {
+    models: {
+      local: { available: true, backend: "ollama/tinyllama", capabilities: ["chat"] },
+      cloud: { available: true, backend: "openai/gpt-4.1", capabilities: ["chat"] },
+    },
+  };
+  assert.deepEqual(
+    selectAvailableModels(matrix, ["local", "cloud"], ["local"]).map((model) => model.alias),
+    ["local"]
+  );
+});
+
+test("normalizeLocalUiUrl strips stale routes and rejects non-local hosts", () => {
+  assert.equal(normalizeLocalUiUrl("http://127.0.0.1:3000/error?detail=1#x"), "http://127.0.0.1:3000/");
+  assert.equal(normalizeLocalUiUrl("https://example.com/error"), "http://127.0.0.1:3000/");
+});
+
+test("request returns HTTP status and parsed JSON without external dependencies", async () => {
+  const http = require("http");
+  const server = http.createServer((incoming, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ ok: true, path: incoming.url }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    const result = await request(`http://127.0.0.1:${address.port}/health`);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { ok: true, path: "/health" });
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("request sends bounded JSON POST bodies for Hub service runs", async () => {
+  const http = require("http");
+  let received = null;
+  const server = http.createServer((incoming, response) => {
+    let body = "";
+    incoming.setEncoding("utf8");
+    incoming.on("data", (chunk) => { body += chunk; });
+    incoming.on("end", () => {
+      received = { method: incoming.method, type: incoming.headers["content-type"], body: JSON.parse(body) };
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ ok: true }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    const result = await request(`http://127.0.0.1:${address.port}/api/services/coding/run`, {
+      method: "POST",
+      body: { goal: "test" },
+    });
+    assert.equal(result.status, 200);
+    assert.deepEqual(received, {
+      method: "POST",
+      type: "application/json",
+      body: { goal: "test" },
+    });
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
