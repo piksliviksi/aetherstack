@@ -71,17 +71,11 @@ Without Ollama embeddings, hub uses deterministic hash vectors (weaker recall).
 
 ## LiteLLM Redis cache
 
-```yaml
-litellm_settings:
-  cache: true
-  cache_params:
-    type: redis
-    host: redis
-    port: 6379
-    ttl: 600
-```
+LiteLLM response caching is disabled by default. Prompts and completions must not
+be copied into Redis persistence without an explicit retention decision.
 
-Identical completions within TTL are served from Redis.
+The same Redis instance still contains deliberate Aether Hub session/vector
+memory. Treat its Docker volume and backups as user data, not disposable cache.
 
 ---
 
@@ -92,6 +86,7 @@ Identical completions within TTL are served from Redis.
 | Default bind | Localhost lab trust model |
 | Exposure | Do not publish `:8766` or `:6379` publicly |
 | Content | Vectors store whatever text is upserted — treat as sensitive |
+| LiteLLM cache | Disabled by default; opt-in requires a retention policy |
 | Shared host | Put Hub behind authenticated reverse proxy |
 | Private mode | Isolated vault; no common pool — [PRIVATE-MODE.md](./PRIVATE-MODE.md) |
 

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AetherStack Services</title>
+  <style>
+    :root { color-scheme: dark; --bg:#080b12; --panel:#101622; --panel2:#151d2c; --line:#253148; --text:#edf3ff; --muted:#91a0b8; --brand:#73dcff; --good:#66e3a4; --warn:#ffc66d; --bad:#ff7b88; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif; color:var(--text); background:radial-gradient(circle at 10% -10%,#12314a 0,transparent 32%),var(--bg); }
+    button,select,textarea { font:inherit; }
+    button { color:var(--text); background:#1a2537; border:1px solid var(--line); border-radius:9px; padding:.65rem .9rem; cursor:pointer; }
+    button:hover { border-color:#4b6589; transform:translateY(-1px); } button:disabled { opacity:.5; cursor:wait; transform:none; }
+    button.primary { color:#05131b; background:var(--brand); border-color:var(--brand); font-weight:750; }
+    a { color:var(--brand); text-decoration:none; } a:hover { text-decoration:underline; }
+    header { position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:1rem max(1rem,4vw); border-bottom:1px solid var(--line); background:rgba(8,11,18,.9); backdrop-filter:blur(16px); }
+    .brand { display:flex; align-items:center; gap:.8rem; } .logo { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:linear-gradient(145deg,#73dcff,#8d7bff); color:#07101a; font-weight:900; }
+    h1,h2,h3,p { margin-top:0; } h1 { font-size:1.05rem; margin-bottom:.1rem; } h2 { font-size:1.2rem; } h3 { font-size:.95rem; }
+    nav { display:flex; gap:.9rem; align-items:center; flex-wrap:wrap; } nav a.active { color:var(--text); font-weight:700; }
+    main { max-width:1440px; margin:auto; padding:1.4rem max(1rem,4vw) 4rem; }
+    .statusbar { display:flex; flex-wrap:wrap; gap:.55rem; margin-bottom:1.2rem; }
+    .chip { display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .6rem; border:1px solid var(--line); border-radius:999px; background:rgba(16,22,34,.75); color:var(--muted); font-size:.78rem; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--bad); } .dot.good { background:var(--good); box-shadow:0 0 10px #66e3a466; }
+    .layout { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(340px,.7fr); gap:1.2rem; align-items:start; }
+    .panel { border:1px solid var(--line); border-radius:15px; background:linear-gradient(145deg,rgba(21,29,44,.95),rgba(12,17,27,.95)); padding:1rem; box-shadow:0 18px 60px #0004; }
+    .sectionhead { display:flex; justify-content:space-between; gap:1rem; align-items:start; margin-bottom:.9rem; } .muted { color:var(--muted); }
+    .services { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:.7rem; }
+    .service { text-align:left; min-height:126px; padding:.9rem; background:#111a28; border:1px solid var(--line); border-radius:12px; cursor:pointer; transition:.15s ease; }
+    .service:hover,.service.selected { border-color:var(--brand); background:#152538; transform:translateY(-2px); } .service.selected { box-shadow:0 0 0 1px #73dcff44 inset; }
+    .service-top,.agent-top,.row { display:flex; justify-content:space-between; gap:.7rem; align-items:center; }
+    .badge { font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; padding:.2rem .45rem; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+    .badge.ready { color:var(--good); border-color:#2b7955; } .badge.degraded { color:var(--warn); border-color:#82602a; }
+    .service p { margin:.55rem 0 0; color:var(--muted); font-size:.82rem; }
+    .agents { display:grid; gap:.55rem; margin:.8rem 0; } .agent { border:1px solid var(--line); border-radius:10px; padding:.7rem; background:#0d1420; }
+    .agent code { color:#c6b8ff; } .agent .meta { margin-top:.3rem; font-size:.76rem; color:var(--muted); }
+    .controls { display:grid; grid-template-columns:1fr 1fr; gap:.7rem; margin:.9rem 0; } label { display:grid; gap:.3rem; color:var(--muted); font-size:.8rem; }
+    select,textarea { color:var(--text); background:#090f19; border:1px solid var(--line); border-radius:9px; padding:.65rem; }
+    textarea { width:100%; min-height:112px; resize:vertical; }
+    .toggle { display:flex; gap:.55rem; align-items:center; padding:.6rem; border:1px solid var(--line); border-radius:9px; color:var(--text); }
+    .actions { display:flex; gap:.55rem; flex-wrap:wrap; margin-top:.7rem; }
+    .answer { margin-top:1rem; border-top:1px solid var(--line); padding-top:1rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .answer:empty { display:none; } details { margin-top:.8rem; color:var(--muted); } pre { white-space:pre-wrap; overflow:auto; max-height:320px; padding:.7rem; background:#090f19; border-radius:9px; }
+    .bottom { display:grid; grid-template-columns:1fr 1fr; gap:1.2rem; margin-top:1.2rem; } .service-list { display:grid; gap:.45rem; margin:.7rem 0; }
+    .runtime-row { display:flex; justify-content:space-between; border-bottom:1px solid var(--line); padding:.45rem 0; }
+    #notice { min-height:1.3rem; color:var(--muted); margin-top:.55rem; }
+    @media (max-width:900px) { .layout,.bottom { grid-template-columns:1fr; } header { align-items:flex-start; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="logo">A</div><div><h1>AetherStack</h1><div class="muted">Choose the work. The system chooses the team.</div></div></div>
+    <nav><a class="active" href="/">Simple</a><a href="/advanced">Advanced dashboard</a><a href="/graph">Node graph</a><a href="http://127.0.0.1:3000/">Open WebUI</a></nav>
+  </header>
+  <main>
+    <div class="statusbar" id="statusbar"><span class="chip">Checking runtime…</span></div>
+    <div class="layout">
+      <section class="panel">
+        <div class="sectionhead"><div><h2>What do you want to do?</h2><div class="muted">Every service builds its agent lineup from models that are available on this system.</div></div><button id="refresh">Refresh models</button></div>
+        <div class="services" id="services"></div>
+      </section>
+      <aside class="panel" id="workspace">
+        <div class="sectionhead"><div><h2 id="selectedLabel">Select a service</h2><div class="muted" id="selectedSummary">The resolved team will appear here.</div></div><span class="badge" id="selectedState">—</span></div>
+        <div class="agents" id="agents"></div>
+        <div class="controls">
+          <label>Lean delivery
+            <select id="lean"><option value="off">Off</option><option value="balanced" selected>Balanced</option><option value="strict">Strict</option></select>
+          </label>
+          <label class="toggle"><input type="checkbox" id="saver"> Context/token saver</label>
+        </div>
+        <div class="muted">Lean Delivery is independently implemented and inspired by <a href="https://github.com/DietrichGebert/ponytail" target="_blank" rel="noreferrer">Ponytail</a> (MIT): less overbuilding, never less safety.</div>
+        <label style="margin-top:.9rem">Ask the selected team<textarea id="goal" placeholder="Describe the outcome, constraints, and repository or service context…"></textarea></label>
+        <div class="actions"><button class="primary" id="run">Run combined chat</button><button id="activate">Use this team</button><button id="preview">Preview plan</button></div>
+        <div id="notice"></div><div class="answer" id="answer"></div>
+        <details id="traceBox"><summary>Agent trace</summary><pre id="trace"></pre></details>
+      </aside>
+    </div>
+    <div class="bottom">
+      <section class="panel"><h2>Runtime & setup</h2><div class="muted">Core services stay local. Safe model/package setup can run here; privileged host work remains explicit.</div><div class="service-list" id="runtime"></div><div class="actions"><button id="setupPlan">Show setup plan</button><button id="setupApply">Install safe components</button></div><pre id="setupOut"></pre></section>
+      <section class="panel"><h2>Update AetherStack</h2><div class="muted">Checks the official repository and stages an archive without overwriting this checkout.</div><div id="updateState" style="margin:.8rem 0">Not checked.</div><div class="actions"><button id="checkUpdate">Check for updates</button><button id="stageUpdate">Stage latest update</button></div><pre id="updateOut"></pre></section>
+    </div>
+  </main>
+  <script>
+    const state={data:null,selected:null,history:[]};
+    const byId=id=>document.getElementById(id);
+    const text=(tag,value,cls)=>{const el=document.createElement(tag);el.textContent=value??'';if(cls)el.className=cls;return el};
+    async function json(url,options){const response=await fetch(url,options);const body=await response.json().catch(()=>({error:`HTTP ${response.status}`}));if(!response.ok)throw new Error(body.error||`HTTP ${response.status}`);return body}
+    function setBusy(value){for(const id of ['run','activate','preview','refresh'])byId(id).disabled=value}
+    function renderStatus(){const runtime=state.data?.runtime||{};const entries=[['Hub',true],['LiteLLM',runtime.litellm?.ok],['Redis',runtime.redis?.ok],['Open WebUI',runtime.open_webui?.ok]];byId('statusbar').replaceChildren(...entries.map(([name,ok])=>{const chip=text('span','', 'chip');chip.append(text('span','',`dot ${ok?'good':''}`),text('span',`${name} ${ok?'OK':'ERROR'}`));return chip}),text('span',`${state.data?.available_model_count||0} models · ${(state.data?.available_providers||[]).join(', ')||'no provider'}`,'chip'))}
+    function renderServices(){const box=byId('services');box.replaceChildren(...(state.data?.services||[]).map(service=>{const card=text('button','',`service ${state.selected?.id===service.id?'selected':''}`);card.type='button';const top=text('div','', 'service-top');top.append(text('strong',service.label),text('span',service.ready?'ready':service.degraded?'adapted':'setup',`badge ${service.ready?'ready':service.degraded?'degraded':''}`));card.append(top,text('p',service.summary),text('div',`${service.agent_count} agents · ${(service.backends||[]).length} backend${(service.backends||[]).length===1?'':'s'} · ${service.models.length} aliases`,'muted'));card.onclick=()=>selectService(service.id);return card}))}
+    function selectService(id){state.selected=(state.data?.services||[]).find(item=>item.id===id)||null;renderServices();renderSelected()}
+    function renderSelected(){const service=state.selected;if(!service)return;byId('selectedLabel').textContent=service.label;byId('selectedSummary').textContent=service.summary;byId('selectedState').textContent=service.ready?'ready':service.degraded?'adapted':'needs setup';byId('selectedState').className=`badge ${service.ready?'ready':'degraded'}`;byId('lean').value=service.lean_mode||'balanced';byId('saver').checked=Boolean(service.token_saver);byId('agents').replaceChildren(...service.agents.map(agent=>{const card=text('div','', 'agent');const top=text('div','', 'agent-top');const fit=agent.available&&!(agent.missing_capabilities||[]).length?'ready':agent.available?'partial':'missing';top.append(text('strong',agent.label),text('span',fit,`badge ${fit==='ready'?'ready':'degraded'}`));card.append(top);if(agent.available){const model=text('code',agent.model);const gaps=(agent.missing_capabilities||[]).length?` · missing ${agent.missing_capabilities.join(', ')}`:'';card.append(model,text('div',`${agent.backend||agent.provider||'unknown backend'} · ${agent.tier||'unknown'} · needs ${agent.needs.join(', ')}${gaps}`,'meta'))}else{card.append(text('div',agent.suggestion?`Enable ${agent.suggestion.model}: ${agent.suggestion.reason}`:'No matching model configured.','meta'))}return card}))}
+    async function load(refresh=false){setBusy(true);try{state.data=await json(refresh?'/api/services/refresh':'/api/services',refresh?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:undefined);renderStatus();if(!state.selected&&state.data.services.length)state.selected=state.data.services[0];else if(state.selected)state.selected=state.data.services.find(s=>s.id===state.selected.id)||state.data.services[0];renderServices();renderSelected();renderRuntime()}catch(error){byId('notice').textContent=error.message}finally{setBusy(false)}}
+    function body(extra={}){return {lean_mode:byId('lean').value,token_saver:byId('saver').checked,verify:true,...extra}}
+    async function serviceAction(action){if(!state.selected)return;setBusy(true);byId('notice').textContent=action==='run'?'The agent team is working…':'Resolving live models…';try{const goal=byId('goal').value.trim();if((action==='run'||action==='plan')&&!goal)throw new Error('Describe the task first.');const result=await json(`/api/services/${encodeURIComponent(state.selected.id)}/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body({goal,history:state.history}))});if(action==='run'){byId('answer').textContent=result.answer||'No answer returned.';state.history.push({role:'user',content:goal},{role:'assistant',content:result.answer||''});state.history=state.history.slice(-8);byId('trace').textContent=JSON.stringify({agents:result.agents,steps:result.steps,usage:result.usage},null,2);byId('notice').textContent=`Combined by ${result.agents.length} agents · ${result.usage?.total_tokens||0} tokens reported.`}else if(action==='plan'){byId('trace').textContent=JSON.stringify({service:result.service,agents:result.agents,flow:result.edges},null,2);byId('traceBox').open=true;byId('notice').textContent='Plan resolved against the live capability matrix.'}else{state.selected=result.service;renderSelected();byId('notice').textContent=`${result.service.label} is active with verified models.`}}catch(error){byId('notice').textContent=error.message}finally{setBusy(false)}}
+    function renderRuntime(){const runtime=state.data?.runtime||{};const items=[['LiteLLM gateway',runtime.litellm?.ok],['Redis memory',runtime.redis?.ok],['Open WebUI',runtime.open_webui?.ok],['Host Ollama',Boolean(state.data?.available_providers?.includes('ollama'))]];byId('runtime').replaceChildren(...items.map(([name,ok])=>{const row=text('div','', 'runtime-row');row.append(text('span',name),text('span',ok?'OK':'Needs attention',ok?'badge ready':'badge degraded'));return row}))}
+    async function setup(apply){try{if(apply&&!confirm('Install safe packages/models now? Host or elevated steps will remain deferred.'))return;await json('/api/bootstrap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:Boolean(apply)})});const result=await json('/api/bootstrap/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:Boolean(apply),dry_run:!apply,only_safe:true})});byId('setupOut').textContent=JSON.stringify(result.run||result.plan,null,2)}catch(error){byId('setupOut').textContent=error.message}}
+    async function update(stage){try{const result=await json(stage?'/api/update/stage':'/api/update',stage?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:undefined);byId('updateState').textContent=stage?`Staged ${result.manifest?.revision?.slice(0,12)||'update'}`:`Latest ${result.latest_version||result.latest_short||'unavailable'} · installed ${result.current_version}${result.update_available===true?' · update available':result.update_available===false?' · current':''}`;byId('updateOut').textContent=JSON.stringify(result,null,2)}catch(error){byId('updateOut').textContent=error.message}}
+    byId('refresh').onclick=()=>load(true);byId('run').onclick=()=>serviceAction('run');byId('activate').onclick=()=>serviceAction('activate');byId('preview').onclick=()=>serviceAction('plan');byId('setupPlan').onclick=()=>setup(false);byId('setupApply').onclick=()=>setup(true);byId('checkUpdate').onclick=()=>update(false);byId('stageUpdate').onclick=()=>update(true);load();
+  </script>
+</body>
+</html>

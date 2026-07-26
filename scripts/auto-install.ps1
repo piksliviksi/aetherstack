@@ -107,7 +107,7 @@ if (Test-Ollama) {
     $tags = (Invoke-RestMethod http://127.0.0.1:11434/api/tags -TimeoutSec 5).models.name
   } catch { $tags = @() }
   foreach ($m in $want) {
-    $have = $tags | Where-Object { $_ -eq $m -or $_ -like "$m:*" -or ($_ -split ":")[0] -eq $m }
+    $have = $tags | Where-Object { $_ -eq $m -or $_ -like "${m}:*" -or ($_ -split ":")[0] -eq $m }
     if (-not $have) {
       Write-Host "  ollama pull $m  (may take a while)" -ForegroundColor DarkCyan
       if (Get-Command ollama -ErrorAction SilentlyContinue) {
@@ -141,7 +141,7 @@ if ($IncludeElevated) {
   $ens = Join-Path $Root "scripts\ensure-wsl-ollama.ps1"
   if (Test-Path $ens) { & powershell -NoProfile -ExecutionPolicy Bypass -File $ens 2>&1 | Out-Host }
   # ROCm ollama package — required to use AMD compute units (not stock install on WSL)
-  $rocm = (wsl -d $Distro -- bash -lc "test -d /usr/local/lib/ollama/rocm && echo yes || echo no" 2>$null)
+  $rocm = (wsl -d $Distro -- bash -lc "if test -d /usr/local/lib/ollama/rocm || ls -d /usr/local/lib/ollama/rocm_* >/dev/null 2>&1; then echo yes; else echo no; fi" 2>$null)
   if ($rocm -match "no") {
     Write-Host "  Installing Ollama ROCm backend for AMD compute engines (large download)..." -ForegroundColor Yellow
     $script = "/mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh"

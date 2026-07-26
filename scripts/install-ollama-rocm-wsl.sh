@@ -63,12 +63,24 @@ else
   tar -xzf "${TMP}/${NAME}.tgz" -C "${DEST}"
 fi
 
-# Normalize layout: some archives unpack lib/ollama/rocm
+# Normalize layout: archives may use lib/ollama/rocm or lib/ollama/rocm_v7_2
 echo "==> Library tree:"
 ls -la "${LIBDIR}" 2>/dev/null | head -25 || true
 if [[ -d "${LIBDIR}/rocm" ]]; then
   echo "OK: ${LIBDIR}/rocm present"
   ls "${LIBDIR}/rocm" | head -15
+elif compgen -G "${LIBDIR}/rocm_*" >/dev/null 2>&1; then
+  echo "OK: versioned ROCm runners present:"
+  ls -d "${LIBDIR}"/rocm_* 2>/dev/null
+  ls "${LIBDIR}"/rocm_* 2>/dev/null | head -5
+  # Convenience symlink for scripts that check .../rocm
+  if [[ ! -e "${LIBDIR}/rocm" ]]; then
+    first="$(ls -d "${LIBDIR}"/rocm_* 2>/dev/null | head -1)"
+    if [[ -n "$first" ]]; then
+      ln -sfn "$(basename "$first")" "${LIBDIR}/rocm"
+      echo "Symlink ${LIBDIR}/rocm -> $(basename "$first")"
+    fi
+  fi
 else
   # Search for hip/rocm ggml
   echo "Looking for ROCm ggml libs..."
@@ -92,6 +104,8 @@ Environment=PATH=/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 Environment=OLLAMA_VULKAN=false
 Environment=HIP_VISIBLE_DEVICES=0
 Environment=ROCR_VISIBLE_DEVICES=0
+# llama.cpp automatic memory fitting hangs on ROCm/DXG before model load.
+Environment=LLAMA_ARG_FIT=off
 # Optional: force library path for ollama runners
 # Environment=OLLAMA_LLM_LIBRARY=rocm
 EOF

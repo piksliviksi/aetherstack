@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src 'nonce-{{NONCE}}';">
+  <title>AetherStack Control Center</title>
+  <style>
+    body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 24px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+    h1, h2 { margin: 0 0 8px; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 16px; }
+    .muted { color: var(--vscode-descriptionForeground); }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 22px; }
+    button { border: 1px solid var(--vscode-button-border, transparent); padding: 7px 12px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; border-radius: 2px; }
+    button:hover { background: var(--vscode-button-hoverBackground); }
+    button:disabled { cursor: wait; opacity: 0.55; }
+    button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+    button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 12px 0 24px; }
+    .card { border: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); padding: 14px; border-radius: 5px; min-width: 0; }
+    .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .ok { color: var(--vscode-testing-iconPassed); font-weight: 600; }
+    .error { color: var(--vscode-testing-iconFailed); font-weight: 600; }
+    .pill { padding: 2px 7px; border-radius: 10px; border: 1px solid currentColor; font-size: 11px; }
+    a { color: var(--vscode-textLink-foreground); overflow-wrap: anywhere; }
+    code, pre { font-family: var(--vscode-editor-font-family); }
+    pre { white-space: pre-wrap; background: var(--vscode-textCodeBlock-background); padding: 12px; overflow: auto; border-radius: 3px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); text-align: left; vertical-align: top; }
+    label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    #notice { min-height: 20px; margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AetherStack Control Center</h1>
+      <div id="summary" class="muted">Checking local services…</div>
+    </div>
+    <button class="secondary" data-action="choosePath">Choose installation</button>
+  </header>
+
+  <div class="actions">
+    <button data-action="start">Start all</button>
+    <button data-action="stop" class="secondary">Stop all</button>
+    <button data-action="restart" class="secondary">Restart all</button>
+    <button data-action="refresh" class="secondary">Refresh</button>
+    <button data-action="logs" class="secondary">Show logs</button>
+  </div>
+  <div id="notice" class="muted"></div>
+
+  <h2>Services</h2>
+  <div id="services" class="grid"></div>
+
+  <h2>Inference activity</h2>
+  <div class="card">
+    <label><input id="showModel" type="checkbox"> Show the currently running model in the AetherStack VS Code view</label>
+    <div id="inference" class="muted" style="margin-top:10px">Activity display is off.</div>
+  </div>
+
+  <h2 style="margin-top:24px">Available models from capability matrix</h2>
+  <div id="models" class="grid"></div>
+
+  <h2>Backend technical details</h2>
+  <div class="card">
+    <div>Installation: <code id="stackPath">not selected</code></div>
+    <table>
+      <thead><tr><th>Container</th><th>Service</th><th>State</th><th>Health</th><th>Ports</th></tr></thead>
+      <tbody id="containers"></tbody>
+    </table>
+    <pre id="technicalError" hidden></pre>
+  </div>
+
+  <script nonce="{{NONCE}}">
+    const vscode = acquireVsCodeApi();
+    const $ = (id) => document.getElementById(id);
+    const text = (tag, value, className) => {
+      const element = document.createElement(tag);
+      element.textContent = value == null ? '' : String(value);
+      if (className) element.className = className;
+      return element;
+    };
+
+    document.querySelectorAll('[data-action]').forEach((button) => {
+      button.addEventListener('click', () => vscode.postMessage({ type: button.dataset.action }));
+    });
+    $('showModel').addEventListener('change', () => vscode.postMessage({ type: 'showActiveModel', value: $('showModel').checked }));
+
+    function render(state) {
+      const runtime = state.runtime || {};
+      $('summary').textContent = runtime.up ? 'AetherStack is up' : runtime.checking ? 'Checking local services…' : 'AetherStack has service errors';
+      $('summary').className = runtime.up ? 'ok' : runtime.checking ? 'muted' : 'error';
+      $('notice').textContent = state.notice || '';
+      $('stackPath').textContent = state.stackPath || 'not selected';
+      $('showModel').checked = Boolean(state.showActiveModel);
+      document.querySelectorAll('[data-action]').forEach((button) => {
+        button.disabled = Boolean(state.busy);
+      });
+      if (state.busy) $('notice').textContent = `AetherStack is ${state.busy}…`;
+
+      $('services').replaceChildren(...(runtime.services || []).map((service) => {
+        const card = text('div', '', 'card');
+        const row = text('div', '', 'row');
+        row.append(text('strong', service.name), text('span', service.ok ? 'OK' : 'ERROR', service.ok ? 'ok pill' : 'error pill'));
+        const link = text('a', service.url);
+        link.href = '#';
+        link.addEventListener('click', (event) => { event.preventDefault(); vscode.postMessage({ type: 'openUrl', url: service.url }); });
+        card.append(row, link);
+        if (!service.ok) card.append(text('div', service.error || 'not running', 'error'));
+        return card;
+      }));
+
+      const inference = state.inference || {};
+      const active = Array.isArray(inference.active) ? inference.active : [];
+      $('inference').textContent = !state.showActiveModel
+        ? 'Activity display is off.'
+        : active.length
+          ? `Running now: ${active.map((entry) => entry.model).join(', ')}`
+          : inference.last
+            ? `Idle. Last model: ${inference.last.model} (${inference.last.state}).`
+            : 'Idle. No inference observed yet.';
+
+      $('models').replaceChildren(...(state.models || []).map((model) => {
+        const card = text('div', '', 'card');
+        card.append(text('strong', model.alias), text('div', `${model.tier || 'unknown'} · ${(model.capabilities || []).join(', ')}`, 'muted'));
+        return card;
+      }));
+      if (!(state.models || []).length) $('models').append(text('div', 'No available chat/code models reported.', 'muted'));
+
+      $('containers').replaceChildren(...(state.containers || []).map((container) => {
+        const row = document.createElement('tr');
+        for (const value of [container.Name || container.Names, container.Service, container.State, container.Health || '—', container.Ports || '—']) {
+          row.append(text('td', value || '—'));
+        }
+        return row;
+      }));
+      $('technicalError').hidden = !state.technicalError;
+      $('technicalError').textContent = state.technicalError || '';
+    }
+
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'state') render(event.data.state || {});
+    });
+    vscode.postMessage({ type: 'ready' });
+  </script>
+</body>
+</html>

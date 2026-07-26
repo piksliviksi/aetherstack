@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src 'nonce-{{NONCE}}';">
+  <title>AetherStack Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font: 13px/1.5 var(--vscode-font-family); }
+    main { width: min(980px, 100%); margin: 0 auto; padding: 20px; }
+    header, .toolbar, .composer-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    header { justify-content: space-between; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 22px; }
+    .muted { color: var(--vscode-descriptionForeground); }
+    .toolbar, .agents, .message, .composer { border: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); border-radius: 6px; padding: 12px; }
+    .toolbar { margin-bottom: 10px; }
+    .toolbar label { display: grid; gap: 3px; min-width: 180px; flex: 1; }
+    select, textarea { width: 100%; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); padding: 7px; font: inherit; }
+    textarea { min-height: 104px; resize: vertical; }
+    .agents { margin-bottom: 12px; }
+    .agent-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+    .agent { border: 1px solid var(--vscode-panel-border); border-radius: 12px; padding: 3px 8px; }
+    #messages { display: grid; gap: 10px; margin: 14px 0; }
+    .message { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .message.user { border-left: 3px solid var(--vscode-button-background); }
+    .message.assistant { border-left: 3px solid var(--vscode-testing-iconPassed); }
+    .role { display: block; font-weight: 600; margin-bottom: 5px; }
+    button { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 1px solid var(--vscode-button-border, transparent); padding: 7px 12px; cursor: pointer; }
+    button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { min-height: 20px; }
+    .error { color: var(--vscode-errorForeground); }
+    @media (max-width: 600px) { main { padding: 10px; } .toolbar { display: grid; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>AetherStack Chat</h1><div class="muted">A capability-matched team runs inside VS Code. Open WebUI remains optional.</div></div>
+    <button id="refresh" class="secondary">Refresh services</button>
+  </header>
+  <section class="toolbar">
+    <label>Service preset<select id="service"></select></label>
+    <label>Lean delivery<select id="lean"><option value="off">Off</option><option value="balanced" selected>Balanced</option><option value="strict">Strict</option></select></label>
+    <label style="display:flex;align-items:center;min-width:auto"><input id="tokenSaver" type="checkbox"> Prefer lower token cost</label>
+  </section>
+  <section class="agents"><strong>Dynamic team</strong><div class="muted" id="serviceDescription"></div><div id="agents" class="agent-list"></div></section>
+  <div id="messages"></div>
+  <section class="composer">
+    <textarea id="prompt" placeholder="Describe the outcome you want…"></textarea>
+    <div class="composer-actions"><button id="send">Run combined chat</button><span id="status" class="muted"></span></div>
+  </section>
+</main>
+<script nonce="{{NONCE}}">
+  const vscode = acquireVsCodeApi();
+  const $ = (id) => document.getElementById(id);
+  let services = [];
+  const text = (tag, value, className) => { const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
+  function selected() { return services.find((item) => item.id === $('service').value); }
+  function renderTeam() {
+    const service = selected();
+    $('agents').replaceChildren();
+    $('serviceDescription').textContent = service ? service.summary || '' : 'No service presets are available.';
+    for (const agent of (service && service.agents) || []) {
+      const gaps = (agent.missing_capabilities || []).length ? ` · missing ${agent.missing_capabilities.join(', ')}` : '';
+      $('agents').append(text('span', `${agent.role}: ${agent.model || 'unresolved'}${agent.backend ? ` (${agent.backend})` : ''}${gaps}`, 'agent'));
+    }
+  }
+  function addMessage(role, value, detail) {
+    const box = text('article', '', `message ${role}`);
+    box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'), text('div', value));
+    if (detail) box.append(text('div', detail, 'muted'));
+    $('messages').append(box);
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  $('service').addEventListener('change', renderTeam);
+  $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
+  $('send').addEventListener('click', () => {
+    const prompt = $('prompt').value.trim();
+    if (!prompt || !$('service').value) return;
+    addMessage('user', prompt);
+    $('prompt').value = '';
+    vscode.postMessage({ type: 'run', serviceId: $('service').value, prompt, leanMode: $('lean').value, tokenSaver: $('tokenSaver').checked });
+  });
+  $('prompt').addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') $('send').click(); });
+  window.addEventListener('message', (event) => {
+    const message = event.data || {};
+    if (message.type === 'state') {
+      const current = $('service').value;
+      services = Array.isArray(message.services) ? message.services : [];
+      $('service').replaceChildren(...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
+      if (services.some((service) => service.id === current)) $('service').value = current;
+      renderTeam();
+      $('status').textContent = message.notice || '';
+      $('status').className = message.error ? 'error' : 'muted';
+    } else if (message.type === 'busy') {
+      $('send').disabled = Boolean(message.value); $('refresh').disabled = Boolean(message.value);
+      $('status').textContent = message.value ? 'The agent team is working…' : '';
+    } else if (message.type === 'result') {
+      const result = message.result || {};
+      const usage = result.usage || result.token_usage || {};
+      const tokens = usage.total_tokens == null ? '' : ` · ${usage.total_tokens} tokens`;
+      const team = (result.agents || []).map((agent) => agent.model).filter(Boolean).join(', ');
+      addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${team || 'dynamic team'}${tokens}`);
+    } else if (message.type === 'error') {
+      $('status').textContent = message.message || 'Request failed'; $('status').className = 'error';
+    }
+  });
+  vscode.postMessage({ type: 'ready' });
+</script>
+</body>
+</html>

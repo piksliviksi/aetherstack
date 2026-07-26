@@ -7,6 +7,14 @@ data/
 *.log
 *.err
 webui-up.*
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.session
+*.cookie
+cache/
+.cache/
 
 __pycache__/
 *.pyc

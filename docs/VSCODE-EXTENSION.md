@@ -15,15 +15,16 @@
 
 | In scope | Out of scope |
 |----------|--------------|
-| Wire VS Code clients to one OpenAI-compatible gateway | Per-message provider picker UI |
-| Project AI history scan and overview | Full multi-agent graph UI (Hub `/graph` + pipelines) |
-| Continue → LiteLLM `:4000` config | Loading model weights or driving GPU inside VS Code |
+| Native AetherStack combined chat with capability-matched service teams | Loading model weights or driving GPU inside VS Code |
+| Project AI history scan, overview, service control, and active-model state | Replacing specialist third-party coding clients |
+| Continue → LiteLLM `:4000` config | Installing privileged host GPU drivers silently |
 
 Chat path after wiring:
 
-1. Continue (or equivalent) → one base URL + key + model id  
-2. Open WebUI `:3000` — same gateway in browser  
-3. Aether Hub `:8766` — pipelines, limits, slash hygiene  
+1. AetherStack Chat → capability-resolved service team in VS Code
+2. Continue (or equivalent) → one base URL + key + model id
+3. Simple Hub `:8766` → the same presets, setup, and update staging
+4. Open WebUI `:3000` → optional separate browser client
 
 ---
 
@@ -46,7 +47,7 @@ code --install-extension AetherStack.aetherstack
 ```bash
 code --install-extension AetherStack.aetherstack
 # or local VSIX:
-code --install-extension packages/aetherstack-0.1.0.vsix
+code --install-extension packages/aetherstack-0.3.0.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -63,21 +64,29 @@ Duplicates can hide the Activity Bar icon or confuse settings.
 
 ---
 
-## First-time setup (5 minutes)
+## First-time setup
 
-### 1. Start AetherStack on the machine
+### 1. Start AetherStack from VS Code
 
-- **Windows:** double-click `start.bat` in the [AetherStack repo](https://github.com/piksliviksi/aetherstack).  
-- **macOS / Ubuntu / Linux:** `./start.sh` (Docker Desktop must be running on Mac).
+1. Make sure Docker Desktop / Docker Engine is running.
+2. Open **AetherStack → Control & Services**.
+3. Press **Start all services**. If the extension cannot auto-detect the installation, choose the folder containing `docker-compose.yml` and `aether-hub/` once.
+4. The extension waits for all endpoints and reports either `OK` or the concrete HTTP/connection/startup error.
 
-You want at least:
+Successful startup shows:
 
 | Service | URL |
 |---------|-----|
-| Open WebUI | http://127.0.0.1:3000 |
-| LiteLLM gateway | http://127.0.0.1:4000 |
+| Open WebUI | http://127.0.0.1:3000/ — OK |
+| LiteLLM gateway | http://127.0.0.1:4000/ — OK |
+| Aether Hub | http://127.0.0.1:8766/ — OK |
 
-Default lab API key: `sk-aether-local` (from `.env` → `LITELLM_MASTER_KEY`).
+Docker Compose reads existing provider keys from the AetherStack root `.env`. The extension imports the existing `LITELLM_MASTER_KEY` into VS Code SecretStorage and syncs it to Continue's supported global `~/.continue/.env` as `AETHERSTACK_API_KEY`. Generated project config references `${{ secrets.AETHERSTACK_API_KEY }}`; it does not generate new provider keys or copy secrets into the project.
+
+Open WebUI does not require a second local login. A loopback-only proxy reuses
+the existing sole admin account, strips browser-supplied identity headers, and
+keeps the authenticated backend off host ports. With multiple existing admins,
+set `AETHER_LOCAL_WEBUI_EMAIL` in the same root `.env`.
 
 ### 2. Open a **folder** in VS Code
 
@@ -92,7 +101,7 @@ The extension does **not** add a giant chat panel. Look for:
 **A. Activity Bar (left strip)**
 
 - Icon titled **AetherStack** (often near the **bottom** of the bar).
-- Click it → sidebar **Project AI Overview**.
+- Click it → sidebar **Control & Services**.
 
 If missing:
 
@@ -106,18 +115,24 @@ If missing:
 
 ### 4. Run the first commands
 
-1. **AetherStack: Scan Project AI History**  
+1. **AetherStack: Start All Services**
+   - Starts Open WebUI, LiteLLM, Redis, and Aether Hub.
+   - Monitors ports `3000`, `4000`, and `8766` continuously.
+   - Reads live model availability from Hub `/api/matrix`.
+   - If `.continue/config.yaml` does not exist, checks candidate aliases with LiteLLM provider health and wires up to eight models that actually respond. Existing configs are preserved.
+
+2. **AetherStack: Scan Project AI History**
    - Detects `.continue`, `.claude`, Aider history, `.waylog`, `.aetherstack`, etc.  
    - Writes:
      - `.aetherstack/project-overview.md`
      - `.aetherstack/project-overview.json`
    - Fills the **Project AI Overview** tree.
 
-2. **AetherStack: Wire Continue.dev to AetherStack**  
+3. **AetherStack: Wire Continue.dev to AetherStack**
    - Writes `.continue/config.yaml` pointing at LiteLLM.  
-   - API key is **not** written as a real secret; uses `${env:AETHERSTACK_API_KEY}`.
+   - API key is **not** written as a real secret; uses `${{ secrets.AETHERSTACK_API_KEY }}` resolved from Continue's global `.env`.
 
-3. (Optional) Install **Continue**, then set the key:
+4. (Optional fallback) If Continue was configured before startup, set the same existing gateway key manually:
 
 ```powershell
 # Windows PowerShell (user or session)
@@ -129,16 +144,11 @@ $env:AETHERSTACK_API_KEY = "sk-aether-local"
 export AETHERSTACK_API_KEY=sk-aether-local
 ```
 
-Or VS Code **User** settings (not workspace — safer for git):
+For the AetherStack extension itself, run **AetherStack: Set API Key Securely**.
+The value is kept in VS Code SecretStorage rather than settings JSON.
 
-```json
-{
-  "aetherstack.apiKey": "sk-aether-local"
-}
-```
-
-4. **AetherStack: List Models (API)** — confirms the gateway answers.  
-5. **AetherStack: Open Chat UI** — browser chat at `:3000`.
+5. **AetherStack: List Models (API)** — confirms the gateway answers.
+6. **AetherStack: Open Chat UI** — browser chat at `:3000`.
 
 ---
 
@@ -146,12 +156,20 @@ Or VS Code **User** settings (not workspace — safer for git):
 
 | Command | When to use |
 |---------|-------------|
+| **Open Combined Chat** | Run capability-matched task services directly in a VS Code editor tab |
+| **Open Hub UI** | Open the Simple service UI, setup helper, and update staging tool |
+| **Open Control Center** | View services, containers, available models, technical errors, and lifecycle controls |
+| **Start / Stop / Restart All Services** | Control the complete local Docker Compose backend |
+| **Refresh Service State** | Re-run health and Compose state checks |
+| **Show Backend Logs** | Open the last 100 Compose log lines in the AetherStack output channel |
+| **Choose Installation Folder** | Set the local AetherStack source/install path |
 | **Scan Project AI History** | Start of a session; after adding chat tools |
 | **Show Project Overview** | Re-open `.aetherstack/project-overview.md` |
 | **Wire Continue.dev to AetherStack** | Point Continue at multi-model LiteLLM |
-| **Write .vscode Settings for AetherStack** | Commit-safe URLs/model in `.vscode/settings.json`; key goes to **User** settings only |
+| **Write .vscode Settings for AetherStack** | Commit-safe URLs/model in `.vscode/settings.json`; never writes a key |
+| **Set API Key Securely** | Store the gateway key in VS Code SecretStorage |
 | **List Models (API)** | Debug 401 / stack down |
-| **Open Chat UI (Open WebUI)** | Browser chat |
+| **Open Chat UI (Open WebUI)** | Optional separate browser chat |
 | **Open Project Data Engine** | Disk/CPU dashboard (`:8765`) with `?project=<workspace>` |
 | **Save Chat Snapshot Note** | Manual session note under `.aetherstack/snapshots/` |
 
@@ -166,11 +184,17 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 | Setting | Default | Notes |
 |---------|---------|--------|
 | `aetherstack.baseUrl` | `http://127.0.0.1:4000/v1` | LiteLLM OpenAI-compatible base |
-| `aetherstack.apiKey` | `sk-aether-local` | Prefer **User** scope; do not commit |
 | `aetherstack.chatUiUrl` | `http://127.0.0.1:3000` | Open WebUI |
 | `aetherstack.defaultModel` | `local-default` | Alias from LiteLLM config |
+| `aetherstack.stackPath` | empty / auto-detect | Folder containing the AetherStack Compose installation |
+| `aetherstack.autoWireModels` | `true` | Create a missing Continue config from live available matrix models after startup |
+| `aetherstack.showActiveModel` | `false` | Show active model alias in the AetherStack tree and status bar |
 
-**Write .vscode Settings** stores base URL / chat UI / model in the workspace and **strips** any `aetherstack.apiKey` from workspace `settings.json` so keys are less likely to land in git.
+### Active-model display
+
+Enable **Show the currently running model** in the Control Center. LiteLLM then exposes the model alias currently handling a request through Hub `/api/inference/status`. Telemetry contains only call id, model alias, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
+
+**Write .vscode Settings** stores base URL / chat UI / model in the workspace. It never writes an API key; legacy plaintext settings are migrated to SecretStorage.
 
 ---
 
@@ -199,7 +223,7 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 1. Stack running (`start.bat` / `./start.sh`).  
 2. **Wire Continue.dev**.  
-3. Set `AETHERSTACK_API_KEY` or User `aetherstack.apiKey`.  
+3. Set `AETHERSTACK_API_KEY` for Continue, and use **AetherStack: Set API Key Securely** for the extension.
 4. Select model alias in Continue (`local-default`, `grok-4.5`, …).  
 5. Or **Open Chat UI** (`:3000`).
 
@@ -223,7 +247,7 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 ### List Models → 401
 
 - Stack not running, or wrong key.  
-- Set `aetherstack.apiKey` to your `LITELLM_MASTER_KEY` (default lab: `sk-aether-local`).  
+- Run **AetherStack: Set API Key Securely** and enter your `LITELLM_MASTER_KEY` (default lab: `sk-aether-local`).
 - Confirm:  
   `curl http://127.0.0.1:4000/v1/models -H "Authorization: Bearer sk-aether-local"`
 

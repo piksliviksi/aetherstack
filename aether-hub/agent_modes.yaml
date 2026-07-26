@@ -10,6 +10,8 @@ defaults:
   mode: inline
   # When true, prefer cheap/local paths, cap tokens, compress context
   token_saver: false
+  # Lean delivery reduces overbuilding/output without cutting safety controls.
+  lean_mode: off
 
 # Token saver knobs (only applied when token_saver=true)
 token_saver:

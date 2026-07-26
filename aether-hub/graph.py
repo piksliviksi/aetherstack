@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -19,6 +20,14 @@ SCHEMA = "aetherstack.graph.v1"
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 GRAPH_DIR = Path(os.environ.get("AETHER_GRAPHS_DIR", str(REPO / "pipelines" / "graphs")))
+GRAPH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
+def _safe_graph_id(value: Any) -> str:
+    gid = str(value or "").strip()
+    if not GRAPH_ID_RE.fullmatch(gid):
+        raise ValueError("graph id must be 1-128 letters, numbers, '-' or '_'")
+    return gid
 
 NODE_TYPES = {
     "goal": {"label": "Goal", "ports_in": 0, "ports_out": 1, "color": "#3b82f6"},
@@ -372,7 +381,7 @@ def pipeline_to_graph(pipeline_id: str | None = None, pipeline: dict | None = No
 
 def save_graph(graph: dict[str, Any]) -> dict[str, Any]:
     GRAPH_DIR.mkdir(parents=True, exist_ok=True)
-    gid = graph.get("id") or f"graph-{uuid.uuid4().hex[:8]}"
+    gid = _safe_graph_id(graph.get("id") or f"graph-{uuid.uuid4().hex[:8]}")
     graph["id"] = gid
     graph["schema"] = SCHEMA
     graph["updated_at"] = time.time()
@@ -383,6 +392,7 @@ def save_graph(graph: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_graph(gid: str) -> dict[str, Any] | None:
+    gid = _safe_graph_id(gid)
     fp = GRAPH_DIR / f"{gid}.aether-graph.json"
     if not fp.is_file():
         # search

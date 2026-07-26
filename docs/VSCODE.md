@@ -34,7 +34,7 @@ VS Code  ──HTTP──►  LiteLLM :4000  ──HTTP──►  Ollama (host o
 | Path | Command |
 |------|---------|
 | Marketplace | `code --install-extension AetherStack.aetherstack` |
-| Local VSIX | `code --install-extension packages/aetherstack-0.1.2.vsix` |
+| Local VSIX | `code --install-extension packages/aetherstack-0.3.0.vsix` |
 | Dev folder | `code --install-extension path/to/integrations/vscode` |
 
 Listing: https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack
@@ -88,7 +88,7 @@ models:
     provider: openai
     model: local-default
     apiBase: http://127.0.0.1:4000/v1
-    apiKey: sk-aether-local
+    apiKey: ${env:AETHERSTACK_API_KEY}
     roles: [chat, edit, apply]
 ```
 
