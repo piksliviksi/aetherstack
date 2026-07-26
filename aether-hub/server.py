@@ -41,7 +41,9 @@ from combos import (  # noqa: E402
 )
 from services import (  # noqa: E402
     activate_service,
+    build_service_graph,
     classify_service,
+    default_service_id,
     execute_service,
     list_services,
     plan_service,
@@ -507,6 +509,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/api/services", "/api/service-presets"):
             self._send(200, list_services(get_snapshot(), get_discover()))
+            return
+        if path.startswith("/api/services/") and path.endswith("/graph"):
+            service_id = path[len("/api/services/") : -len("/graph")].strip("/")
+            if service_id == "active":
+                service_id = get_runtime().get("service") or default_service_id()
+            try:
+                self._send(200, build_service_graph(service_id, get_snapshot()))
+            except ValueError as e:
+                self._send(404, {"error": str(e)})
             return
         if path == "/api/activity-words":
             self._send(200, list_words())
@@ -1318,6 +1329,7 @@ def _paths() -> list[str]:
         "POST /api/services/{id}/activate",
         "POST /api/services/{id}/plan",
         "POST /api/services/{id}/run",
+        "GET  /api/services/{id|active}/graph ← editable resolved preset tree",
         "GET|POST|DELETE /api/activity-words  ← editable inference activity text",
         "GET  /api/update            ← check upstream",
         "POST /api/update/stage      ← download without applying",

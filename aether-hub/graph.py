@@ -135,8 +135,8 @@ def best_practice_template(goal_text: str = "") -> dict[str, Any]:
             140,
             {
                 "role": "mastermind",
-                "maker": "anthropic",
-                "model": "claude-sonnet-4",
+                "maker": None,
+                "model": None,
                 "max_cost": "high",
                 "strategy": "best_score",
             },
@@ -147,8 +147,8 @@ def best_practice_template(goal_text: str = "") -> dict[str, Any]:
             140,
             {
                 "role": "critic",
-                "maker": "openai",
-                "model": "gpt-4.1",
+                "maker": None,
+                "model": None,
                 "gate": True,
                 "ack": True,
                 "max_cost": "high",
@@ -162,7 +162,7 @@ def best_practice_template(goal_text: str = "") -> dict[str, Any]:
                 "role": "builder",
                 "tier": "local",
                 "strategy": "cheapest",
-                "model": "local-default",
+                "model": None,
                 "parallel": 2,
                 "max_cost": "medium",
             },
@@ -184,6 +184,84 @@ def best_practice_template(goal_text: str = "") -> dict[str, Any]:
     g["nodes"] = nodes
     g["edges"] = auto_connect(nodes)["edges"]
     return g
+
+
+def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, Any]:
+    """Build the real editable lead -> parallel workers -> review -> synthesis service graph."""
+    service_id = _safe_graph_id(f"service-{service.get('id') or 'preset'}")
+    graph = empty_graph(service_id)
+    graph["title"] = f"{service.get('label') or service.get('id')} service tree"
+    graph["service_id"] = service.get("id")
+    graph["token_saver"] = bool(service.get("token_saver"))
+    graph["lean_mode"] = service.get("lean_mode")
+    agents = list(service.get("agents") or [])
+    lead = next((agent for agent in agents if agent.get("role") == "mastermind"), None)
+    reviewer = next((agent for agent in agents if agent.get("role") == "supervisor"), None)
+    workers = [agent for agent in agents if agent.get("role") == "worker"]
+    center_y = max(70, 45 + max(0, len(workers) - 1) * 65)
+
+    def agent_node(agent: dict[str, Any] | None, node_id: str, ntype: str, x: int, y: int, label: str) -> dict[str, Any]:
+        agent = agent or {}
+        return {
+            "id": node_id,
+            "type": ntype,
+            "x": x,
+            "y": y,
+            "data": {
+                "label": agent.get("label") or label,
+                "role": agent.get("role") or label.lower(),
+                "model": agent.get("model"),
+                "provider": agent.get("provider"),
+                "backend": agent.get("backend"),
+                "tier": agent.get("tier"),
+                "strategy": agent.get("strategy") or "best_score",
+                "needs": list(agent.get("needs") or []),
+                "available": bool(agent.get("available")),
+                "service_id": service.get("id"),
+            },
+        }
+
+    goal = new_node(
+        "goal",
+        30,
+        center_y,
+        {
+            "label": "Task / goal",
+            "text": goal_text or service.get("summary") or service.get("label") or "Describe the task",
+            "service_id": service.get("id"),
+        },
+    )
+    goal["id"] = f"{service_id}-goal"
+    lead_node = agent_node(lead, f"{service_id}-lead", "master", 180, center_y, "Lead")
+    worker_nodes = [
+        agent_node(agent, f"{service_id}-worker-{index + 1}", "worker", 370, 45 + index * 130, f"Worker {index + 1}")
+        for index, agent in enumerate(workers)
+    ]
+    reviewer_node = agent_node(reviewer, f"{service_id}-review", "analyser", 570, center_y, "Review")
+    synthesis_node = agent_node(lead, f"{service_id}-synthesis", "master", 760, center_y, "Final synthesis")
+    synthesis_node["data"]["label"] = "Final synthesis"
+    synthesis_node["data"]["role"] = "synthesizer"
+    output = new_node("output", 930, center_y, {"label": "Final answer", "service_id": service.get("id")})
+    output["id"] = f"{service_id}-output"
+
+    if not worker_nodes:
+        worker_nodes = [agent_node(None, f"{service_id}-worker-1", "worker", 370, center_y, "Unresolved worker")]
+    nodes = [goal, lead_node, *worker_nodes, reviewer_node, synthesis_node, output]
+    edges = []
+
+    def connect(source: dict[str, Any], target: dict[str, Any]) -> None:
+        edges.append({"id": f"e-{source['id']}-{target['id']}", "from": source["id"], "to": target["id"], "kind": "data"})
+
+    connect(goal, lead_node)
+    for worker in worker_nodes:
+        connect(lead_node, worker)
+        connect(worker, reviewer_node)
+    connect(reviewer_node, synthesis_node)
+    connect(synthesis_node, output)
+    graph["nodes"] = nodes
+    graph["edges"] = edges
+    graph["resolved_models"] = sorted({agent.get("model") for agent in agents if agent.get("model")})
+    return graph
 
 
 def auto_connect(nodes: list[dict[str, Any]] | None = None, graph: dict | None = None) -> dict[str, Any]:

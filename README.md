@@ -154,8 +154,10 @@ The same combined chat opens as an **AetherStack Chat** editor tab in VS Code.
 Its default **Auto** mode classifies the current coding stage from the task and
 activates the matching service tree; the catalog, activities, and agent lineup
 remain data-driven and every model is resolved from live capabilities. Expand
-the collapsed active-preset graph below the lineup, or use the separate
-Advanced setup button for the full editor. Each run uses a lead, parallel
+the collapsed full advanced canvas below the preset workspace; it loads the
+selected service's live lead, parallel workers, reviewer, synthesis, and model
+assignments. The same tree opens full-page at `/graph`, while the separate
+Advanced setup button opens technical configuration. Each run uses a lead, parallel
 workers, a reviewer, and final synthesis. Lean
 Delivery and the token saver can reduce unnecessary context and output without
 removing validation, security controls, accessibility, tests, or observability.

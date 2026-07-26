@@ -194,7 +194,7 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 Enable **Show the currently running model** in the Control Center. LiteLLM then exposes the model alias currently handling a request through Hub `/api/inference/status`, and Chat shows that alias beside its rotating activity line. Telemetry contains only call id, model alias, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
 
-Chat defaults to **Auto — detect from current task**. Each message is matched against the editable service catalog, the selected service is activated, and its lead/workers/reviewer are resolved from currently available models. Expand **Active preset node graph** beneath the agent lineup to inspect the current flow. The full editor and the English/Estonian/Ukrainian activity-word editor remain under **Advanced setup** in Hub; runtime edits persist in `.aetherstack/activity_words.json`.
+Chat defaults to **Auto — detect from current task**. Each message is matched against the editable service catalog, the selected service is activated, and its lead/workers/reviewer are resolved from currently available models. Chat keeps a compact flow summary beneath the lineup. Hub embeds the complete editable advanced canvas below its presets, and `/graph` opens the same selected or active tree full-page. **Advanced setup** is reserved for technical configuration and the English/Estonian/Ukrainian activity-word editor; runtime edits persist in `.aetherstack/activity_words.json`.
 
 **Write .vscode Settings** stores base URL / chat UI / model in the workspace. It never writes an API key; legacy plaintext settings are migrated to SecretStorage.
 

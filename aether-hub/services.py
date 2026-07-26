@@ -350,6 +350,28 @@ def _activate_resolved_service(
     )
 
 
+def default_service_id() -> str:
+    catalog = load_service_catalog()
+    services = catalog.get("services") or {}
+    if not services:
+        raise ValueError("service catalog is empty")
+    # The first catalog entry is the visible first preset (Research by default).
+    return next(iter(services))
+
+
+def build_service_graph(
+    service_id: str, snapshot: dict[str, Any], verify: bool = False
+) -> dict[str, Any]:
+    from graph import service_to_graph
+
+    resolved = (
+        resolve_verified_service(service_id, snapshot)
+        if verify
+        else resolve_service(service_id, snapshot)
+    )
+    return service_to_graph(resolved)
+
+
 def plan_service(
     service_id: str,
     snapshot: dict[str, Any],
