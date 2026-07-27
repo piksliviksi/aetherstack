@@ -43,6 +43,10 @@ test("renderMarkdown renders a blockquote", () => {
   assert.equal(renderMarkdown("> quoted"), "<blockquote>quoted</blockquote>");
 });
 
+test("renderMarkdown converts a single line break inside a paragraph to <br>", () => {
+  assert.equal(renderMarkdown("line one\nline two"), "<p>line one<br>line two</p>");
+});
+
 const { highlightCode } = require("../chat-render");
 
 test("highlightCode wraps a JS keyword", () => {

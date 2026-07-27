@@ -849,7 +849,7 @@ class HubChat {
     webview.html = template
       .replaceAll("{{NONCE}}", nonce())
       .replaceAll("{{CSP_SOURCE}}", webview.cspSource)
-      .replace("{{CHAT_RENDER_JS}}", renderScript);
+      .replace("{{CHAT_RENDER_JS}}", () => renderScript);
     webview.onDidReceiveMessage(async (message) => {
       try {
         if (message.type === "ready") await this.loadServices(false, webview);

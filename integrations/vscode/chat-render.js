@@ -80,7 +80,7 @@ function renderMarkdown(source) {
       paragraph.push(lines[i]);
       i += 1;
     }
-    blocks.push(`<p>${renderInline(paragraph.join(" "))}</p>`);
+    blocks.push(`<p>${paragraph.map((paragraphLine) => renderInline(paragraphLine)).join("<br>")}</p>`);
   }
   return blocks.join("");
 }
