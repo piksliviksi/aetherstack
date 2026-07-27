@@ -739,14 +739,15 @@ class HubChat {
   async saveConversationSnapshot(transcript) {
     if (!transcript.length) return;
     const now = Date.now();
+    const title = titleFromTranscript(transcript);
     let entry = this.conversations.find((item) => item.id === this.activeConversationId);
     if (!entry) {
-      entry = { id: String(now), title: titleFromTranscript(transcript), updatedAt: now };
+      entry = { id: String(now), title, updatedAt: now };
       this.conversations.push(entry);
       this.activeConversationId = entry.id;
     }
     entry.transcript = transcript;
-    entry.title = titleFromTranscript(transcript);
+    entry.title = title;
     entry.updatedAt = now;
     this.conversations = capConversations(this.conversations);
     await this.context.globalState.update("aetherstack.conversations", this.conversations);
@@ -887,15 +888,20 @@ class HubChat {
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
         } else if (message.type === "newConversation") {
           this.activeConversationId = null;
+          this.history = [];
           await webview.postMessage({ type: "conversationSwitched", transcript: [] });
         } else if (message.type === "switchConversation") {
           const entry = this.conversations.find((item) => item.id === message.id);
           this.activeConversationId = entry ? entry.id : null;
+          this.history = entry ? entry.transcript.map((item) => ({ role: item.role, content: item.value })) : [];
           await webview.postMessage({ type: "conversationSwitched", transcript: entry ? entry.transcript : [] });
         } else if (message.type === "deleteConversation") {
           this.conversations = this.conversations.filter((item) => item.id !== message.id);
           await this.context.globalState.update("aetherstack.conversations", this.conversations);
-          if (this.activeConversationId === message.id) this.activeConversationId = null;
+          if (this.activeConversationId === message.id) {
+            this.activeConversationId = null;
+            this.history = [];
+          }
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
         }
       } catch (error) {
