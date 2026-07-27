@@ -160,6 +160,7 @@
     $('messages').style.flex = '1';
     const id = explicitId != null ? explicitId : (messageSeq += 1);
     const box = text('article', '', `message ${role}`);
+    box.tabIndex = 0;
     box.dataset.msgId = String(id);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
     appendRichText(box, value);
@@ -212,6 +213,16 @@
     return A.map((row, i) => (row + '0' + E[i]).split('').map((bit) => (bit === '1' ? ',,' : '..')).join('')).join('\n');
   }
   $('idleArtPre').textContent = buildIdleArt();
+  (function backfillTranscriptIds() {
+    // Legacy transcripts saved before id tracking (commit 5574691) have no id field at all.
+    // Mint real ids and persist them into the transcript array itself, not just the DOM.
+    let nextId = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
+    let backfilled = false;
+    for (const item of transcript) {
+      if (item.id == null) { item.id = ++nextId; backfilled = true; }
+    }
+    if (backfilled) saveState();
+  })();
   transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id));
   messageSeq = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
   if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
