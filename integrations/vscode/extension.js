@@ -7,6 +7,7 @@ const { createCliBridge } = require("./cli-bridge");
 const { reconcileHostCliBridge } = require("./cli-sync");
 const { parseChatInput, commandHelp } = require("./chat-routing");
 const { createChatRequestHandler } = require("./chat-participant");
+const { capConversations, titleFromTranscript } = require("./conversations");
 const {
   SERVICES,
   checkServices,
@@ -722,6 +723,8 @@ class HubChat {
     this.services = [];
     this.history = [];
     this.activityWords = [];
+    this.conversations = this.context.globalState.get("aetherstack.conversations", []);
+    this.activeConversationId = null;
   }
 
   async hubRequest(pathname, options = {}) {
@@ -731,6 +734,26 @@ class HubChat {
       throw new Error(detail || `Aether Hub returned HTTP ${response.status}`);
     }
     return response.body || {};
+  }
+
+  async saveConversationSnapshot(transcript) {
+    if (!transcript.length) return;
+    const now = Date.now();
+    let entry = this.conversations.find((item) => item.id === this.activeConversationId);
+    if (!entry) {
+      entry = { id: String(now), title: titleFromTranscript(transcript), updatedAt: now };
+      this.conversations.push(entry);
+      this.activeConversationId = entry.id;
+    }
+    entry.transcript = transcript;
+    entry.title = titleFromTranscript(transcript);
+    entry.updatedAt = now;
+    this.conversations = capConversations(this.conversations);
+    await this.context.globalState.update("aetherstack.conversations", this.conversations);
+  }
+
+  conversationSummaries() {
+    return capConversations(this.conversations).map(({ id, title, updatedAt }) => ({ id, title, updatedAt }));
   }
 
   async loadServices(force = false, webview = this.activeWebview()) {
@@ -823,6 +846,7 @@ class HubChat {
       });
       if (selection) result.selection = selection;
       this.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
+      await this.saveConversationSnapshot(this.history.map((entry) => ({ role: entry.role, value: entry.content })));
       await webview.postMessage({ type: "result", result });
     } finally {
       if (inferenceTimer) clearInterval(inferenceTimer);
@@ -859,6 +883,21 @@ class HubChat {
         else if (message.type === "run") await this.run(message, webview);
         else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
         else if (message.type === "openEditor") this.showPanel();
+        else if (message.type === "listConversations") {
+          await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
+        } else if (message.type === "newConversation") {
+          this.activeConversationId = null;
+          await webview.postMessage({ type: "conversationSwitched", transcript: [] });
+        } else if (message.type === "switchConversation") {
+          const entry = this.conversations.find((item) => item.id === message.id);
+          this.activeConversationId = entry ? entry.id : null;
+          await webview.postMessage({ type: "conversationSwitched", transcript: entry ? entry.transcript : [] });
+        } else if (message.type === "deleteConversation") {
+          this.conversations = this.conversations.filter((item) => item.id !== message.id);
+          await this.context.globalState.update("aetherstack.conversations", this.conversations);
+          if (this.activeConversationId === message.id) this.activeConversationId = null;
+          await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
+        }
       } catch (error) {
         await webview.postMessage({ type: "error", message: error.message || String(error) });
       }
