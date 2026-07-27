@@ -15,6 +15,7 @@ from typing import Any, Callable
 import yaml
 
 from agents import apply_runtime_update, plan_event
+from attachments import build_image_content_part, decode_attachment, extract_pdf_text
 from matrix import _score_model
 
 ROOT = Path(__file__).resolve().parent
@@ -573,11 +574,55 @@ def _history_block(history: Any) -> str:
     return "\n\n".join(lines)[-16000:]
 
 
+def _select_vision_model(snapshot: dict[str, Any]) -> str | None:
+    best_id: str | None = None
+    best_score = float("-inf")
+    for model_id, meta in (snapshot.get("models") or {}).items():
+        if meta.get("executor") == "host_cli":
+            continue
+        score = _score_model(meta, {"vision"}, "auto")
+        if score > best_score:
+            best_id, best_score = model_id, score
+    return best_id if best_score > 0 else None
+
+
+def _augment_final_message_with_attachments(
+    final_messages: list[dict[str, Any]],
+    attachments: list[dict[str, Any]],
+    snapshot: dict[str, Any],
+    final_call: dict[str, Any],
+) -> None:
+    if not attachments:
+        return
+    text = final_messages[-1]["content"]
+    for attachment in attachments:
+        if attachment.get("type") != "pdf":
+            continue
+        raw = decode_attachment(attachment)
+        extracted = extract_pdf_text(raw)
+        label = attachment.get("name") or "attachment.pdf"
+        text += f"\n\n--- {label} ---\n{extracted}" if extracted else f"\n\n[no text could be extracted from {label}]"
+    images = [item for item in attachments if item.get("type") == "image"]
+    if images:
+        vision_model = _select_vision_model(snapshot)
+        if vision_model:
+            final_call["model"] = vision_model
+            parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+            for attachment in images:
+                raw = decode_attachment(attachment)
+                mime = attachment.get("mime") or "image/png"
+                parts.append(build_image_content_part(raw, mime))
+            final_messages[-1]["content"] = parts
+            return
+        text += "\n\n[image attached but no vision-capable model is currently available; image omitted]"
+    final_messages[-1]["content"] = text
+
+
 def execute_service(
     service_id: str,
     snapshot: dict[str, Any],
     event: dict[str, Any] | None = None,
-    completion: Callable[[dict[str, Any], list[dict[str, str]] | None], dict[str, Any]] | None = None,
+    completion: Callable[[dict[str, Any], list[dict[str, Any]] | None], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Execute a bounded lead -> workers -> review -> synthesis service run."""
     event = dict(event or {})
@@ -661,6 +706,8 @@ def execute_service(
             ),
         },
     ]
+    attachments = [item for item in (event.get("attachments") or []) if isinstance(item, dict)]
+    _augment_final_message_with_attachments(final_messages, attachments, snapshot, final_call)
     final = completion(final_call, final_messages)
     steps = [
         {"role": "lead-plan", "model": lead.get("model"), "content": lead.get("content")},

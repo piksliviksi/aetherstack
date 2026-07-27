@@ -131,7 +131,7 @@ HOST = os.environ.get("AETHER_HUB_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AETHER_HUB_PORT", "8766"))
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 SYNC_INTERVAL = int(os.environ.get("AETHER_MATRIX_SYNC_SEC", "60"))
-MAX_JSON_BODY = int(os.environ.get("AETHER_MAX_JSON_BODY", str(1024 * 1024)))
+MAX_JSON_BODY = int(os.environ.get("AETHER_MAX_JSON_BODY", str(12 * 1024 * 1024)))
 MAX_INFERENCE_STATUS_BYTES = 64 * 1024
 CORS_ORIGINS = {
     item.strip().rstrip("/")
