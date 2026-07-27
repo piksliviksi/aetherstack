@@ -39,6 +39,10 @@
     .message code { font-family: inherit; }
     .message strong { color: var(--vscode-testing-iconPassed); }
     .role { display: block; margin-bottom: 3px; }
+    .message { position: relative; }
+    .message .msg-actions { position: absolute; top: 0; right: 0; display: none; gap: 4px; }
+    .message:hover .msg-actions { display: flex; }
+    .message .msg-actions button { padding: 1px 6px; font-size: 10px; }
     .composer {
       position: relative;
       border: 1px solid var(--vscode-panel-border);
@@ -149,16 +153,57 @@
       pre.appendChild(button);
     });
   }
+  let messageSeq = 0;
   function addMessage(role, value, detail, persist = true) {
     $('idleArt').style.display = 'none';
     $('messages').style.flex = '1';
+    const id = messageSeq += 1;
     const box = text('article', '', `message ${role}`);
+    box.dataset.msgId = String(id);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
     appendRichText(box, value);
     if (detail) box.append(text('div', detail, 'muted'));
+    const actions = text('div', '', 'msg-actions');
+    const copyBtn = document.createElement('button'); copyBtn.type = 'button'; copyBtn.className = 'secondary'; copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', () => navigator.clipboard.writeText(String(value || '')).catch(() => {}));
+    actions.append(copyBtn);
+    if (role === 'user') {
+      const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.className = 'secondary'; editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => editMessage(id));
+      actions.append(editBtn);
+    } else {
+      const regenBtn = document.createElement('button'); regenBtn.type = 'button'; regenBtn.className = 'secondary'; regenBtn.textContent = 'Regenerate';
+      regenBtn.addEventListener('click', () => regenerateFrom(id));
+      actions.append(regenBtn);
+    }
+    box.append(actions);
     $('messages').append(box);
-    if (persist) { transcript.push({ role, value: String(value || ''), detail: String(detail || '') }); saveState(); }
+    if (persist) { transcript.push({ id, role, value: String(value || ''), detail: String(detail || '') }); saveState(); }
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function truncateTranscriptFrom(id) {
+    const index = transcript.findIndex((item) => item.id === id);
+    if (index === -1) return;
+    transcript = transcript.slice(0, index);
+    $('messages').replaceChildren();
+    transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false));
+    if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
+    saveState();
+  }
+  function editMessage(id) {
+    const item = transcript.find((entry) => entry.id === id);
+    if (!item) return;
+    truncateTranscriptFrom(id);
+    $('prompt').value = item.value;
+    $('prompt').focus();
+  }
+  function regenerateFrom(id) {
+    const index = transcript.findIndex((item) => item.id === id);
+    const prior = index > 0 ? transcript[index - 1] : null;
+    if (!prior || prior.role !== 'user') return;
+    truncateTranscriptFrom(prior.id);
+    $('prompt').value = prior.value;
+    sendPrompt();
   }
   function buildIdleArt() {
     const A = ['01110', '10001', '10001', '11111', '10001', '10001', '10001'];
