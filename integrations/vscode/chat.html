@@ -84,7 +84,7 @@
     .idle-art pre { margin: 0; color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.1; text-align: center; animation: idle-breathe 4s ease-in-out infinite; }
     @keyframes idle-breathe { 0%, 100% { opacity: .18; } 50% { opacity: .4; } }
     body.wide { display: flex; align-items: stretch; }
-    body.wide main { flex: 1; min-width: 0; margin: 0; }
+    body.wide main { flex: 1 1 auto; max-width: 980px; min-width: 0; margin: 0; }
     body.wide .history-rail { display: block; width: 220px; flex: none; border-right: 1px solid var(--vscode-panel-border); padding: 14px 10px 14px 16px; overflow-y: auto; }
     body:not(.wide) .history-rail { display: none; }
     body:not(.wide) .history-rail.open { display: block; position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--vscode-editor-background); border-right: 1px solid var(--vscode-panel-border); z-index: 20; padding: 10px; overflow-y: auto; }
