@@ -30,8 +30,11 @@ def decode_attachment(attachment: dict[str, Any]) -> bytes:
 
 
 def extract_pdf_text(data: bytes) -> str:
-    reader = pypdf.PdfReader(io.BytesIO(data))
-    pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    except Exception as exc:
+        raise AttachmentError(f"could not read PDF: {exc}") from exc
     return "\n\n".join(page for page in pages if page)
 
 

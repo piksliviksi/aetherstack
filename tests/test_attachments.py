@@ -52,6 +52,11 @@ def test_extract_pdf_text_returns_empty_for_blank_page():
     assert extract_pdf_text(data) == ""
 
 
+def test_extract_pdf_text_rejects_malformed_pdf():
+    with pytest.raises(AttachmentError):
+        extract_pdf_text(b"not a real pdf")
+
+
 def test_build_image_content_part_shape():
     part = build_image_content_part(b"\x89PNG...", "image/png")
     assert part["type"] == "image_url"
