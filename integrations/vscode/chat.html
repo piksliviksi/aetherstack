@@ -42,6 +42,7 @@
     .message { position: relative; }
     .message .msg-actions { position: absolute; top: 0; right: 0; display: none; gap: 4px; }
     .message:hover .msg-actions { display: flex; }
+    .message:focus-within .msg-actions { display: flex; }
     .message .msg-actions button { padding: 1px 6px; font-size: 10px; }
     .composer {
       position: relative;
@@ -154,10 +155,10 @@
     });
   }
   let messageSeq = 0;
-  function addMessage(role, value, detail, persist = true) {
+  function addMessage(role, value, detail, persist = true, explicitId) {
     $('idleArt').style.display = 'none';
     $('messages').style.flex = '1';
-    const id = messageSeq += 1;
+    const id = explicitId != null ? explicitId : (messageSeq += 1);
     const box = text('article', '', `message ${role}`);
     box.dataset.msgId = String(id);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
@@ -186,7 +187,7 @@
     if (index === -1) return;
     transcript = transcript.slice(0, index);
     $('messages').replaceChildren();
-    transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false));
+    transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id));
     if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
     saveState();
   }
@@ -211,7 +212,8 @@
     return A.map((row, i) => (row + '0' + E[i]).split('').map((bit) => (bit === '1' ? ',,' : '..')).join('')).join('\n');
   }
   $('idleArtPre').textContent = buildIdleArt();
-  transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false));
+  transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id));
+  messageSeq = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
   if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
   let pickerIndex = -1;
   function pickerOptions() { return [{ id: 'auto', label: 'Auto — analyze my request' }, ...services.map((service) => ({ id: service.id, label: service.label || service.id }))]; }
