@@ -66,7 +66,7 @@ API keys / gateway secrets committed to git or shared workspaces.
 
 - Continue config uses `${env:AETHERSTACK_API_KEY}` placeholder, not the live key.
 - Workspace `.vscode/settings.json` stores baseUrl/UI/model only; **strips** any existing `aetherstack.apiKey`.
-- API key, if set, is written to **User** settings (`ConfigurationTarget.Global`) only.
+- API key, if set, is written to VS Code **SecretStorage** (`context.secrets`), not `settings.json`; a legacy key found in **User** settings (`ConfigurationTarget.Global`) is migrated in and cleared from config.
 - Overview JSON omits secrets.
 
 ---

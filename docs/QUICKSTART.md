@@ -152,7 +152,7 @@ aetherstack/
 
 | Default | Constraint |
 |---------|------------|
-| `WEBUI_AUTH=false` | Lab only. Enable auth before public bind. |
+| `WEBUI_AUTH=true` | Hardcoded in `docker-compose.yml`; port 3000 stays loopback-only, signed in via the local proxy. |
 | `.env` | Not committed. |
 | `LITELLM_MASTER_KEY` | Rotate before shared or remote use. |
 | Bind | Localhost or TLS reverse proxy for remote access. |

@@ -65,7 +65,7 @@ In-repo catalogs:
 | [WSL-AMD-GPU.md](./WSL-AMD-GPU.md) | Windows + WSL ROCm |
 | [TUTORIAL-MACOS.md](./TUTORIAL-MACOS.md) | Host Ollama + Metal |
 
-Code: [aether-amd/](../aether-amd/), `scripts/scan-system.*`, `scripts/auto-install.*`.
+Code: [aether-amd/](../aether-amd/), `scripts/scan-system.ps1`, `scripts/auto-install.ps1` (GPU-aware); the `.sh` counterparts are generic host-scan/bootstrap only.
 
 ---
 

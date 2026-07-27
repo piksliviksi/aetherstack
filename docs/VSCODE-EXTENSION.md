@@ -47,7 +47,7 @@ code --install-extension AetherStack.aetherstack
 ```bash
 code --install-extension AetherStack.aetherstack
 # or local VSIX:
-code --install-extension packages/aetherstack-0.3.5.vsix
+code --install-extension packages/aetherstack-0.3.10.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
