@@ -42,3 +42,22 @@ test("renderMarkdown renders a table", () => {
 test("renderMarkdown renders a blockquote", () => {
   assert.equal(renderMarkdown("> quoted"), "<blockquote>quoted</blockquote>");
 });
+
+const { highlightCode } = require("../chat-render");
+
+test("highlightCode wraps a JS keyword", () => {
+  assert.equal(highlightCode("const x = 1;", "js"), '<span class="tok-kw">const</span> x = <span class="tok-num">1</span>;');
+});
+
+test("highlightCode wraps a Python string", () => {
+  assert.equal(highlightCode("x = 'hi'", "python"), "x = <span class=\"tok-str\">'hi'</span>");
+});
+
+test("highlightCode falls back to escaped text for unknown languages", () => {
+  assert.equal(highlightCode("<tag>", "unknownlang"), "&lt;tag&gt;");
+});
+
+test("renderMarkdown renders a fenced code block via highlightCode", () => {
+  const out = renderMarkdown("```js\nconst x = 1;\n```");
+  assert.equal(out, '<pre data-lang="js"><code><span class="tok-kw">const</span> x = <span class="tok-num">1</span>;</code></pre>');
+});

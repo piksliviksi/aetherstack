@@ -31,6 +31,15 @@ function renderMarkdown(source) {
   while (i < lines.length) {
     const line = lines[i];
     if (!line.trim()) { i += 1; continue; }
+    if (/^```/.test(line)) {
+      const lang = line.replace(/^```/, "").trim();
+      const body = [];
+      i += 1;
+      while (i < lines.length && !/^```/.test(lines[i])) { body.push(lines[i]); i += 1; }
+      i += 1; // skip closing fence
+      blocks.push(`<pre data-lang="${escapeHtml(lang)}"><code>${highlightCode(body.join("\n"), lang)}</code></pre>`);
+      continue;
+    }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       const level = heading[1].length;
@@ -76,6 +85,57 @@ function renderMarkdown(source) {
   return blocks.join("");
 }
 
+const KEYWORDS = {
+  js: ["const", "let", "var", "function", "return", "if", "else", "for", "while", "async", "await", "class", "import", "export", "from", "new", "try", "catch"],
+  ts: ["const", "let", "var", "function", "return", "if", "else", "for", "while", "async", "await", "class", "import", "export", "from", "new", "try", "catch", "interface", "type"],
+  python: ["def", "return", "if", "elif", "else", "for", "while", "import", "from", "class", "try", "except", "with", "as", "lambda", "async", "await"],
+  bash: ["if", "then", "else", "fi", "for", "do", "done", "while", "function", "export", "local"],
+  yaml: [],
+  json: [],
+};
+KEYWORDS.javascript = KEYWORDS.js;
+KEYWORDS.typescript = KEYWORDS.ts;
+KEYWORDS.py = KEYWORDS.python;
+KEYWORDS.sh = KEYWORDS.bash;
+KEYWORDS.shell = KEYWORDS.bash;
+
+function highlightCode(code, lang) {
+  const key = String(lang || "").toLowerCase();
+  const keywords = KEYWORDS[key];
+  if (keywords === undefined) return escapeHtml(code);
+
+  let html = escapeHtml(code);
+  const saved = [];
+
+  // Replace strings with placeholders to protect from keyword highlighting
+  html = html.replace(/(&#0*39;|'|"|&quot;)([^'"&]*)\1/g, (match) => {
+    const idx = saved.length;
+    saved.push({ text: match, type: "str" });
+    return `__P_${idx}__`;
+  });
+
+  // Replace numbers with placeholders
+  html = html.replace(/\b\d+(\.\d+)?\b/g, (match) => {
+    const idx = saved.length;
+    saved.push({ text: match, type: "num" });
+    return `__P_${idx}__`;
+  });
+
+  // Replace keywords (now safe, placeholders won't match keyword patterns)
+  if (keywords.length) {
+    const pattern = new RegExp(`\\b(${keywords.join("|")})\\b`, "g");
+    html = html.replace(pattern, (match) => `<span class="tok-kw">${match}</span>`);
+  }
+
+  // Restore saved sections with HTML wrapping
+  for (let i = 0; i < saved.length; i++) {
+    const cls = saved[i].type === "num" ? "tok-num" : "tok-str";
+    html = html.replace(`__P_${i}__`, `<span class="${cls}">${saved[i].text}</span>`);
+  }
+
+  return html;
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { renderMarkdown, renderInline, escapeHtml };
+  module.exports = { renderMarkdown, renderInline, escapeHtml, highlightCode };
 }
