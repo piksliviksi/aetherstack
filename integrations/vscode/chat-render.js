@@ -101,39 +101,33 @@ KEYWORDS.shell = KEYWORDS.bash;
 
 function highlightCode(code, lang) {
   const key = String(lang || "").toLowerCase();
-  const keywords = KEYWORDS[key];
+  // Plain-object lookup falls through to Object.prototype for names like
+  // "constructor" or "toString" — guard with hasOwn so those hit the
+  // unknown-language fallback instead of crashing on a non-array value.
+  const keywords = Object.hasOwn(KEYWORDS, key) ? KEYWORDS[key] : undefined;
   if (keywords === undefined) return escapeHtml(code);
 
-  let html = escapeHtml(code);
-  const saved = [];
+  const html = escapeHtml(code);
 
-  // Replace strings with placeholders to protect from keyword highlighting
-  html = html.replace(/(&#0*39;|'|"|&quot;)([^'"&]*)\1/g, (match) => {
-    const idx = saved.length;
-    saved.push({ text: match, type: "str" });
-    return `__P_${idx}__`;
+  // Single pass: match strings, numbers, and keywords with one alternation
+  // and wrap each match directly. Strings are tried first per position so
+  // their contents (which may contain digits or keyword-looking text) are
+  // consumed whole and never re-scanned by the number/keyword branches.
+  // No intermediate placeholder text is ever inserted into the string, so
+  // there's nothing for later matches to collide with or re-match.
+  const kwAlt = keywords.length ? `|(?<kw>\\b(?:${keywords.join("|")})\\b)` : "";
+  const pattern = new RegExp(
+    `(?<quote>&#0*39;|'|"|&quot;)(?<str>[^'"&]*)\\k<quote>|(?<num>\\b\\d+(?:\\.\\d+)?\\b)${kwAlt}`,
+    "g"
+  );
+
+  return html.replace(pattern, (match, ...rest) => {
+    const groups = rest[rest.length - 1];
+    if (groups.quote !== undefined) return `<span class="tok-str">${match}</span>`;
+    if (groups.num !== undefined) return `<span class="tok-num">${match}</span>`;
+    if (groups.kw !== undefined) return `<span class="tok-kw">${match}</span>`;
+    return match;
   });
-
-  // Replace numbers with placeholders
-  html = html.replace(/\b\d+(\.\d+)?\b/g, (match) => {
-    const idx = saved.length;
-    saved.push({ text: match, type: "num" });
-    return `__P_${idx}__`;
-  });
-
-  // Replace keywords (now safe, placeholders won't match keyword patterns)
-  if (keywords.length) {
-    const pattern = new RegExp(`\\b(${keywords.join("|")})\\b`, "g");
-    html = html.replace(pattern, (match) => `<span class="tok-kw">${match}</span>`);
-  }
-
-  // Restore saved sections with HTML wrapping
-  for (let i = 0; i < saved.length; i++) {
-    const cls = saved[i].type === "num" ? "tok-num" : "tok-str";
-    html = html.replace(`__P_${i}__`, `<span class="${cls}">${saved[i].text}</span>`);
-  }
-
-  return html;
 }
 
 if (typeof module !== "undefined" && module.exports) {

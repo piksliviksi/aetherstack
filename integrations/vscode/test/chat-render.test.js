@@ -61,3 +61,26 @@ test("renderMarkdown renders a fenced code block via highlightCode", () => {
   const out = renderMarkdown("```js\nconst x = 1;\n```");
   assert.equal(out, '<pre data-lang="js"><code><span class="tok-kw">const</span> x = <span class="tok-num">1</span>;</code></pre>');
 });
+
+test("highlightCode wraps the class keyword alongside a number without collision", () => {
+  assert.equal(
+    highlightCode("class Foo { x = 1; }", "js"),
+    '<span class="tok-kw">class</span> Foo { x = <span class="tok-num">1</span>; }'
+  );
+});
+
+test("highlightCode survives a placeholder-shaped literal without corruption or leaking", () => {
+  assert.equal(
+    highlightCode('const __P_0__ = "hello";', "js"),
+    '<span class="tok-kw">const</span> __P_0__ = <span class="tok-str">&quot;hello&quot;</span>;'
+  );
+  assert.equal(
+    highlightCode('x = "__P_1__"; y = 5;', "js"),
+    'x = <span class="tok-str">&quot;__P_1__&quot;</span>; y = <span class="tok-num">5</span>;'
+  );
+});
+
+test("highlightCode falls back to escaped text for an Object.prototype-named fence language", () => {
+  assert.equal(highlightCode("foo", "constructor"), "foo");
+  assert.equal(highlightCode("<tag>", "constructor"), "&lt;tag&gt;");
+});
