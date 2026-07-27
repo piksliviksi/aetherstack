@@ -36,6 +36,10 @@
     #activeModels { color: var(--vscode-testing-iconPassed); font-weight: 600; }
     #messages { display: grid; gap: 10px; margin: 14px 0; }
     .message { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .message { position: relative; }
+    .message .msg-actions { position: absolute; top: 0; right: 0; display: none; gap: 4px; }
+    .message:hover .msg-actions { display: flex; }
+    .message .msg-actions button { padding: 1px 6px; font-size: 10px; }
     .message.user { border-left: 3px solid var(--vscode-button-background); }
     .message.assistant { border-left: 3px solid var(--vscode-testing-iconPassed); }
     .message pre { overflow: auto; margin: 8px 0 0; padding: 9px; border-radius: 5px; background: var(--vscode-textCodeBlock-background); position: relative; }
@@ -119,27 +123,70 @@
       pre.appendChild(button);
     });
   }
+  let messageSeq = 0;
   function addMessage(role, value, detail, persist = true) {
+    const id = messageSeq += 1;
     const box = text('article', '', `message ${role}`);
+    box.dataset.msgId = String(id);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
-    appendRichText(box, value);
+    const body = text('div', '');
+    appendRichText(body, value);
+    box.append(body);
     if (detail) box.append(text('div', detail, 'muted'));
+    const actions = text('div', '', 'msg-actions');
+    const copyBtn = document.createElement('button'); copyBtn.type = 'button'; copyBtn.className = 'secondary'; copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', () => navigator.clipboard.writeText(String(value || '')));
+    actions.append(copyBtn);
+    if (role === 'user') {
+      const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.className = 'secondary'; editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => editMessage(id));
+      actions.append(editBtn);
+    } else {
+      const regenBtn = document.createElement('button'); regenBtn.type = 'button'; regenBtn.className = 'secondary'; regenBtn.textContent = 'Regenerate';
+      regenBtn.addEventListener('click', () => regenerateFrom(id));
+      actions.append(regenBtn);
+    }
+    box.append(actions);
     $('messages').append(box);
-    if (persist) { transcript.push({ role, value: String(value || ''), detail: String(detail || '') }); saveState(); }
+    if (persist) { transcript.push({ id, role, value: String(value || ''), detail: String(detail || '') }); saveState(); }
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function truncateTranscriptFrom(id) {
+    const index = transcript.findIndex((item) => item.id === id);
+    if (index === -1) return;
+    transcript = transcript.slice(0, index);
+    $('messages').replaceChildren();
+    transcript.slice().forEach((item) => addMessage(item.role, item.value, item.detail, false));
+    saveState();
+  }
+  function editMessage(id) {
+    const item = transcript.find((entry) => entry.id === id);
+    if (!item) return;
+    truncateTranscriptFrom(id);
+    $('prompt').value = item.value;
+    $('prompt').focus();
+  }
+  function regenerateFrom(id) {
+    const index = transcript.findIndex((item) => item.id === id);
+    const prior = index > 0 ? transcript[index - 1] : null;
+    if (!prior || prior.role !== 'user') return;
+    truncateTranscriptFrom(prior.id);
+    $('prompt').value = prior.value;
+    sendPrompt();
   }
   if (transcript.length) transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false));
   else addMessage('assistant', 'Tell me what you want to accomplish. I will select the working preset automatically, show the active team, and keep the answer in this conversation. Type /help for direct preset commands.');
   $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
-  $('send').addEventListener('click', () => {
+  function sendPrompt() {
     const prompt = $('prompt').value.trim();
     if (!prompt || !$('service').value) return;
     addMessage('user', prompt);
     $('prompt').value = '';
     vscode.postMessage({ type: 'run', serviceId: $('service').value, prompt, leanMode: $('lean').value, tokenSaver: $('tokenSaver').checked });
-  });
+  }
+  $('send').addEventListener('click', sendPrompt);
   $('prompt').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('send').click(); }
   });
