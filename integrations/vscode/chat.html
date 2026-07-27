@@ -83,9 +83,27 @@
     .idle-art { display: none; flex: 1; align-items: center; justify-content: center; }
     .idle-art pre { margin: 0; color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.1; text-align: center; animation: idle-breathe 4s ease-in-out infinite; }
     @keyframes idle-breathe { 0%, 100% { opacity: .18; } 50% { opacity: .4; } }
+    body.wide main { flex-direction: row; gap: 12px; }
+    body.wide .history-rail { display: block; width: 220px; flex: none; border-right: 1px solid var(--vscode-panel-border); padding-right: 10px; overflow-y: auto; }
+    body:not(.wide) .history-rail { display: none; }
+    body:not(.wide) .history-rail.open { display: block; position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--vscode-editor-background); border-right: 1px solid var(--vscode-panel-border); z-index: 20; padding: 10px; overflow-y: auto; }
+    .history-item { padding: 5px 4px; cursor: pointer; border-radius: 2px; font-size: 12px; }
+    .history-item:hover { background: var(--vscode-list-hoverBackground); }
+    .history-item .del { float: right; opacity: .5; }
+    .history-item .del:hover { opacity: 1; }
+    #historyToggle { display: none; }
+    body:not(.wide) #historyToggle { display: inline-block; }
   </style>
 </head>
 <body>
+<button id="historyToggle" class="secondary" type="button">☰</button>
+<div class="history-rail" id="historyRail">
+  <div class="composer-actions" style="justify-content:space-between;margin-bottom:8px">
+    <strong class="muted">History</strong>
+    <button id="newConversation" class="secondary" type="button">New</button>
+  </div>
+  <div id="historyList"></div>
+</div>
 <main>
   <header>
     <div class="brandmark"><span class="ae">AE</span><h1>AetherStack</h1></div>
@@ -123,6 +141,21 @@
   let activityTimer = null;
   let showActiveModel = false;
   const restored = vscode.getState() || {};
+  new ResizeObserver((entries) => {
+    const width = entries[0].contentRect.width;
+    document.body.classList.toggle('wide', width >= 560);
+  }).observe(document.body);
+  function renderHistory(items) {
+    $('historyList').replaceChildren(...items.map((item) => {
+      const row = text('div', '', 'history-item');
+      row.append(text('span', item.title));
+      const del = text('span', '✕', 'del');
+      del.addEventListener('click', (event) => { event.stopPropagation(); vscode.postMessage({ type: 'deleteConversation', id: item.id }); });
+      row.append(del);
+      row.addEventListener('click', () => vscode.postMessage({ type: 'switchConversation', id: item.id }));
+      return row;
+    }));
+  }
   let transcript = Array.isArray(restored.transcript) ? restored.transcript.slice(-40) : [];
   const text = (tag, value, className) => { const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
   function selected() { return services.find((item) => item.id === ($('service').value === 'auto' ? activeServiceId : $('service').value)); }
@@ -269,6 +302,9 @@
   $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
+  $('historyToggle').addEventListener('click', () => $('historyRail').classList.toggle('open'));
+  $('newConversation').addEventListener('click', () => vscode.postMessage({ type: 'newConversation' }));
+  vscode.postMessage({ type: 'listConversations' });
   function sendPrompt() {
     const prompt = $('prompt').value.trim();
     if (!prompt || $('prompt').disabled || !$('service').value) return;
@@ -314,6 +350,24 @@
       renderTeam(); saveState();
     } else if (message.type === 'command') {
       addMessage('assistant', message.content || '');
+    } else if (message.type === 'conversations') {
+      renderHistory(message.items || []);
+    } else if (message.type === 'conversationSwitched') {
+      transcript = [];
+      messageSeq = 0;
+      $('messages').replaceChildren();
+      const items = Array.isArray(message.transcript) ? message.transcript : [];
+      if (items.length) {
+        for (const item of items) addMessage(item.role, item.value, item.detail, true);
+        $('idleArt').style.display = 'none';
+        $('messages').style.flex = '1';
+      } else {
+        $('idleArt').style.display = 'flex';
+        $('messages').style.flex = '0';
+      }
+      saveState();
+      vscode.postMessage({ type: 'listConversations' });
+      $('historyRail').classList.remove('open');
     } else if (message.type === 'result') {
       const result = message.result || {};
       activeServiceId = result.service_id || (result.selection && result.selection.service_id) || activeServiceId;
