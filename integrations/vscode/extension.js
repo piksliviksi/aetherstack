@@ -845,9 +845,11 @@ class HubChat {
   configureWebview(webview) {
     webview.options = { enableScripts: true };
     const template = fs.readFileSync(path.join(this.context.extensionPath, "chat.html"), "utf8");
+    const renderScript = fs.readFileSync(path.join(this.context.extensionPath, "chat-render.js"), "utf8");
     webview.html = template
       .replaceAll("{{NONCE}}", nonce())
-      .replaceAll("{{CSP_SOURCE}}", webview.cspSource);
+      .replaceAll("{{CSP_SOURCE}}", webview.cspSource)
+      .replace("{{CHAT_RENDER_JS}}", renderScript);
     webview.onDidReceiveMessage(async (message) => {
       try {
         if (message.type === "ready") await this.loadServices(false, webview);

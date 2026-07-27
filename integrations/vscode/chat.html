@@ -38,7 +38,15 @@
     .message { white-space: pre-wrap; overflow-wrap: anywhere; }
     .message.user { border-left: 3px solid var(--vscode-button-background); }
     .message.assistant { border-left: 3px solid var(--vscode-testing-iconPassed); }
-    .message pre { overflow: auto; margin: 8px 0 0; padding: 9px; border-radius: 5px; background: var(--vscode-textCodeBlock-background); }
+    .message pre { overflow: auto; margin: 8px 0 0; padding: 9px; border-radius: 5px; background: var(--vscode-textCodeBlock-background); position: relative; }
+    .message pre .lang-label { position: absolute; top: 4px; right: 34px; font-size: 10px; color: var(--vscode-descriptionForeground); }
+    .message pre .copy-code { position: absolute; top: 2px; right: 4px; padding: 2px 6px; font-size: 10px; }
+    .tok-kw { color: var(--vscode-symbolIcon-keywordForeground, #c586c0); }
+    .tok-str { color: var(--vscode-symbolIcon-stringForeground, #ce9178); }
+    .tok-num { color: var(--vscode-symbolIcon-numberForeground, #b5cea8); }
+    table { border-collapse: collapse; margin: 6px 0; }
+    th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 8px; text-align: left; }
+    blockquote { margin: 6px 0; padding: 2px 10px; border-left: 3px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
     .message code { font-family: var(--vscode-editor-font-family); }
     .role { display: block; font-weight: 600; margin-bottom: 5px; }
     #route { margin: -3px 0 10px; min-height: 20px; color: var(--vscode-textLink-foreground); }
@@ -71,6 +79,7 @@
     <div class="composer-actions"><button id="send">Send</button><span id="status" class="muted"></span></div>
   </section>
 </main>
+<script nonce="{{NONCE}}">{{CHAT_RENDER_JS}}</script>
 <script nonce="{{NONCE}}">
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
@@ -100,10 +109,14 @@
   function saveState() { vscode.setState({ transcript: transcript.slice(-40), serviceId: $('service').value || 'auto', activeServiceId }); }
   function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
   function appendRichText(parent, value) {
-    const parts = String(value || '').split(/```/);
-    parts.forEach((part, index) => {
-      if (index % 2 === 0) parent.append(text('div', part));
-      else { const pre = document.createElement('pre'); const code = text('code', part.replace(/^\w+\s*\n/, '')); pre.append(code); parent.append(pre); }
+    parent.insertAdjacentHTML('beforeend', renderMarkdown(String(value || '')));
+    parent.querySelectorAll('pre[data-lang]').forEach((pre) => {
+      const lang = pre.getAttribute('data-lang');
+      if (lang) pre.appendChild(text('span', lang, 'lang-label'));
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'secondary copy-code'; button.textContent = 'Copy';
+      button.addEventListener('click', () => navigator.clipboard.writeText(pre.querySelector('code').textContent));
+      pre.appendChild(button);
     });
   }
   function addMessage(role, value, detail, persist = true) {
