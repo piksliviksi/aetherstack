@@ -90,8 +90,10 @@
     body:not(.wide) .history-rail.open { display: block; position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--vscode-editor-background); border-right: 1px solid var(--vscode-panel-border); z-index: 20; padding: 10px; overflow-y: auto; }
     .history-item { padding: 5px 4px; cursor: pointer; border-radius: 2px; font-size: 12px; }
     .history-item:hover { background: var(--vscode-list-hoverBackground); }
-    .history-item .del { float: right; opacity: .5; }
+    .history-item .del { float: right; opacity: .5; background: transparent; border: none; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; }
     .history-item .del:hover { opacity: 1; }
+    .history-item:focus-visible, .history-item .del:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    .history-rail.busy { opacity: .6; }
     #historyToggle { display: none; }
     body:not(.wide) #historyToggle { display: inline-block; }
   </style>
@@ -141,6 +143,7 @@
   let activeServiceId = '';
   let activityTimer = null;
   let showActiveModel = false;
+  let historyBusy = false;
   const restored = vscode.getState() || {};
   new ResizeObserver((entries) => {
     const width = entries[0].contentRect.width;
@@ -149,11 +152,21 @@
   function renderHistory(items) {
     $('historyList').replaceChildren(...items.map((item) => {
       const row = text('div', '', 'history-item');
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', `Switch to conversation: ${item.title}`);
       row.append(text('span', item.title));
-      const del = text('span', '✕', 'del');
+      const del = text('button', '✕', 'del');
+      del.type = 'button';
+      del.setAttribute('aria-label', 'Delete conversation');
       del.addEventListener('click', (event) => { event.stopPropagation(); vscode.postMessage({ type: 'deleteConversation', id: item.id }); });
       row.append(del);
-      row.addEventListener('click', () => vscode.postMessage({ type: 'switchConversation', id: item.id }));
+      const switchTo = () => { if (!historyBusy) vscode.postMessage({ type: 'switchConversation', id: item.id }); };
+      row.addEventListener('click', switchTo);
+      row.addEventListener('keydown', (event) => {
+        if (event.target !== row) return;
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); switchTo(); }
+      });
       return row;
     }));
   }
@@ -304,7 +317,13 @@
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
   $('historyToggle').addEventListener('click', () => $('historyRail').classList.toggle('open'));
-  $('newConversation').addEventListener('click', () => vscode.postMessage({ type: 'newConversation' }));
+  $('newConversation').addEventListener('click', () => { if (!historyBusy) vscode.postMessage({ type: 'newConversation' }); });
+  document.addEventListener('click', (event) => {
+    if ($('historyRail').classList.contains('open') && !$('historyRail').contains(event.target) && event.target !== $('historyToggle')) $('historyRail').classList.remove('open');
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && $('historyRail').classList.contains('open')) { event.preventDefault(); $('historyRail').classList.remove('open'); }
+  });
   vscode.postMessage({ type: 'listConversations' });
   function sendPrompt() {
     const prompt = $('prompt').value.trim();
@@ -334,6 +353,8 @@
       $('status').className = message.error ? 'error' : 'muted';
     } else if (message.type === 'busy') {
       $('prompt').disabled = Boolean(message.value); $('refresh').disabled = Boolean(message.value);
+      historyBusy = Boolean(message.value);
+      $('historyRail').classList.toggle('busy', historyBusy);
       $('status').textContent = message.value ? 'The agent team is working…' : '';
       setBusy(Boolean(message.value));
     } else if (message.type === 'inference') {

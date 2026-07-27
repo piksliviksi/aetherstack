@@ -901,6 +901,7 @@ class HubChat {
           if (this.activeConversationId === message.id) {
             this.activeConversationId = null;
             this.history = [];
+            await webview.postMessage({ type: "conversationSwitched", transcript: [] });
           }
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
         }
