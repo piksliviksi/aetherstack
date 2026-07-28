@@ -788,65 +788,65 @@ class HubChat {
 
   async run(message, webview = this.activeWebview()) {
     if (!webview) throw new Error("AetherStack Chat view is not available.");
-    const parsed = parseChatInput(
-      message.prompt,
-      message.serviceId,
-      this.services.map((service) => service.id)
-    );
-    if (parsed.action === "error") throw new Error(parsed.message);
-    if (parsed.action === "help" || parsed.action === "presets") {
-      const content = parsed.action === "help"
-        ? commandHelp(this.services)
-        : this.services.map((service) => `/${service.id} — ${service.label}: ${service.summary}`).join("\n");
-      await webview.postMessage({ type: "command", content });
-      return;
-    }
-    if (parsed.action === "select") {
-      await webview.postMessage({
-        type: "route",
-        selection: parsed.serviceId === "auto"
-          ? { service_id: "", label: "Automatic routing", confidence: "ready", source: "slash-command" }
-          : { service_id: parsed.serviceId, label: (this.services.find((item) => item.id === parsed.serviceId) || {}).label, confidence: "fixed", source: "slash-command" },
-      });
-      await webview.postMessage({ type: "command", content: parsed.serviceId === "auto" ? "Automatic intent routing is active." : `Preset selected: ${parsed.serviceId}.` });
-      return;
-    }
-    const prompt = String(parsed.prompt || "").trim();
-    if (!prompt) throw new Error("Enter a goal first.");
-    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-    if (attachments.some((item) => item.type === "image") && !(await this.hasVisionModel())) {
-      throw new Error("No vision-capable model is currently available for the attached image.");
-    }
-    let serviceId = parsed.serviceId;
-    let selection;
-    if (serviceId === "auto") {
-      selection = await this.hubRequest("/api/services/classify", {
-        method: "POST",
-        body: { goal: prompt },
-      });
-      serviceId = String(selection.service_id || "");
-      if (!this.services.some((service) => service.id === serviceId)) {
-        throw new Error("AetherStack could not map this request to an available service preset.");
-      }
-      selection.source = "intent-analysis";
-    } else if (parsed.command) {
-      const service = this.services.find((item) => item.id === serviceId) || {};
-      selection = { service_id: serviceId, label: service.label || serviceId, confidence: "fixed", source: "slash-command" };
-    }
-    if (selection) await webview.postMessage({ type: "route", selection });
-    await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
     await webview.postMessage({ type: "busy", value: true });
     let inferenceTimer = null;
-    const publishInference = async () => {
-      if (!cfg().showActiveModel) return;
-      try {
-        const inference = await fetchInferenceStatus();
-        await webview.postMessage({ type: "inference", inference });
-      } catch {
-        /* The normal service result will still report the models used. */
-      }
-    };
     try {
+      const parsed = parseChatInput(
+        message.prompt,
+        message.serviceId,
+        this.services.map((service) => service.id)
+      );
+      if (parsed.action === "error") throw new Error(parsed.message);
+      if (parsed.action === "help" || parsed.action === "presets") {
+        const content = parsed.action === "help"
+          ? commandHelp(this.services)
+          : this.services.map((service) => `/${service.id} — ${service.label}: ${service.summary}`).join("\n");
+        await webview.postMessage({ type: "command", content });
+        return;
+      }
+      if (parsed.action === "select") {
+        await webview.postMessage({
+          type: "route",
+          selection: parsed.serviceId === "auto"
+            ? { service_id: "", label: "Automatic routing", confidence: "ready", source: "slash-command" }
+            : { service_id: parsed.serviceId, label: (this.services.find((item) => item.id === parsed.serviceId) || {}).label, confidence: "fixed", source: "slash-command" },
+        });
+        await webview.postMessage({ type: "command", content: parsed.serviceId === "auto" ? "Automatic intent routing is active." : `Preset selected: ${parsed.serviceId}.` });
+        return;
+      }
+      const prompt = String(parsed.prompt || "").trim();
+      if (!prompt) throw new Error("Enter a goal first.");
+      const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+      if (attachments.some((item) => item.type === "image") && !(await this.hasVisionModel())) {
+        throw new Error("No vision-capable model is currently available for the attached image.");
+      }
+      let serviceId = parsed.serviceId;
+      let selection;
+      if (serviceId === "auto") {
+        selection = await this.hubRequest("/api/services/classify", {
+          method: "POST",
+          body: { goal: prompt },
+        });
+        serviceId = String(selection.service_id || "");
+        if (!this.services.some((service) => service.id === serviceId)) {
+          throw new Error("AetherStack could not map this request to an available service preset.");
+        }
+        selection.source = "intent-analysis";
+      } else if (parsed.command) {
+        const service = this.services.find((item) => item.id === serviceId) || {};
+        selection = { service_id: serviceId, label: service.label || serviceId, confidence: "fixed", source: "slash-command" };
+      }
+      if (selection) await webview.postMessage({ type: "route", selection });
+      await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
+      const publishInference = async () => {
+        if (!cfg().showActiveModel) return;
+        try {
+          const inference = await fetchInferenceStatus();
+          await webview.postMessage({ type: "inference", inference });
+        } catch {
+          /* The normal service result will still report the models used. */
+        }
+      };
       if (cfg().showActiveModel) {
         inferenceTimer = setInterval(publishInference, 1200);
         await publishInference();
