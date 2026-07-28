@@ -130,7 +130,12 @@
     </div>
     <div class="prompt-row"><textarea id="prompt" placeholder="Ask anything, or use /research, /plan, /code, /test, /bugfix, /help…"></textarea></div>
     <div id="inference"><span id="activeModels"></span> <span id="activityText"></span></div>
-    <div class="composer-actions"><span id="status" class="muted"></span></div>
+    <div class="composer-actions">
+      <span id="status" class="muted"></span>
+      <button type="button" id="attachBtn" class="secondary">Attach</button>
+      <input type="file" id="attachInput" accept="image/*,.pdf" multiple hidden>
+      <span id="attachList"></span>
+    </div>
   </fieldset>
   <div class="statusline"><span id="cwdLine"></span><span id="tokenLine"></span></div>
 </main>
@@ -144,6 +149,8 @@
   let activityTimer = null;
   let showActiveModel = false;
   let historyBusy = false;
+  const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+  let pendingAttachments = [];
   const restored = vscode.getState() || {};
   new ResizeObserver((entries) => {
     const width = entries[0].contentRect.width;
@@ -202,7 +209,7 @@
     });
   }
   let messageSeq = 0;
-  function addMessage(role, value, detail, persist = true, explicitId) {
+  function addMessage(role, value, detail, persist = true, explicitId, messageAttachments = []) {
     $('idleArt').style.display = 'none';
     $('messages').style.flex = '1';
     const id = explicitId != null ? explicitId : (messageSeq += 1);
@@ -227,7 +234,7 @@
     }
     box.append(actions);
     $('messages').append(box);
-    if (persist) { transcript.push({ id, role, value: String(value || ''), detail: String(detail || '') }); saveState(); }
+    if (persist) { transcript.push({ id, role, value: String(value || ''), detail: String(detail || ''), attachments: messageAttachments }); saveState(); }
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
   function truncateTranscriptFrom(id) {
@@ -235,7 +242,7 @@
     if (index === -1) return;
     transcript = transcript.slice(0, index);
     $('messages').replaceChildren();
-    transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id));
+    transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id, item.attachments || []));
     if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
     saveState();
   }
@@ -252,6 +259,7 @@
     if (!prior || prior.role !== 'user') return;
     truncateTranscriptFrom(prior.id);
     $('prompt').value = prior.value;
+    pendingAttachments = prior.attachments || [];
     sendPrompt();
   }
   function buildIdleArt() {
@@ -270,7 +278,7 @@
     }
     if (backfilled) saveState();
   })();
-  transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id));
+  transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id, item.attachments || []));
   messageSeq = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
   if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
   let pickerIndex = -1;
@@ -316,6 +324,23 @@
   $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
+  function renderAttachmentList() {
+    $('attachList').textContent = pendingAttachments.length ? pendingAttachments.map((a) => a.name).join(', ') : '';
+  }
+  $('attachBtn').addEventListener('click', () => $('attachInput').click());
+  $('attachInput').addEventListener('change', async () => {
+    for (const file of Array.from($('attachInput').files || [])) {
+      if (file.size > MAX_ATTACHMENT_BYTES) { $('status').textContent = `${file.name} exceeds the 8MB attachment limit.`; $('status').className = 'error'; continue; }
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      const isImage = file.type.startsWith('image/');
+      if (!isPdf && !isImage) { $('status').textContent = `${file.name}: only images and PDFs are supported.`; $('status').className = 'error'; continue; }
+      const buffer = await file.arrayBuffer();
+      const base64 = btoa(Array.from(new Uint8Array(buffer), (b) => String.fromCharCode(b)).join(''));
+      pendingAttachments.push({ type: isPdf ? 'pdf' : 'image', name: file.name, mime: file.type || (isPdf ? 'application/pdf' : 'image/png'), data: base64 });
+    }
+    $('attachInput').value = '';
+    renderAttachmentList();
+  });
   $('historyToggle').addEventListener('click', () => $('historyRail').classList.toggle('open'));
   $('newConversation').addEventListener('click', () => { if (!historyBusy) vscode.postMessage({ type: 'newConversation' }); });
   document.addEventListener('click', (event) => {
@@ -327,10 +352,12 @@
   vscode.postMessage({ type: 'listConversations' });
   function sendPrompt() {
     const prompt = $('prompt').value.trim();
-    if (!prompt || $('prompt').disabled || !$('service').value) return;
-    addMessage('user', prompt);
+    if ((!prompt && !pendingAttachments.length) || $('prompt').disabled || !$('service').value) return;
+    addMessage('user', prompt, '', true, undefined, pendingAttachments);
     $('prompt').value = '';
-    vscode.postMessage({ type: 'run', serviceId: $('service').value, prompt, leanMode: $('lean').value, tokenSaver: $('tokenSaver').checked });
+    vscode.postMessage({ type: 'run', serviceId: $('service').value, prompt, leanMode: $('lean').value, tokenSaver: $('tokenSaver').checked, attachments: pendingAttachments });
+    pendingAttachments = [];
+    renderAttachmentList();
   }
   $('prompt').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendPrompt(); }

@@ -775,6 +775,17 @@ class HubChat {
     return (this.view && this.view.webview) || (this.panel && this.panel.webview) || null;
   }
 
+  async hasVisionModel() {
+    try {
+      const matrix = await this.hubRequest("/api/matrix");
+      return Object.values(matrix.models || {}).some(
+        (model) => model.available && model.executor !== "host_cli" && (model.capabilities || []).includes("vision")
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async run(message, webview = this.activeWebview()) {
     if (!webview) throw new Error("AetherStack Chat view is not available.");
     const parsed = parseChatInput(
@@ -802,6 +813,10 @@ class HubChat {
     }
     const prompt = String(parsed.prompt || "").trim();
     if (!prompt) throw new Error("Enter a goal first.");
+    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+    if (attachments.some((item) => item.type === "image") && !(await this.hasVisionModel())) {
+      throw new Error("No vision-capable model is currently available for the attached image.");
+    }
     let serviceId = parsed.serviceId;
     let selection;
     if (serviceId === "auto") {
@@ -843,6 +858,7 @@ class HubChat {
           lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
           token_saver: Boolean(message.tokenSaver),
           history: this.history.slice(-8),
+          attachments,
         },
       });
       if (selection) result.selection = selection;
