@@ -560,6 +560,52 @@ def _chat_completion(call: dict[str, Any], messages: list[dict[str, str]] | None
     }
 
 
+def _chat_completion_stream(
+    call: dict[str, Any],
+    messages: list[dict[str, Any]],
+    on_delta: Callable[[str], None],
+) -> dict[str, Any]:
+    model = str(call.get("model") or "")
+    payload = {
+        "model": model,
+        "messages": messages or call.get("messages") or [],
+        "max_tokens": call.get("max_tokens") or 1600,
+        "stream": True,
+    }
+    key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    request = urllib.request.Request(
+        f"{LITELLM_BASE_URL}/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    parts: list[str] = []
+    final_model = model
+    usage: dict[str, Any] = {}
+    with urllib.request.urlopen(request, timeout=180) as response:
+        for raw_line in response:
+            line = raw_line.decode("utf-8").strip()
+            if not line.startswith("data:"):
+                continue
+            payload_text = line[len("data:"):].strip()
+            if payload_text == "[DONE]":
+                break
+            chunk = json.loads(payload_text)
+            final_model = chunk.get("model") or final_model
+            choice = (chunk.get("choices") or [{}])[0]
+            delta_text = (choice.get("delta") or {}).get("content") or ""
+            if delta_text:
+                parts.append(delta_text)
+                on_delta(delta_text)
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+    return {"model": final_model, "content": "".join(parts), "usage": usage}
+
+
+def _is_host_cli(snapshot: dict[str, Any], model_id: str) -> bool:
+    return (snapshot.get("models") or {}).get(model_id, {}).get("executor") == "host_cli"
+
+
 def _history_block(history: Any) -> str:
     if not isinstance(history, list):
         return ""
@@ -623,6 +669,7 @@ def execute_service(
     snapshot: dict[str, Any],
     event: dict[str, Any] | None = None,
     completion: Callable[[dict[str, Any], list[dict[str, Any]] | None], dict[str, Any]] | None = None,
+    on_delta: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Execute a bounded lead -> workers -> review -> synthesis service run."""
     event = dict(event or {})
@@ -708,7 +755,12 @@ def execute_service(
     ]
     attachments = [item for item in (event.get("attachments") or []) if isinstance(item, dict)]
     _augment_final_message_with_attachments(final_messages, attachments, snapshot, final_call)
-    final = completion(final_call, final_messages)
+    if on_delta is not None and not _is_host_cli(snapshot, final_call.get("model")):
+        final = _chat_completion_stream(final_call, final_messages, on_delta)
+    else:
+        final = completion(final_call, final_messages)
+        if on_delta is not None:
+            on_delta(final.get("content") or "")
     steps = [
         {"role": "lead-plan", "model": lead.get("model"), "content": lead.get("content")},
         *workers,

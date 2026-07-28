@@ -380,6 +380,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_sse_start(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        origin = self.headers.get("Origin")
+        if origin and _request_origin_allowed(origin, self.headers.get("Host", "")):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+
+    def _send_sse_event(self, data: dict) -> None:
+        payload = f"data: {json.dumps(data, default=str)}\n\n".encode("utf-8")
+        self.wfile.write(payload)
+        self.wfile.flush()
+
     def _read_json(self) -> dict:
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -1048,6 +1064,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": str(e)})
             except Exception as e:
                 self._send(502, {"error": f"service execution failed: {str(e)[:500]}"})
+            return
+        if path.startswith("/api/services/") and path.endswith("/run/stream"):
+            service_id = path[len("/api/services/") : -len("/run/stream")].strip("/")
+            self._send_sse_start()
+            try:
+                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
+                resolved_id = selection["service_id"] if selection else service_id
+
+                def on_delta(chunk_text: str) -> None:
+                    self._send_sse_event({"type": "delta", "text": chunk_text})
+
+                result = execute_service(resolved_id, get_snapshot(), body or {}, on_delta=on_delta)
+                if selection:
+                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
+                self._send_sse_event({"type": "done", "result": result})
+            except ValueError as e:
+                self._send_sse_event({"type": "error", "error": str(e)})
+            except Exception as e:
+                self._send_sse_event({"type": "error", "error": f"service execution failed: {str(e)[:500]}"})
             return
         if path.startswith("/api/combos/") and path.endswith("/launch"):
             cid = path[len("/api/combos/") : -len("/launch")].strip("/")
