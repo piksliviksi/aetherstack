@@ -178,7 +178,34 @@
     }));
   }
   let transcript = Array.isArray(restored.transcript) ? restored.transcript.slice(-40) : [];
-  const text = (tag, value, className) => { const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
+  let streamingBox = null;
+  let streamingRaw = '';
+  function startStreamingMessage() {
+    $('idleArt').style.display = 'none';
+    $('messages').style.flex = '1';
+    streamingRaw = '';
+    const box = text('article', '', 'message assistant');
+    box.append(text('span', 'AetherStack', 'role'));
+    const body = text('div', '');
+    box.append(body);
+    $('messages').append(box);
+    streamingBox = box;
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function appendStreamingDelta(chunk) {
+    if (!streamingBox) startStreamingMessage();
+    streamingRaw += chunk;
+    const body = streamingBox.children[1];
+    body.replaceChildren();
+    appendRichText(body, streamingRaw);
+    streamingBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function finishStreamingMessage() {
+    if (streamingBox) streamingBox.remove();
+    streamingBox = null;
+    streamingRaw = '';
+  }
+  const text = (tag, value, className) =>{ const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
   function selected() { return services.find((item) => item.id === ($('service').value === 'auto' ? activeServiceId : $('service').value)); }
   function graphNode(agent, label) { const node = text('div', '', 'graph-node'); node.append(text('strong', label || (agent && agent.label) || 'Stage')); if (agent) node.append(text('code', agent.model || 'unresolved')); return node; }
   function renderGraph(service) { const agents = (service && service.agents) || []; const lead = agents.find((a) => a.role === 'mastermind'); const reviewer = agents.find((a) => a.role === 'supervisor'); const workers = agents.filter((a) => a.role === 'worker'); const flow = $('serviceGraph'); flow.replaceChildren(graphNode(lead, (lead && lead.label) || 'Lead'), text('div', '↓', 'graph-arrow')); const row = text('div', '', 'graph-row'); row.append(...(workers.length ? workers.map((agent) => graphNode(agent, agent.label)) : [graphNode(null, 'Workers resolve after task detection')])); flow.append(row, text('div', '↓', 'graph-arrow'), graphNode(reviewer, (reviewer && reviewer.label) || 'Review'), text('div', '↓', 'graph-arrow'), graphNode(lead, 'Synthesis')); }
@@ -425,7 +452,15 @@
       saveState();
       vscode.postMessage({ type: 'listConversations' });
       $('historyRail').classList.remove('open');
+    } else if (message.type === 'delta') {
+      appendStreamingDelta(message.text || '');
+    } else if (message.type === 'deltaInterrupted') {
+      if (streamingBox) {
+        const body = streamingBox.children[1];
+        body.append(text('div', 'connection interrupted — retrying without streaming…', 'error'));
+      }
     } else if (message.type === 'result') {
+      finishStreamingMessage();
       const result = message.result || {};
       activeServiceId = result.service_id || (result.selection && result.selection.service_id) || activeServiceId;
       renderTeam();
