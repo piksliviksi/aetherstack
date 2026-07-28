@@ -110,6 +110,59 @@ function request(urlStr, { headers = {}, timeoutMs = 4000, method = "GET", body 
   });
 }
 
+function requestStream(urlStr, { headers = {}, timeoutMs = 190_000, method = "POST", body = null } = {}, onEvent) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlStr);
+    const client = url.protocol === "https:" ? https : http;
+    const req = client.request(
+      {
+        hostname: url.hostname,
+        port: url.port,
+        path: `${url.pathname}${url.search}`,
+        method,
+        headers: body == null
+          ? headers
+          : { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(typeof body === "string" ? body : JSON.stringify(body)), ...headers },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          let data = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => { data += chunk; });
+          res.on("end", () => reject(new Error(data || `HTTP ${res.statusCode}`)));
+          return;
+        }
+        res.setEncoding("utf8");
+        let buffer = "";
+        res.on("data", (chunk) => {
+          buffer += chunk;
+          let index;
+          while ((index = buffer.indexOf("\n\n")) !== -1) {
+            const raw = buffer.slice(0, index);
+            buffer = buffer.slice(index + 2);
+            const line = raw.split("\n").find((part) => part.startsWith("data:"));
+            if (!line) continue;
+            let parsed;
+            try {
+              parsed = JSON.parse(line.slice(5).trim());
+            } catch {
+              continue; // malformed chunk — skip it, don't let a parse failure abort the stream
+            }
+            onEvent(parsed); // deliberately outside the try/catch above — a bug in the caller's
+                              // handler should surface normally, not be silently swallowed as "malformed JSON"
+          }
+        });
+        res.on("end", () => resolve());
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error(`timed out after ${timeoutMs} ms`)));
+    if (body != null) req.write(typeof body === "string" ? body : JSON.stringify(body));
+    req.end();
+  });
+}
+
 function conciseError(error) {
   if (!error) return "unknown error";
   if (error.code === "ECONNREFUSED") return "connection refused";
@@ -311,6 +364,7 @@ module.exports = {
   isStackRoot,
   normalizeLocalUiUrl,
   request,
+  requestStream,
   composeDetails,
   composeLogs,
   restartCompose,

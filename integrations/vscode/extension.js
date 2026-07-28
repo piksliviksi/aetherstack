@@ -17,6 +17,7 @@ const {
   isStackRoot,
   normalizeLocalUiUrl,
   request,
+  requestStream,
   runCompose,
   restartCompose,
   selectAvailableModels,
@@ -851,20 +852,51 @@ class HubChat {
         inferenceTimer = setInterval(publishInference, 1200);
         await publishInference();
       }
-      const result = await this.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
-        method: "POST",
-        body: {
-          goal: prompt,
-          lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
-          token_saver: Boolean(message.tokenSaver),
-          history: this.history.slice(-8),
-          attachments,
-        },
-      });
+      const requestBody = {
+        goal: prompt,
+        lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
+        token_saver: Boolean(message.tokenSaver),
+        history: this.history.slice(-8),
+        attachments,
+      };
+      let result = null;
+      let streamedText = "";
+      try {
+        await requestStream(
+          `http://127.0.0.1:8766/api/services/${encodeURIComponent(serviceId)}/run/stream`,
+          { method: "POST", body: requestBody },
+          (event) => {
+            if (event.type === "delta") {
+              streamedText += event.text || "";
+              webview.postMessage({ type: "delta", text: event.text || "" });
+            } else if (event.type === "done") {
+              result = event.result;
+            }
+            // event.type === "error" (an application-level failure reported by the server after
+            // the stream started) is deliberately not thrown here — see the note at the top of
+            // this task. result stays null, so the `if (!result)` fallback below correctly
+            // triggers a non-streaming retry regardless of whether this was a transport failure
+            // (caught by the outer try/catch via requestStream's own reject) or an application-
+            // level error event (which resolves requestStream normally but leaves result unset).
+          }
+        );
+      } catch {
+        // transport-level failure (connection reset, timeout, non-2xx from requestStream's own
+        // reject path) — fall through to the non-streaming retry below.
+      }
+      if (!result) {
+        if (streamedText) {
+          await webview.postMessage({ type: "deltaInterrupted" });
+        }
+        result = await this.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
+          method: "POST",
+          body: requestBody,
+        });
+      }
       if (selection) result.selection = selection;
       this.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
       await this.saveConversationSnapshot(this.history.map((entry) => ({ role: entry.role, value: entry.content })));
-      await webview.postMessage({ type: "result", result });
+      await webview.postMessage({ type: "result", result, streamed: Boolean(streamedText) });
     } finally {
       if (inferenceTimer) clearInterval(inferenceTimer);
       await webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
