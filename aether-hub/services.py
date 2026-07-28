@@ -571,6 +571,7 @@ def _chat_completion_stream(
         "messages": messages or call.get("messages") or [],
         "max_tokens": call.get("max_tokens") or 1600,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
     key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
     request = urllib.request.Request(

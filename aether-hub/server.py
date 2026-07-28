@@ -396,6 +396,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
         self.wfile.flush()
 
+    def _send_sse_event_safe(self, data: dict) -> None:
+        """Best-effort SSE send for error reporting: the client may already be gone
+        (e.g. an earlier on_delta write is what caused the original error), so a
+        failure here must not itself become a second unhandled exception."""
+        try:
+            self._send_sse_event(data)
+        except Exception:
+            pass
+
     def _read_json(self) -> dict:
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -1080,9 +1089,9 @@ class Handler(BaseHTTPRequestHandler):
                     result["selection"] = {key: value for key, value in selection.items() if key != "service"}
                 self._send_sse_event({"type": "done", "result": result})
             except ValueError as e:
-                self._send_sse_event({"type": "error", "error": str(e)})
+                self._send_sse_event_safe({"type": "error", "error": str(e)})
             except Exception as e:
-                self._send_sse_event({"type": "error", "error": f"service execution failed: {str(e)[:500]}"})
+                self._send_sse_event_safe({"type": "error", "error": f"service execution failed: {str(e)[:500]}"})
             return
         if path.startswith("/api/combos/") and path.endswith("/launch"):
             cid = path[len("/api/combos/") : -len("/launch")].strip("/")

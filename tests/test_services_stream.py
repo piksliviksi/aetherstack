@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -87,3 +88,37 @@ def test_execute_service_falls_back_to_blocking_for_host_cli_final_model(monkeyp
 
     assert received == ["cli output"]
     assert result["answer"] == "cli output"
+
+
+def test_chat_completion_stream_parses_sse_lines_and_captures_trailing_usage(monkeypatch):
+    """Exercises the real SSE parsing in _chat_completion_stream (line-by-line `data:`
+    parsing, [DONE] handling, per-chunk json.loads) against a faked urlopen, plus the
+    Fix 1 behavior: a stream_options.include_usage-style trailing chunk with empty
+    `choices` and a `usage` field must be captured without being treated as content."""
+    import services
+
+    lines = [
+        b'data: {"model": "local-tiny", "choices": [{"delta": {"content": "Hello, "}}]}\n',
+        b'data: {"model": "local-tiny", "choices": [{"delta": {"content": "world."}}]}\n',
+        b'data: {"choices": [], "usage": {"total_tokens": 42}}\n',
+        b"data: [DONE]\n",
+    ]
+    captured_requests = []
+
+    def fake_urlopen(request, timeout=None):
+        captured_requests.append(request)
+        return _FakeStreamResponse(lines)
+
+    monkeypatch.setattr(services.urllib.request, "urlopen", fake_urlopen)
+
+    received = []
+    call = {"model": "local-tiny", "max_tokens": 500}
+    result = services._chat_completion_stream(call, [{"role": "user", "content": "hi"}], received.append)
+
+    assert received == ["Hello, ", "world."]
+    assert result["content"] == "Hello, world."
+    assert result["model"] == "local-tiny"
+    assert result["usage"] == {"total_tokens": 42}
+
+    sent_payload = json.loads(captured_requests[0].data.decode("utf-8"))
+    assert sent_payload["stream_options"] == {"include_usage": True}
