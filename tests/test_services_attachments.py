@@ -66,3 +66,40 @@ def test_augment_with_image_and_no_vision_model_falls_back_to_text_note():
     _augment_final_message_with_attachments(messages, attachments, snapshot, final_call)
     assert final_call["model"] == "local-tiny"
     assert "image omitted" in messages[-1]["content"]
+
+
+def test_execute_service_wires_event_attachments_into_final_completion(monkeypatch):
+    # End-to-end: goes through execute_service's own
+    # `event.get("attachments")` extraction rather than calling
+    # _augment_final_message_with_attachments directly, so a broken
+    # extraction/call-site (wrong key, wrong filter, swapped args) fails this.
+    import services
+    from tests.test_services import snapshot as full_snapshot
+
+    monkeypatch.setattr(services, "extract_pdf_text", lambda data: "extracted body")
+
+    calls: list[tuple[str, list[dict] | None]] = []
+
+    def completion(call: dict, messages: list[dict] | None = None) -> dict:
+        calls.append((call["model"], messages))
+        return {
+            "model": call["model"],
+            "content": f"response-{len(calls)}",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    encoded = base64.b64encode(b"%PDF-1.4 fake").decode("ascii")
+    result = services.execute_service(
+        "planning",
+        full_snapshot(),
+        {
+            "goal": "describe this",
+            "verify": False,
+            "attachments": [{"type": "pdf", "name": "notes.pdf", "data": encoded}],
+        },
+        completion=completion,
+    )
+    assert result["ok"]
+    final_messages = calls[-1][1]
+    assert "--- notes.pdf ---" in final_messages[-1]["content"]
+    assert "extracted body" in final_messages[-1]["content"]
