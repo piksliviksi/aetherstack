@@ -471,6 +471,7 @@
       const selection = result.selection ? `${result.selection.source === 'intent-analysis' ? 'Auto-selected' : 'Selected'} ${result.selection.label} · ` : '';
       addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${selection}${team || 'dynamic team'}${tokens}`);
     } else if (message.type === 'error') {
+      finishStreamingMessage();
       setBusy(false);
       $('status').textContent = message.message || 'Request failed'; $('status').className = 'error';
     }
