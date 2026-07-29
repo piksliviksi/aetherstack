@@ -299,7 +299,21 @@ def minimize_service_agents(
     assurance = result.get("id") in _ASSURANCE_SERVICES or bool(_ASSURANCE_WORDS.search(goal))
     complex_work = bool(_COMPLEX_WORDS.search(goal)) or len(goal) > 700
 
-    chosen = [agent for agent in (lead, workers[0] if workers else None) if agent]
+    first_worker = workers[0] if workers else None
+    same_backend = bool(
+        lead
+        and first_worker
+        and (
+            lead.get("model") == first_worker.get("model")
+            or (
+                lead.get("backend")
+                and lead.get("backend") == first_worker.get("backend")
+            )
+        )
+    )
+    chosen = [lead] if lead else []
+    if first_worker and (assurance or complex_work or not same_backend):
+        chosen.append(first_worker)
     if assurance and reviewer:
         chosen.append(reviewer)
     if budget == "adaptive" and complex_work and len(workers) > 1:
@@ -492,10 +506,34 @@ def plan_service(
     event: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     event = dict(event or {})
+    resolution_snapshot = snapshot
+    goal = str(event.get("goal") or event.get("prompt") or "")
+    prefer_local = bool(event.get("prefer_local")) or (
+        bool(event.get("token_saver"))
+        and str(event.get("agent_budget") or "adaptive").lower() == "minimal"
+        and service_id not in _ASSURANCE_SERVICES
+        and not _COMPLEX_WORDS.search(goal)
+        and len(goal) <= 700
+    )
+    if prefer_local:
+        catalog_service = (load_service_catalog().get("services") or {}).get(service_id) or {}
+        lead_needs = set((catalog_service.get("lead") or {}).get("needs") or ["chat"])
+        local_full_fit = any(
+            meta.get("available")
+            and meta.get("tier") == "local"
+            and lead_needs.issubset(set(meta.get("capabilities") or []))
+            for meta in (snapshot.get("models") or {}).values()
+        )
+        if local_full_fit:
+            resolution_snapshot = copy.deepcopy(snapshot)
+            for meta in (resolution_snapshot.get("models") or {}).values():
+                if meta.get("tier") != "local":
+                    meta["available"] = False
+                    meta["availability_reason"] = "local-first token-saver request"
     resolved = (
-        resolve_verified_service(service_id, snapshot)
+        resolve_verified_service(service_id, resolution_snapshot)
         if event.get("verify", True)
-        else resolve_service(service_id, snapshot)
+        else resolve_service(service_id, resolution_snapshot)
     )
     resolved = minimize_service_agents(resolved, event)
     roles = {}
@@ -530,6 +568,39 @@ def plan_service(
             "tasks": tasks or None,
         },
     )
+    # plan_event supports generic multi-agent events and therefore always
+    # creates a worker and supervisor. Service presets deliberately minimize
+    # the team; do not reintroduce roles that minimize_service_agents removed.
+    selected_roles = {
+        agent.get("role")
+        for agent in resolved.get("agents") or []
+        if agent.get("available")
+    }
+    removed_roles = {"worker", "supervisor"} - selected_roles
+    if removed_roles:
+        plan["agents"] = [
+            agent for agent in (plan.get("agents") or [])
+            if agent.get("role") not in removed_roles
+        ]
+        plan["litellm_calls"] = [
+            call for call in (plan.get("litellm_calls") or [])
+            if call.get("role") not in removed_roles
+        ]
+        plan["edges"] = [
+            edge for edge in (plan.get("edges") or [])
+            if not any(
+                str(edge.get(key) or "").endswith(f"-{role}")
+                or f"-{role}-" in str(edge.get(key) or "")
+                for role in removed_roles
+                for key in ("from", "to")
+            )
+        ]
+        plan["makers_in_event"] = sorted(
+            {agent.get("provider") for agent in plan["agents"] if agent.get("provider")}
+        )
+        plan["models_in_event"] = sorted(
+            {agent.get("model") for agent in plan["agents"] if agent.get("model")}
+        )
     plan["service"] = resolved
     return plan
 
@@ -750,18 +821,22 @@ def execute_service(
         {
             "role": "system",
             "content": (
-                "You are AetherStack, an interactive coding and project copilot. Answer the user directly and conversationally, "
-                "using the plan, worker results, review, and recent context. Provide the next useful decision, explanation, code, "
-                "or concrete action instead of merely listing facts or orchestration status. Ask one focused question only when "
-                "missing information truly blocks a useful answer. Resolve conflicts, do not mention orchestration mechanics "
-                "unless useful, and clearly state remaining uncertainty."
+                "You are AetherStack, an interactive coding and project copilot. Return only the final user-facing answer. "
+                "Use the supplied internal material silently: never mention a lead, plan, worker, reviewer, supervisor, agent, "
+                "orchestration, subtask, provided material, approval, or synthesis. Do not narrate that work is complete or announce "
+                "what you will do next. Follow the requested format and length exactly; do not grade your own answer, explain that "
+                "it is concise, or append a follow-up question. Code must be minimal and complete, with no undeclared names or "
+                "placeholder logic. Answer the original goal directly with the requested explanation, code, design, decision, "
+                "or concrete action. Ask one focused question only when missing information truly blocks a useful answer. Resolve "
+                "conflicts and state only uncertainty that matters to the user."
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Goal:\n{goal}\n\nLead plan:\n{lead['content'][:10000]}\n\n"
-                f"Worker results:\n{worker_text}\n\nSupervisor review:\n{(review or {}).get('content', '')[:10000]}"
+                f"Original user goal:\n{goal}\n\nInternal draft:\n{lead['content'][:10000]}\n\n"
+                f"Internal supporting material:\n{worker_text}\n\nInternal quality notes:\n{(review or {}).get('content', '')[:10000]}\n\n"
+                "Produce the answer now. Include no process commentary."
             ),
         },
     ]

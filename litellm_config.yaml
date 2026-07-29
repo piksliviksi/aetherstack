@@ -4,7 +4,7 @@
 # Set API keys in .env — unused providers are simply not called.
 
 model_list:
-  # ── Local (host Ollama, AMD ROCm/HIP GPU offload — RX 6600 XT 8GB) ──
+  # ── Local host Ollama (Metal, Vulkan, ROCm, CUDA, or CPU) ──────────
   # Prefer models that are actually pulled. Override by pulling + editing here.
   - model_name: local-default
     litellm_params:
@@ -13,7 +13,7 @@ model_list:
 
   - model_name: local-llama
     litellm_params:
-      model: ollama/tinyllama
+      model: ollama/llama3.1:8b
       api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-tiny

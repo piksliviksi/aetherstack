@@ -55,18 +55,18 @@ models:
     tier: local
     provider: ollama
     backend: ollama/llama3.1:8b
-    capabilities: [chat, code, tools, private, cheap]
+    capabilities: [chat, code, reason, tools, private, cheap]
     context: 8192
     cost: 0
     latency: low
-    notes: Default local — runs on AMD RX 6600 XT (8GB) via ROCm/HIP GPU offload
+    notes: Default local — host Ollama selects Metal, Vulkan, ROCm, CUDA, or CPU for the platform
 
   local-llama:
     tier: local
     provider: ollama
-    backend: ollama/tinyllama
-    capabilities: [chat, code, private, cheap]
-    context: 2048
+    backend: ollama/llama3.1:8b
+    capabilities: [chat, code, reason, tools, private, cheap]
+    context: 8192
     cost: 0
     latency: very_low
 
@@ -84,7 +84,7 @@ models:
     tier: local
     provider: ollama
     backend: ollama/llama3.1:8b
-    capabilities: [chat, code, tools, private]
+    capabilities: [chat, code, reason, tools, private]
     context: 8192
     cost: 0
     latency: medium

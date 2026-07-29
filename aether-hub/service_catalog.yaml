@@ -124,7 +124,7 @@ services:
     label: Bug fixing
     summary: Reproduce, isolate, repair, and regression-test defects.
     activities: [reproduce failure, isolate root cause, implement repair, add regression test]
-    match: [bug, bugfix, fix error, crash, broken, defect, root cause, reproduce failure]
+    match: [bug, bugfix, fix error, fix, debug, crash, broken, defect, exception, http 500, root cause, reproduce failure]
     accent: orange
     token_saver: true
     instructions: Establish a reproduction and root cause before editing; avoid symptom patches; add a regression test.

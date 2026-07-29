@@ -11,6 +11,7 @@ const DEFAULT_PORT = 8767;
 const MAX_BODY_BYTES = 512 * 1024;
 const MAX_PROMPT_CHARS = 100_000;
 const COMMAND_TIMEOUT_MS = 180_000;
+const TERMINAL_FAILURE_COOLDOWN_MS = 15 * 60_000;
 
 const CLI_DEFINITIONS = {
   "codex-cli": {
@@ -52,6 +53,7 @@ function execResult(file, args, options = {}) {
 async function resolveCommand(command) {
   const locator = process.platform === "win32" ? "where.exe" : "which";
   const result = await execResult(locator, [command]);
+  if (!result.ok && command === "codex") return findBundledCodex();
   if (!result.ok) return null;
   const candidates = result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
   if (process.platform !== "win32") return candidates[0] || null;
@@ -68,6 +70,58 @@ async function resolveCommand(command) {
     }
   } catch { /* fall through to the shim */ }
   return shim;
+}
+
+async function findBundledCodex() {
+  const roots = [
+    process.env.VSCODE_EXTENSIONS,
+    path.join(os.homedir(), ".vscode", "extensions"),
+    path.join(os.homedir(), ".vscode-insiders", "extensions"),
+  ].filter(Boolean);
+  const platformPrefix = process.platform === "win32" ? "windows-"
+    : process.platform === "darwin" ? "darwin-" : "linux-";
+  const executable = process.platform === "win32" ? "codex.exe" : "codex";
+  for (const root of roots) {
+    let extensions;
+    try { extensions = (await fs.promises.readdir(root)).filter((name) => /^openai\.chatgpt-/i.test(name)).sort().reverse(); }
+    catch { continue; }
+    for (const extension of extensions) {
+      const binRoot = path.join(root, extension, "bin");
+      let platforms;
+      try { platforms = (await fs.promises.readdir(binRoot)).filter((name) => name.startsWith(platformPrefix)); }
+      catch { continue; }
+      for (const platform of platforms) {
+        const candidate = path.join(binRoot, platform, executable);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function remoteModels(port, token, refresh) {
+  return new Promise((resolve, reject) => {
+    const request = http.get({
+      hostname: "127.0.0.1",
+      port,
+      path: `/v1/models${refresh ? "?refresh=1" : ""}`,
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 35_000,
+    }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body = (body + chunk).slice(-1024 * 1024); });
+      response.on("end", () => {
+        if (response.statusCode !== 200) { reject(new Error(`existing host bridge rejected synchronization (HTTP ${response.statusCode})`)); return; }
+        try {
+          const parsed = JSON.parse(body);
+          resolve(Object.fromEntries((parsed.models || []).map((model) => [model.alias, model])));
+        } catch (error) { reject(new Error(`existing host bridge returned invalid JSON: ${error.message}`)); }
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error("existing host bridge timed out")));
+    request.on("error", reject);
+  });
 }
 
 async function detectCli(alias, definition, runner = execResult, resolver = resolveCommand) {
@@ -258,16 +312,30 @@ function authorized(header, token) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
+function isTerminalProviderFailure(error) {
+  return /\b402\b|payment required|balance exhausted|usage balance|not authenticated|authentication required|unauthorized|log(?:ged)?\s*out/i
+    .test(String(error && (error.message || error) || ""));
+}
+
 function createCliBridge(options = {}) {
   const token = options.token || crypto.randomBytes(32).toString("hex");
   let port = options.port == null ? DEFAULT_PORT : Number(options.port);
   const cwd = options.cwd || process.cwd();
   let server = null;
+  let reusedServer = false;
   let modelCache = { at: 0, models: {} };
+  const quarantinedUntil = new Map();
 
   async function models(refresh = false) {
+    if (reusedServer) return remoteModels(port, token, refresh);
     if (!refresh && Date.now() - modelCache.at < 30_000) return modelCache.models;
-    modelCache = { at: Date.now(), models: await discoverCliModels(options) };
+    const now = Date.now();
+    const discovered = await discoverCliModels(options);
+    for (const [alias, until] of quarantinedUntil) {
+      if (until <= now) quarantinedUntil.delete(alias);
+      else delete discovered[alias];
+    }
+    modelCache = { at: now, models: discovered };
     return modelCache.models;
   }
 
@@ -294,7 +362,16 @@ function createCliBridge(options = {}) {
         if (!model) { sendJson(response, 404, { error: "host CLI model is not authenticated or installed" }); return; }
         const prompt = promptFromMessages(body.messages);
         if (!prompt.trim()) { sendJson(response, 400, { error: "messages are required" }); return; }
-        const content = await (options.executor || runCliModel)(model, prompt, { cwd });
+        let content;
+        try {
+          content = await (options.executor || runCliModel)(model, prompt, { cwd });
+        } catch (error) {
+          if (isTerminalProviderFailure(error)) {
+            quarantinedUntil.set(model.alias, Date.now() + TERMINAL_FAILURE_COOLDOWN_MS);
+            delete modelCache.models[model.alias];
+          }
+          throw error;
+        }
         sendJson(response, 200, {
           id: `host-cli-${Date.now()}`,
           object: "chat.completion",
@@ -330,13 +407,17 @@ function createCliBridge(options = {}) {
       // Every route still requires the random SecretStorage-backed bearer token.
       server.listen(port, options.host || "0.0.0.0", () => resolve(false));
       });
-      if (reused) server = null;
+      if (reused) {
+        server = null;
+        reusedServer = true;
+      }
       else port = server.address().port;
       return { port, reused };
     },
     stop() {
       if (server) server.close();
       server = null;
+      reusedServer = false;
     },
     models,
   };
@@ -346,7 +427,9 @@ module.exports = {
   CLI_DEFINITIONS,
   createCliBridge,
   discoverCliModels,
+  findBundledCodex,
   promptFromMessages,
   runCliModel,
   safeCliEnvironment,
+  isTerminalProviderFailure,
 };

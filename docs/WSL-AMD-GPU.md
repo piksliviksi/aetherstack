@@ -44,6 +44,7 @@ rocminfo | grep -A5 "Agent 2"
 3. **RX 6000 matrix** — AMD’s official list emphasizes 7000/9000. The `dids.conf` line is enablement outside that list; some workloads fail.
 4. **Debian + Ubuntu ROCm packages** — mixed repos; pin AMD `rocminfo` if Debian’s package shadows `/opt/rocm/bin`.
 5. **Ollama** — needs ROCm-capable build/env; host Ollama on Windows may be separate from WSL Ollama.
+6. **Reference inference result (2026-07-29)** — ROCm discovered the RX 6600 XT and Ollama reported GPU offload, but the HTTP inference ended prematurely and the service restarted. This path is therefore not the AetherStack default on this card.
 
 ## Use the AMD compute engines (required for real GPU LLM)
 
@@ -65,8 +66,7 @@ Adrenalin **26.2.2+**: retest ROCDXG after upgrade.
 
 ## VS Code on the same machine
 
-VS Code does not attach to the AMD GPU for LLM inference on Windows 11.  
-Clients use LiteLLM (`http://127.0.0.1:4000/v1`). Ollama in WSL is the ROCm/DXG process. See [VSCODE.md](./VSCODE.md).
+VS Code does not attach to the AMD GPU for LLM inference on Windows 11. Clients use LiteLLM (`http://127.0.0.1:4000/v1`). On the reference RX 6600 XT, the working server is Windows host Ollama with Vulkan; WSL ROCm remains an opt-in experiment. See [VSCODE.md](./VSCODE.md).
 
 ## Bare metal
 

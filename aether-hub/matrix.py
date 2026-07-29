@@ -115,11 +115,20 @@ def merge_host_cli_models(snapshot: dict[str, Any], bridge: dict[str, Any]) -> d
     snapshot = dict(snapshot)
     models = dict(snapshot.get("models") or {})
     added = []
+    disabled = {
+        value.strip()
+        for value in os.environ.get("AETHER_DISABLED_MODELS", "").split(",")
+        if value.strip()
+    }
+    skipped = []
     for raw in bridge.get("models") or []:
         if not isinstance(raw, dict):
             continue
         alias = str(raw.get("alias") or raw.get("id") or "")
         if not re.fullmatch(r"(?:codex|claude|grok)-cli", alias):
+            continue
+        if alias in disabled:
+            skipped.append(alias)
             continue
         capabilities = [str(value) for value in (raw.get("capabilities") or []) if str(value)]
         models[alias] = {
@@ -139,6 +148,7 @@ def merge_host_cli_models(snapshot: dict[str, Any], bridge: dict[str, Any]) -> d
     snapshot["host_cli"] = {
         "ok": bool(bridge.get("ok")),
         "models": sorted(added),
+        "disabled_models": sorted(skipped),
         "reason": bridge.get("reason"),
     }
     capability_index = copy.deepcopy(snapshot.get("capability_index") or {})

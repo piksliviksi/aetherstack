@@ -47,6 +47,57 @@ test("bridge requires its bearer token and exposes OpenAI-compatible completions
   }
 });
 
+test("bridge quarantines a provider after a terminal account failure", async () => {
+  const bridge = createCliBridge({
+    token: "quarantine-token",
+    port: 0,
+    host: "127.0.0.1",
+    resolver,
+    runner,
+    executor: async (model) => {
+      if (model.alias === "grok-cli") throw new Error("API error (status 402 Payment Required): usage balance exhausted");
+      return "ok";
+    },
+  });
+  const state = await bridge.start();
+  try {
+    const base = `http://127.0.0.1:${state.port}`;
+    const headers = { Authorization: "Bearer quarantine-token", "Content-Type": "application/json" };
+    const failed = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: "grok-cli", messages: [{ role: "user", content: "hello" }] }),
+    });
+    assert.equal(failed.status, 500);
+    const models = await fetch(`${base}/v1/models?refresh=1`, { headers }).then((response) => response.json());
+    assert.equal(models.models.some((model) => model.alias === "grok-cli"), false);
+    assert.equal(models.models.some((model) => model.alias === "codex-cli"), true);
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("a second VS Code window reads the authenticated bridge it reuses", async () => {
+  const first = createCliBridge({ token: "shared-window-token", port: 0, host: "127.0.0.1", resolver, runner });
+  const firstState = await first.start();
+  const second = createCliBridge({
+    token: "shared-window-token",
+    port: firstState.port,
+    host: "127.0.0.1",
+    resolver: async () => null,
+    runner,
+  });
+  try {
+    const secondState = await second.start();
+    assert.equal(secondState.reused, true);
+    const models = await second.models(true);
+    assert.deepEqual(Object.keys(models).sort(), ["claude-cli", "codex-cli", "grok-cli"]);
+  } finally {
+    second.stop();
+    first.stop();
+  }
+});
+
 test("prompt conversion preserves roles and enforces its bound", () => {
   const prompt = promptFromMessages([{ role: "system", content: "rules" }, { role: "user", content: "x".repeat(120_000) }]);
   assert.ok(prompt.length <= 100_000);

@@ -33,7 +33,7 @@ foreach ($p in $Paths) {
 Write-Host "Scanning $($roots.Count) project(s) for LLM-native history..." -ForegroundColor Cyan
 
 # Prefer hub-side scan if we send paths the hub can read (Linux/WSL mounts).
-# On Windows Docker, host paths usually aren't visible — upload chunks via Python if available.
+# On Windows Docker, host paths usually aren't visible - upload chunks via Python if available.
 $py = Get-Command python -ErrorAction SilentlyContinue
 if ($py) {
   $env:AETHER_HUB = $HubUrl

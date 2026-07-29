@@ -1,8 +1,10 @@
 # AetherStack on macOS (OSX)
 
-Works on **macOS 12+** (Intel or Apple Silicon) with Docker Desktop.
+Works on **macOS Sonoma 14+** (Intel or Apple Silicon) with Docker Desktop and a current Ollama release.
 
-The control plane (Open WebUI, LiteLLM, Redis) runs in Docker. Local models run best via **host Ollama** (Metal acceleration on Apple Silicon / supported Intel Macs).
+The control plane (Open WebUI, LiteLLM, Redis, Postgres, Hub) runs in Docker. Local models run best via **host Ollama**: Metal acceleration on Apple M-series systems and CPU inference on Intel Macs.
+
+See Ollama's current [macOS requirements](https://docs.ollama.com/macos) and [GPU support](https://docs.ollama.com/gpu).
 
 ## Prerequisites
 

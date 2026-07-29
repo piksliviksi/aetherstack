@@ -10,7 +10,7 @@ Operating model: [OPERATING-MODEL.md](./OPERATING-MODEL.md).
 | Item | Requirement |
 |------|-------------|
 | Docker | Desktop (Windows/macOS) or Engine (Linux) |
-| Ollama | Host install for Metal / ROCm / CUDA inference |
+| Ollama | Host install for Metal / Vulkan / ROCm / CUDA inference |
 | Cloud keys | Only for providers in use |
 
 ```bash
@@ -85,6 +85,9 @@ curl http://localhost:4000/v1/models -H "Authorization: Bearer sk-aether-local"
 ## Operator checks
 
 ```bash
+python scripts/runtime-smoke.py
+# Optional full live preset sweep:
+python scripts/runtime-smoke.py --all-services
 curl -s http://127.0.0.1:8766/api/discover | jq .summary
 # Windows:  .\scripts\scan-system.ps1
 # Unix:     ./scripts/scan-system.sh

@@ -1,4 +1,4 @@
-# List LiteLLM models (sends master key — browsers do not)
+# List LiteLLM models (sends master key - browsers do not)
 $Root = Split-Path (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $envFile = Join-Path $Root ".env"
 $key = "sk-aether-local"

@@ -1,4 +1,4 @@
-# AetherStack backup — project or global memory/research export.
+# AetherStack backup - project or global memory/research export.
 # Destinations: local folder (default), optional AWS S3 / Azure Blob via hub config.
 param(
   [ValidateSet("global", "project")]

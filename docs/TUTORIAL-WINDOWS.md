@@ -70,8 +70,9 @@ LiteLLM API key for clients: value of `LITELLM_MASTER_KEY` in `.env` (default `s
 
 Docker on Windows does **not** expose AMD GPUs well. Prefer:
 
-1. **Ollama for Windows** (if it supports your card), or  
-2. **Ollama inside WSL** with ROCm/DXG — see [WSL-AMD-GPU.md](./WSL-AMD-GPU.md)
+1. **Host Ollama for Windows with Vulkan** (`OLLAMA_VULKAN=1`) for cards outside the Windows ROCm matrix. This is the validated RX 6600 XT path, though Ollama marks Vulkan experimental.
+2. Native Linux ROCm/Vulkan for supported hardware.
+3. **Ollama inside WSL** with ROCm/DXG only as an opt-in experiment — see [WSL-AMD-GPU.md](./WSL-AMD-GPU.md).
 
 AetherStack containers still run in Docker; only **inference** stays on the host/WSL Ollama.
 
@@ -84,7 +85,7 @@ AetherStack containers still run in Docker; only **inference** stays on the host
 | `docker` not found | Install Docker Desktop; log out/in |
 | Docker never ready | Open Docker Desktop manually; wait for “Engine running” |
 | Port 3000/4000 in use | Stop other apps or change ports in `docker-compose.yml` |
-| Open WebUI can’t see Ollama | Ensure Ollama is running; `curl http://127.0.0.1:11434` |
+| Open WebUI can’t see Ollama | Ensure Ollama is running at the `OLLAMA_BASE_URL` port from `.env` |
 | Script blocked | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 
 ---

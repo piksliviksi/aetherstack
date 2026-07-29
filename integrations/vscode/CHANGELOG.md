@@ -9,6 +9,10 @@
 - Refresh authenticated host CLI providers during the extension lifecycle and include host CLI execution in privacy-minimal active-model telemetry.
 - Keep generated project overviews free of absolute local paths and other machine-specific identity data.
 - Package VSIX files outside the source tree, inspect their identity and contents, and publish the same checked artifact to Marketplace and GitHub Releases; build the runtime archive byte-deterministically.
+- Keep multi-window host CLI discovery synchronized with the bridge that actually owns the port, locate the authenticated Codex CLI bundled with the official VS Code extension, and quarantine providers after terminal account or payment failures.
+- Validate the full local runtime with a portable live smoke test and use hardware-adaptive local model installation on Windows, Linux, and macOS.
+- Prefer the proven Windows Radeon Vulkan runtime, keep WSL ROCm opt-in, and honor a non-default `OLLAMA_BASE_URL` in startup, scanning, and auto-install scripts.
+- Reduce same-backend duplicate inference calls, preserve reviewers for assurance-sensitive services, prevent internal orchestration language from leaking into final answers, and improve automatic bug-fixing intent selection.
 
 ## 0.3.11
 

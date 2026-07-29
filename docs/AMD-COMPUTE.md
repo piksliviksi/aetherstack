@@ -1,6 +1,8 @@
-# AMD compute (ROCm / HIP / DXG)
+# AMD compute (Vulkan / ROCm / HIP / DXG)
 
-Local Radeon inference uses GPU **compute units (CUs)** through **ROCm/HSA**. Display drivers alone do not run LLM kernels. CUDA-only Ollama builds do not use AMD CUs.
+Use the runtime appropriate to the host. On Windows, host Ollama with experimental Vulkan is the practical path for GPUs outside Ollama's Windows ROCm matrix. On native Linux, use supported ROCm or Vulkan. WSL ROCm/DXG is an experimental fallback, not the default.
+
+The RX 6600 XT reference host was validated on 2026-07-29 with Ollama 0.32.4 host Vulkan: `llama3.1:8b` loaded 100% into GPU memory and generated successfully. WSL ROCm detected all 32 compute units but did not complete a reliable HTTP inference run, so AetherStack leaves that WSL service disabled on this machine.
 
 ## Scope of this repository
 
@@ -29,7 +31,7 @@ sudo bash aether-amd/ensure-backend.sh
 | ISA / gfx | gfx1032 (Navi 23); HIP override often **gfx1030** |
 | Compute units | **32** |
 | Wavefront | 32 |
-| Windows access | WSL2 `/dev/dxg` + librocdxg + ROCm HSA |
+| Windows access | Host Vulkan (validated here); WSL2 ROCDXG is experimental |
 | Linux bare metal | `/dev/kfd` + `/dev/dri` + ROCm |
 
 | Observation | Meaning |
@@ -39,13 +41,29 @@ sudo bash aether-amd/ensure-backend.sh
 
 ---
 
-## WSL: CPU fallback cause
+## Windows host Vulkan (recommended for this RX 6600 XT)
+
+Set `OLLAMA_VULKAN=1` for the Ollama server, keep AetherStack's `OLLAMA_BASE_URL` pointed at that host endpoint, then verify after a real prompt:
+
+```powershell
+$env:OLLAMA_HOST='http://127.0.0.1:11435' # use your configured port
+ollama ps
+# PROCESSOR must show 100% GPU or an intentional CPU/GPU split
+```
+
+Vulkan support is experimental in Ollama. Treat successful model output plus `ollama ps` GPU residency as the runtime gate; device discovery alone is insufficient.
+
+Current support references: [Ollama hardware support](https://docs.ollama.com/gpu) and [AMD ROCm WSL compatibility](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityrad/wsl/wsl_compatibility.html).
+
+## WSL: experimental ROCm path
 
 1. Stock `install.sh` pulls `ollama-linux-amd64-rocm` only when `lspci` reports AMD.  
 2. Under WSL + ROCDXG the GPU often does not appear as PCI amdgpu.  
 3. Install keeps CUDA / Vulkan / CPU runners → VRAM 0 → CPU inference.
 
-**Corrective procedure:**
+This path is useful for experiments and supported hardware, but RX 6600 XT is outside AMD's current WSL support matrix. Do not automatically replace a working Windows Vulkan runtime with it.
+
+**Manual procedure:**
 
 ```bash
 # Debian WSL
@@ -105,14 +123,14 @@ Hub discover surfaces `ollama_missing_rocm_libs` when host scan reports the gap.
 
 ---
 
-## Runtime path
+## Runtime paths
 
 ```text
 Client (VS Code / browser)
   → Docker: WebUI :3000 · LiteLLM :4000 · Hub :8766 · Redis
   → host.docker.internal:11434
-  → WSL/host Ollama + ROCm HIP runners
-  → Radeon CUs (HSA)
+  → Windows host Ollama + Vulkan, or native Linux Ollama + ROCm/Vulkan
+  → Radeon GPU
 ```
 
 Docker control plane does not own AMD CUs by default.

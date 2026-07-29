@@ -33,14 +33,14 @@ if (Test-Ollama "http://${wslip}:11434/") {
 }
 
 if (-not (Test-Ollama "http://127.0.0.1:11434/")) {
-  Write-Host "localhost:11434 not forwarded — setting netsh portproxy..." -ForegroundColor Yellow
+  Write-Host "localhost:11434 not forwarded - setting netsh portproxy..." -ForegroundColor Yellow
   netsh interface portproxy delete v4tov4 listenport=11434 listenaddress=127.0.0.1 2>$null | Out-Null
   netsh interface portproxy add v4tov4 listenport=11434 listenaddress=127.0.0.1 connectport=11434 connectaddress=$wslip | Out-Null
   Start-Sleep -Seconds 1
 }
 
 if (Test-Ollama) {
-  Write-Host "OK: http://127.0.0.1:11434 → WSL Ollama (use this for Docker host.docker.internal)" -ForegroundColor Green
+  Write-Host "OK: http://127.0.0.1:11434 -> WSL Ollama (use this for Docker host.docker.internal)" -ForegroundColor Green
   try {
     $tags = Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 5
     $tags.models | ForEach-Object { Write-Host "  model: $($_.name)" }

@@ -5,12 +5,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 mkdir -p .aetherstack
 HUB_URL="${HUB_URL:-http://127.0.0.1:8766}"
+docker_ollama_url="${OLLAMA_BASE_URL:-$(sed -n 's/^[[:space:]]*OLLAMA_BASE_URL[[:space:]]*=[[:space:]]*//p' .env 2>/dev/null | tail -1 | tr -d '\r' | sed "s/^[\"']//;s/[\"']$//")}"
+docker_ollama_url="${docker_ollama_url:-http://host.docker.internal:11434}"
+host_ollama_url="${docker_ollama_url//host.docker.internal/127.0.0.1}"
+host_ollama_url="${host_ollama_url//gateway.docker.internal/127.0.0.1}"
+host_ollama_url="${host_ollama_url%/}"
 
 json_escape() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '""'; }
 
 ollama_models="[]"
-if curl -sf --max-time 2 http://127.0.0.1:11434/api/tags >/tmp/aether-ollama-tags.json 2>/dev/null; then
-  ollama_models=$(python3 -c "import json; d=json.load(open('/tmp/aether-ollama-tags.json')); print(json.dumps([m.get('name') for m in d.get('models',[])]))" 2>/dev/null || echo '[]')
+tags_file="$(mktemp "${TMPDIR:-/tmp}/aether-ollama-tags.XXXXXX")"
+trap 'rm -f "$tags_file"' EXIT
+if curl -sf --max-time 2 "$host_ollama_url/api/tags" >"$tags_file" 2>/dev/null; then
+  ollama_models=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps([m.get('name') for m in d.get('models',[])]))" "$tags_file" 2>/dev/null || echo '[]')
   ollama_ok=true
 else
   ollama_ok=false
@@ -32,8 +39,10 @@ report = {
   "ts": time.time(),
   "host": socket.gethostname(),
   "os": platform.platform(),
+  "ram_gb": round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 ** 3), 1),
   "docker": {"ok": ${docker_ok}, "containers": json.loads('''${containers}''')},
-  "ollama": {"localhost_ok": ${ollama_ok}, "models": json.loads('''${ollama_models}''')},
+  "containers": json.loads('''${containers}'''),
+  "ollama": {"localhost_ok": ${ollama_ok}, "base_url": "${host_ollama_url}", "models": json.loads('''${ollama_models}''')},
   "hub": {"ok": ${hub_ok}, "url": "${HUB_URL}"},
 }
 path = ".aetherstack/system-scan.json"

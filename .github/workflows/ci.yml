@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +26,22 @@ jobs:
           cache-dependency-path: integrations/vscode/package.json
       - name: Test extension source
         run: npm --prefix integrations/vscode test
+      - name: Validate Unix startup scripts
+        if: runner.os != 'Windows'
+        shell: bash
+        run: find . -maxdepth 3 -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: Validate Windows startup scripts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors) { $failed = $true; $errors | ForEach-Object { Write-Error $_.Message } }
+          }
+          if ($failed) { exit 1 }
       - name: Verify release identity
         run: npm --prefix integrations/vscode run verify:release
       - name: Package VSIX
@@ -51,7 +67,11 @@ jobs:
 
   runtime-unit:
     name: Runtime unit and Compose checks
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,8 +82,9 @@ jobs:
             aether-hub/requirements.txt
             project-engine/requirements.txt
       - name: Install test dependencies
-        run: python -m pip install -r aether-hub/requirements.txt -r project-engine/requirements.txt
+        run: python -m pip install pytest -r aether-hub/requirements.txt -r project-engine/requirements.txt
       - name: Run Python tests
-        run: python -m unittest discover -s tests -v
+        run: python -m pytest -q
       - name: Validate Compose model
+        if: runner.os == 'Linux'
         run: docker compose --env-file .env.example config --quiet

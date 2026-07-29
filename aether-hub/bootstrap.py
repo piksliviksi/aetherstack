@@ -122,6 +122,7 @@ def build_install_plan(discover: dict[str, Any], cfg: dict[str, Any] | None = No
     om = cats.get("ollama_models") or {}
     if ollama.get("any_reachable"):
         essential = list(om.get("essential") or [])
+        fallback = list(om.get("fallback") or [])
         optional = list(om.get("optional") or [])
         large = list(om.get("large") or [])
         ram = host.get("ram_gb") or host.get("free_ram_gb")
@@ -130,17 +131,14 @@ def build_install_plan(discover: dict[str, Any], cfg: dict[str, Any] | None = No
             bare = name.split(":")[0]
             if name not in models_have and bare not in models_have:
                 pull_list.append(name)
-        for name in optional:
+        min_ram = float(limits.get("skip_large_models_if_ram_gb_below") or 10)
+        prefer_small = bool((cfg.get("defaults") or {}).get("prefer_small_models", True))
+        use_large = (ram is not None and float(ram) >= min_ram) or (ram is None and not prefer_small)
+        selected_chat = large if use_large else fallback
+        for name in selected_chat + optional:
             bare = name.split(":")[0]
             if name not in models_have and bare not in models_have:
                 pull_list.append(name)
-        min_ram = float(limits.get("skip_large_models_if_ram_gb_below") or 10)
-        if ram is None or float(ram) >= min_ram:
-            if not (cfg.get("defaults") or {}).get("prefer_small_models", True) or not pull_list:
-                for name in large:
-                    bare = name.split(":")[0]
-                    if name not in models_have and bare not in models_have:
-                        pull_list.append(name)
         max_pulls = int(limits.get("max_ollama_pulls_per_run") or 2)
         base = ((ollama.get("primary") or {}).get("base") or "http://127.0.0.1:11434").rstrip("/")
         for name in pull_list[:max_pulls]:

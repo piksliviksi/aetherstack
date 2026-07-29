@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import json
+import os
 import tempfile
 import unittest
 from unittest import mock
@@ -106,6 +107,24 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertNotIn("untrusted-cli", merged["models"])
         self.assertIn("codex-cli", merged["capability_index"]["code"]["any_available"])
 
+    def test_operator_can_disable_an_unhealthy_host_cli_alias(self) -> None:
+        base = matrix.annotate_availability(
+            {"version": 1, "models": {}, "capabilities": {}, "routing": {}},
+            ollama={"ok": False, "models": []},
+        )
+        bridge = {
+            "ok": True,
+            "models": [
+                {"alias": "codex-cli", "capabilities": ["chat"]},
+                {"alias": "grok-cli", "capabilities": ["chat"]},
+            ],
+        }
+        with mock.patch.dict(os.environ, {"AETHER_DISABLED_MODELS": "grok-cli"}):
+            merged = matrix.merge_host_cli_models(base, bridge)
+        self.assertIn("codex-cli", merged["models"])
+        self.assertNotIn("grok-cli", merged["models"])
+        self.assertEqual(merged["host_cli"]["disabled_models"], ["grok-cli"])
+
     def test_catalog_has_requested_services_without_model_or_provider_pins(self) -> None:
         catalog = services.load_service_catalog()
         self.assertEqual(set(catalog["services"]), EXPECTED_SERVICES)
@@ -131,6 +150,7 @@ class DynamicServiceTests(unittest.TestCase):
             "Design an accessible UI flow and design system": "ui-design",
             "Research and design the UI for a local service": "ui-design",
             "Reproduce this crash, isolate the root cause, and fix the bug": "bugfixing",
+            "Fix a reproducible HTTP 500 and add a regression test": "bugfixing",
         }
         for goal, expected in cases.items():
             with self.subTest(goal=goal):
@@ -233,6 +253,66 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertIn("explicit authorization", system_text)
         self.assertIn("Never remove validation", system_text)
 
+    def test_minimal_service_plan_does_not_reintroduce_removed_reviewer(self) -> None:
+        plan = services.plan_service(
+            "coding",
+            snapshot(),
+            {"goal": "Write a clamp helper", "verify": False, "agent_budget": "minimal"},
+        )
+        roles = {call["role"] for call in plan["litellm_calls"]}
+        self.assertNotIn("supervisor", roles)
+        self.assertNotIn("supervisor", {agent["role"] for agent in plan["agents"]})
+        self.assertFalse(
+            any(
+                str(edge.get(key) or "").endswith("-supervisor")
+                for edge in plan["edges"]
+                for key in ("from", "to")
+            )
+        )
+
+    def test_minimal_local_service_deduplicates_same_backend_worker(self) -> None:
+        snap = snapshot()
+        snap["models"] = {
+            "local-a": {
+                "available": True,
+                "provider": "ollama",
+                "backend": "ollama/llama3.1:8b",
+                "tier": "local",
+                "cost": 0,
+                "capabilities": ["chat", "code", "reason", "tools", "long_context", "cheap"],
+            },
+            "local-b": {
+                "available": True,
+                "provider": "ollama",
+                "backend": "ollama/llama3.1:8b",
+                "tier": "local",
+                "cost": 0,
+                "capabilities": ["chat", "code", "reason", "tools", "long_context", "cheap"],
+            },
+        }
+        plan = services.plan_service(
+            "coding",
+            snap,
+            {"goal": "Write a clamp helper", "verify": False, "agent_budget": "minimal"},
+        )
+        self.assertEqual([call["role"] for call in plan["litellm_calls"]], ["mastermind"])
+
+    def test_short_minimal_token_saver_plan_prefers_a_full_fit_local_model(self) -> None:
+        snap = snapshot()
+        snap["models"]["local-code"]["capabilities"].append("reason")
+        plan = services.plan_service(
+            "planning",
+            snap,
+            {
+                "goal": "Return one short API validation action",
+                "verify": False,
+                "token_saver": True,
+                "agent_budget": "minimal",
+            },
+        )
+        self.assertTrue(plan["litellm_calls"])
+        self.assertTrue(all(call["model"] == "local-code" for call in plan["litellm_calls"]))
+
     def test_combined_chat_executes_lead_workers_review_and_synthesis(self) -> None:
         calls: list[tuple[str, str, list[dict] | None]] = []
 
@@ -257,7 +337,9 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertEqual(result["activation"]["service"], "planning")
         self.assertEqual(get_runtime()["service"], "planning")
         self.assertIn("interactive coding and project copilot", calls[-1][2][0]["content"])
-        self.assertIn("instead of merely listing facts", calls[-1][2][0]["content"])
+        self.assertIn("Return only the final user-facing answer", calls[-1][2][0]["content"])
+        self.assertIn("never mention a lead", calls[-1][2][0]["content"])
+        self.assertIn("no undeclared names", calls[-1][2][0]["content"])
 
     def test_activity_word_database_is_locally_editable(self) -> None:
         old_path = activity_words.DB_PATH

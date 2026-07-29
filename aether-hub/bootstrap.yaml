@@ -19,13 +19,13 @@ categories:
     packages:
       - redis
       - PyYAML
-      - psutil
 
   ollama_models:
     description: Pull Ollama models if Ollama is reachable and model missing
     safe: true
-    # Ordered preference; first missing essential is pulled
-    essential:
+    # Choose a usable chat model from host RAM, plus embeddings.
+    essential: []
+    fallback:
       - tinyllama
     optional:
       - nomic-embed-text
@@ -67,6 +67,6 @@ categories:
         when: wsl ollama inactive
 
 limits:
-  max_ollama_pulls_per_run: 2
+  max_ollama_pulls_per_run: 3
   max_pip_packages_per_run: 10
   skip_large_models_if_ram_gb_below: 10

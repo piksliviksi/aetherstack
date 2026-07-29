@@ -27,7 +27,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 | Memory | Archive on clear; multi-project pull when enabled |
 | **Backup** | **Project or global** export of memory/research/sessions — **manual or scheduled** — to **local PC folders** and/or pre-configured **AWS S3 / Azure** buckets. [docs/BACKUP.md](./docs/BACKUP.md) |
 | Private mode | Project/model flag → isolated vault; no common pool/logs until release |
-| Hardware | Host Ollama on Metal / ROCm CUs / CUDA; Docker = control plane |
+| Hardware | Host Ollama on Metal / Vulkan / ROCm / CUDA; Docker = control plane |
 | Portability | Export/import combos, pipelines, graphs |
 
 ### Workflow delta
@@ -50,7 +50,7 @@ Local multi-model control plane. Configure policy once. Operate from VS Code or 
 
 ### 1. Long coding day — no hard stop when one subscription hits a wall
 
-**Scene:** You code in VS Code or a local CLI for hours. Continue / Claude Code / Codex / Grok-class agents run under **one** Aether gateway endpoint. You hold one or more cloud subscriptions (Claude, Codex/OpenAI, Grok/xAI, Mistral, …) plus **host Ollama** on Metal / ROCm / CUDA.
+**Scene:** You code in VS Code or a local CLI for hours. Continue / Claude Code / Codex / Grok-class agents run under **one** Aether gateway endpoint. You hold one or more cloud subscriptions (Claude, Codex/OpenAI, Grok/xAI, Mistral, …) plus **host Ollama** on Metal / Vulkan / ROCm / CUDA.
 
 **Without Aether:** One provider hits a session, daily, or weekly limit → hard stop. You open another app, re-import chat, re-pick files, re-state goals, lose agent state.
 
@@ -157,8 +157,9 @@ remain data-driven and every model is resolved from live capabilities. Expand
 the collapsed full advanced canvas below the preset workspace; it loads the
 selected service's live lead, parallel workers, reviewer, synthesis, and model
 assignments. The same tree opens full-page at `/graph`, while the separate
-Advanced setup button opens technical configuration. Each run uses a lead, parallel
-workers, a reviewer, and final synthesis. Lean
+Advanced setup button opens technical configuration. Each run uses the smallest
+capability-resolved team: a lead by default, with workers and review retained for
+distinct backends, parallel complexity, or assurance-sensitive work. Lean
 Delivery and the token saver can reduce unnecessary context and output without
 removing validation, security controls, accessibility, tests, or observability.
 The lean policy is an independent implementation inspired by
@@ -198,7 +199,21 @@ apply the staged update from a trusted host workflow.
 | LiteLLM | 4000 | OpenAI-compatible gateway |
 | Aether Hub | 8766 | Discover, routes, combos, pipelines, graph, memory, slash |
 | Redis | 6379 | Cache + agent memory |
-| Ollama (host) | 11434 | Local inference (Metal / ROCm / CUDA) |
+| Ollama (host) | configurable (default 11434) | Local inference (Metal / Vulkan / ROCm / CUDA) |
+
+### Live verification
+
+After startup, run the portable smoke test on Windows, Linux, or macOS:
+
+```bash
+python scripts/runtime-smoke.py
+# Expensive: run a real prompt through all 12 service presets
+python scripts/runtime-smoke.py --all-services
+```
+
+It checks the UI privacy boundary, gateway, Hub APIs and routing, dynamic plans,
+Redis, Ollama, a real completion, embeddings, the Hub OpenAI façade, and loaded
+GPU memory. `--skip-inference` performs control-plane checks only.
 
 ---
 

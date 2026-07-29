@@ -20,7 +20,7 @@ Policy lives in Aether (combos, pipelines, graphs, matrix). The IDE does not re-
 | Step | Action |
 |------|--------|
 | Stack | `start.bat` / `./start.sh` — Docker: WebUI, LiteLLM, Redis, Hub |
-| Local GPU | Host Ollama (Metal / ROCm / CUDA). Not VS Code. |
+| Local GPU | Host Ollama (Metal / Vulkan / ROCm / CUDA). Not VS Code. |
 | Secrets | `.env`: per-provider primary / personal / enterprise keys + `LITELLM_MASTER_KEY` ([MULTI-KEYS.md](./MULTI-KEYS.md)) |
 | Discover | Hub `GET /api/discover` or `scripts/scan-system.*` |
 | Trees | Import combos, pipelines, or node graphs |

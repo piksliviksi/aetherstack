@@ -17,7 +17,7 @@ Aether can **detect** missing pieces (scan) and optionally **install** them.
 | Category | Examples | Safe without elevation |
 |----------|----------|------------------------|
 | **python_pip** | `redis`, `PyYAML`, `psutil` | Yes |
-| **ollama_models** | `tinyllama`, `nomic-embed-text` | Yes (Ollama running) |
+| **ollama_models** | `llama3.1:8b`, `nomic-embed-text`, `tinyllama` | Yes (Ollama running) |
 | **docker_compose_services** | redis, litellm, hub, open-webui | Yes |
 | **docker_images** | pull base images | Yes |
 | **host_tools** | WSL ROCm Ollama, portproxy, dual-Ollama stop | No — `-IncludeElevated` / host script |
@@ -50,11 +50,13 @@ curl -s http://127.0.0.1:8766/api/bootstrap?refresh=1 | jq .actions
 .\scripts\auto-install.ps1 -Yes -IncludeElevated
 ```
 
-This may:
+This explicit experimental option may:
 
-- Stop Windows Ollama when WSL Ollama is preferred  
+- Stop a working Windows Ollama process before trying WSL ROCm
 - Fix `localhost:11434` → WSL via portproxy  
 - Re-run Ollama install script for **ROCm** libs in Debian WSL (large download)
+
+Windows Radeon defaults to host Ollama with Vulkan. Use `-IncludeElevated` only when you intentionally want to test WSL ROCm. Override automatic model pulls with `AETHER_OLLAMA_MODELS` (comma-separated).
 
 ---
 

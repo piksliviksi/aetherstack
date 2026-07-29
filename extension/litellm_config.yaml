@@ -4,20 +4,30 @@
 # Set API keys in .env — unused providers are simply not called.
 
 model_list:
-  # ── Local (host Ollama; WSL ROCm recommended on AMD) ──────────────
+  # ── Local host Ollama (Metal, Vulkan, ROCm, CUDA, or CPU) ─────────
   - model_name: local-default
     litellm_params:
-      model: ollama/tinyllama
+      model: ollama/llama3.1:8b
       api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-llama
     litellm_params:
-      model: ollama/tinyllama
+      model: ollama/llama3.1:8b
       api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-tiny
     litellm_params:
       model: ollama/tinyllama
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: local-llama31-8b
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+  - model_name: local-embed
+    litellm_params:
+      model: ollama/nomic-embed-text
       api_base: os.environ/OLLAMA_BASE_URL
 
   # ── xAI / Grok (latest first) ─────────────────────────────────────

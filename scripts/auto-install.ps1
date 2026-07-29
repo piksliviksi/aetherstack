@@ -1,4 +1,4 @@
-# AetherStack — optional auto-install of missing packages / models / services.
+# AetherStack - optional auto-install of missing packages / models / services.
 # Default: DRY RUN. Use -Yes to apply. Use -Enable to turn on auto-install flag for hub.
 param(
   [switch]$Yes,           # apply changes
@@ -14,15 +14,26 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
 if (-not $PSBoundParameters.ContainsKey("SafeOnly")) { $SafeOnly = -not $IncludeElevated }
 
+function Get-DotEnvValue([string]$Name) {
+  $path = Join-Path $Root ".env"
+  if (-not (Test-Path $path)) { return $null }
+  $line = Get-Content -LiteralPath $path | Where-Object { $_ -match "^\s*$([regex]::Escape($Name))\s*=" } | Select-Object -Last 1
+  if (-not $line) { return $null }
+  return (($line -split "=", 2)[1].Trim()).Trim('"').Trim("'")
+}
+$dockerOllamaUrl = if ($env:OLLAMA_BASE_URL) { $env:OLLAMA_BASE_URL } else { Get-DotEnvValue "OLLAMA_BASE_URL" }
+if (-not $dockerOllamaUrl) { $dockerOllamaUrl = "http://host.docker.internal:11434" }
+$HostOllamaUrl = ($dockerOllamaUrl -replace "host\.docker\.internal", "127.0.0.1" -replace "gateway\.docker\.internal", "127.0.0.1").TrimEnd('/')
+
 Write-Host ""
 Write-Host "  AetherStack auto-install" -ForegroundColor Cyan
-Write-Host "  (optional — dry-run unless -Yes)" -ForegroundColor DarkCyan
+Write-Host "  (optional - dry-run unless -Yes)" -ForegroundColor DarkCyan
 Write-Host ""
 
 # 1) Host scan first
 $scanScript = Join-Path $Root "scripts\scan-system.ps1"
 if (Test-Path $scanScript) {
-  Write-Host "  Running system scan…" -ForegroundColor DarkCyan
+  Write-Host "  Running system scan..." -ForegroundColor DarkCyan
   & powershell -NoProfile -ExecutionPolicy Bypass -File $scanScript 2>$null
 }
 
@@ -51,14 +62,14 @@ $plan = $null
 try {
   $plan = Invoke-RestMethod -Uri "$HubUrl/api/bootstrap?refresh=1" -TimeoutSec 30
 } catch {
-  Write-Host "  Hub not up — local plan only." -ForegroundColor Yellow
+  Write-Host "  Hub not up - local plan only." -ForegroundColor Yellow
 }
 
 if ($plan -and $plan.actions) {
   Write-Host "  Plan: $($plan.action_count) action(s) (safe=$($plan.safe_count))" -ForegroundColor Cyan
   foreach ($a in $plan.actions) {
     $tag = if ($a.safe) { "safe" } else { "elevated" }
-    Write-Host "   [$tag] $($a.title) — $($a.reason)" -ForegroundColor DarkGray
+    Write-Host "   [$tag] $($a.title) - $($a.reason)" -ForegroundColor DarkGray
   }
 } else {
   Write-Host "  No hub plan; applying local essentials if -Yes." -ForegroundColor DarkGray
@@ -76,7 +87,7 @@ if (-not $Yes) {
 }
 
 # 4) Apply host-side actions
-Write-Host "  Applying…" -ForegroundColor Cyan
+Write-Host "  Applying..." -ForegroundColor Cyan
 
 # Python deps for host engine
 $pyPkgs = @("redis", "PyYAML", "psutil")
@@ -95,16 +106,21 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 }
 
 # Ollama models
-function Test-Ollama { try { Invoke-WebRequest http://127.0.0.1:11434/ -UseBasicParsing -TimeoutSec 2 | Out-Null; return $true } catch { return $false } }
+function Test-Ollama { try { Invoke-WebRequest "$HostOllamaUrl/api/tags" -UseBasicParsing -TimeoutSec 2 | Out-Null; return $true } catch { return $false } }
 if (-not (Test-Ollama)) {
-  Write-Host "  Ensuring WSL Ollama…" -ForegroundColor DarkCyan
-  $ens = Join-Path $Root "scripts\ensure-wsl-ollama.ps1"
-  if (Test-Path $ens) { & powershell -NoProfile -ExecutionPolicy Bypass -File $ens 2>&1 | Out-Host }
+  Write-Host "  Ollama is not reachable at $HostOllamaUrl." -ForegroundColor Yellow
+  Write-Host "  Start host Ollama first. Use -IncludeElevated only to try experimental WSL ROCm setup." -ForegroundColor Yellow
 }
 if (Test-Ollama) {
-  $want = @("tinyllama", "nomic-embed-text")
+  if ($env:AETHER_OLLAMA_MODELS) {
+    $wantText = $env:AETHER_OLLAMA_MODELS
+  } else {
+    try { $ramGb = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB } catch { $ramGb = 0 }
+    $wantText = if ($ramGb -ge 10) { "llama3.1:8b,nomic-embed-text" } else { "tinyllama,nomic-embed-text" }
+  }
+  $want = @($wantText -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
   try {
-    $tags = (Invoke-RestMethod http://127.0.0.1:11434/api/tags -TimeoutSec 5).models.name
+    $tags = (Invoke-RestMethod "$HostOllamaUrl/api/tags" -TimeoutSec 5).models.name
   } catch { $tags = @() }
   foreach ($m in $want) {
     $have = $tags | Where-Object { $_ -eq $m -or $_ -like "${m}:*" -or ($_ -split ":")[0] -eq $m }
@@ -115,7 +131,7 @@ if (Test-Ollama) {
       } else {
         # API pull
         try {
-          Invoke-RestMethod -Method POST http://127.0.0.1:11434/api/pull -Body (@{name=$m; stream=$false} | ConvertTo-Json) -ContentType "application/json" -TimeoutSec 3600 | Out-Null
+          Invoke-RestMethod -Method POST "$HostOllamaUrl/api/pull" -Body (@{name=$m; stream=$false} | ConvertTo-Json) -ContentType "application/json" -TimeoutSec 3600 | Out-Null
           Write-Host "  pulled $m via API" -ForegroundColor Green
         } catch { Write-Host "  pull failed: $_" -ForegroundColor Yellow }
       }
@@ -124,23 +140,23 @@ if (Test-Ollama) {
     }
   }
 } else {
-  Write-Host "  Ollama still down — skip model pulls." -ForegroundColor Yellow
+  Write-Host "  Ollama still down - skip model pulls." -ForegroundColor Yellow
 }
 
 # Elevated / host_tools
 if ($IncludeElevated) {
-  Write-Host "  Elevated actions…" -ForegroundColor Yellow
+  Write-Host "  Elevated actions..." -ForegroundColor Yellow
   # dual ollama
   $win = Get-Process -Name "ollama","ollama app" -ErrorAction SilentlyContinue
   $wslActive = (wsl -d $Distro -- bash -lc "systemctl is-active ollama 2>/dev/null" 2>$null)
   if ($win -and $wslActive -match "active") {
-    Write-Host "  Stopping Windows Ollama (WSL ROCm preferred)…" -ForegroundColor Yellow
+    Write-Host "  Stopping Windows Ollama for explicitly requested experimental WSL ROCm setup..." -ForegroundColor Yellow
     $win | Stop-Process -Force -ErrorAction SilentlyContinue
   }
   # portproxy
   $ens = Join-Path $Root "scripts\ensure-wsl-ollama.ps1"
   if (Test-Path $ens) { & powershell -NoProfile -ExecutionPolicy Bypass -File $ens 2>&1 | Out-Host }
-  # ROCm ollama package — required to use AMD compute units (not stock install on WSL)
+  # ROCm ollama package - required to use AMD compute units (not stock install on WSL)
   $rocm = (wsl -d $Distro -- bash -lc "if test -d /usr/local/lib/ollama/rocm || ls -d /usr/local/lib/ollama/rocm_* >/dev/null 2>&1; then echo yes; else echo no; fi" 2>$null)
   if ($rocm -match "no") {
     Write-Host "  Installing Ollama ROCm backend for AMD compute engines (large download)..." -ForegroundColor Yellow
@@ -171,7 +187,7 @@ if ($Enable -or $Yes) {
 
 # Final scan
 if (Test-Path $scanScript) {
-  Write-Host "  Re-scan…" -ForegroundColor DarkCyan
+  Write-Host "  Re-scan..." -ForegroundColor DarkCyan
   & powershell -NoProfile -ExecutionPolicy Bypass -File $scanScript 2>$null
 }
 try {
