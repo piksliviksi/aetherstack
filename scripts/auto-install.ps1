@@ -144,13 +144,16 @@ if ($IncludeElevated) {
   $rocm = (wsl -d $Distro -- bash -lc "if test -d /usr/local/lib/ollama/rocm || ls -d /usr/local/lib/ollama/rocm_* >/dev/null 2>&1; then echo yes; else echo no; fi" 2>$null)
   if ($rocm -match "no") {
     Write-Host "  Installing Ollama ROCm backend for AMD compute engines (large download)..." -ForegroundColor Yellow
-    $script = "/mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh"
+    $wslRoot = (wsl -d $Distro -- wslpath -a $Root 2>$null | Select-Object -First 1).Trim()
+    if (-not $wslRoot) { throw "Cannot map the selected AetherStack runtime into WSL." }
+    $script = "$wslRoot/scripts/install-ollama-rocm-wsl.sh"
     # Prefer repo path if mounted; fall back to copy
     wsl -d $Distro -- bash -lc "if [ -f '$script' ]; then sudo bash '$script'; else curl -fsSL https://ollama.com/download/ollama-linux-amd64-rocm.tar.zst -o /tmp/rocm.tzst && sudo mkdir -p /usr/local && sudo zstd -d -c /tmp/rocm.tzst | sudo tar -xf - -C /usr/local; fi" 2>&1 | Select-Object -Last 30
   } else {
     Write-Host "  Ollama ROCm libs present." -ForegroundColor Green
   }
-  wsl -d $Distro -- bash -lc "bash /mnt/d/llm/stack/scripts/amd-compute-status.sh 2>/dev/null || true" 2>&1 | Select-Object -Last 25
+  if (-not $wslRoot) { $wslRoot = (wsl -d $Distro -- wslpath -a $Root 2>$null | Select-Object -First 1).Trim() }
+  wsl -d $Distro -- bash -lc "bash '$wslRoot/scripts/amd-compute-status.sh' 2>/dev/null || true" 2>&1 | Select-Object -Last 25
 }
 
 # 5) Tell hub to apply safe leftovers + refresh

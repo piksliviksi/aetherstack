@@ -7,7 +7,7 @@ const test = require("node:test");
 // this.history was never reset/resynced on newConversation / switchConversation /
 // deleteConversation, so stale context leaked across conversations and
 // saveConversationSnapshot silently corrupted the wrong conversation's transcript.
-test("HubChat resyncs history across new/switch/delete conversation actions", async () => {
+test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete actions", async () => {
   class Disposable {
     constructor(dispose = () => {}) {
       this.dispose = dispose;
@@ -45,7 +45,7 @@ test("HubChat resyncs history across new/switch/delete conversation actions", as
     },
     env: { openExternal: async () => {} },
     workspace: {
-      workspaceFolders: [{ uri: { fsPath: "D:\\llm\\stack" } }],
+      workspaceFolders: [{ uri: { fsPath: "D:\\workspace\\aetherstack" } }],
       getConfiguration: () => configuration,
       onDidChangeConfiguration: () => new Disposable(),
       openTextDocument: async () => ({}),
@@ -138,26 +138,61 @@ test("HubChat resyncs history across new/switch/delete conversation actions", as
     // Bypass loadServices/network — give HubChat a fixed preset to route to directly.
     chatViewProvider.services = [{ id: "coding", label: "Coding", summary: "sum" }];
 
+    // Restoration is canonicalized even while Hub is offline; service loading
+    // can fail without silently dropping the visible context.
+    await handler({
+      type: "ready",
+      transcript: [{ role: "user", value: "offline restored context" }],
+      serviceId: "coding",
+    });
+    assert.equal(chatViewProvider.stateFor(webview).history[0].content, "offline restored context");
+    await handler({ type: "newConversation" });
+
     const run = (prompt) => handler({ type: "run", prompt, serviceId: "coding" });
 
     // --- Conversation A: two turns ---
     await run("A message 1");
     await run("A message 2");
-    const aId = chatViewProvider.activeConversationId;
+    let surface = chatViewProvider.stateFor(webview);
+    const aId = surface.activeConversationId;
     assert.ok(aId);
     let aEntry = chatViewProvider.conversations.find((item) => item.id === aId);
     assert.equal(aEntry.transcript.length, 4);
-    assert.equal(chatViewProvider.history.length, 4);
+    assert.equal(surface.history.length, 4);
+
+    // A separately restored editor/webview owns a separate canonical context.
+    let secondHandler = null;
+    const secondWebview = {
+      cspSource: "vscode-resource:",
+      onDidReceiveMessage: (fn) => { secondHandler = fn; return new Disposable(); },
+      postMessage: async () => {},
+    };
+    chatViewProvider.resolveWebviewView({ webview: secondWebview, onDidDispose: () => {} });
+    await chatViewProvider.hydrateSurface(secondWebview, {
+      transcript: [{ role: "user", value: "restored editor context" }],
+      serviceId: "coding",
+    });
+    assert.equal(chatViewProvider.stateFor(secondWebview).history.length, 1);
+    assert.equal(chatViewProvider.stateFor(webview).history.length, 4);
+    assert.equal(typeof secondHandler, "function");
+    await secondHandler({ type: "run", prompt: "editor continuation", serviceId: "coding" });
+    assert.equal(
+      chatViewProvider.stateFor(webview).history.some((item) => item.content.includes("editor continuation")),
+      false,
+      "editor context leaked into the sidebar surface",
+    );
 
     // --- Scenario 1: new conversation must not leak A's context ---
     await handler({ type: "newConversation" });
-    assert.equal(chatViewProvider.activeConversationId, null);
-    assert.deepEqual(chatViewProvider.history, []);
+    surface = chatViewProvider.stateFor(webview);
+    assert.equal(surface.activeConversationId, null);
+    assert.deepEqual(surface.history, []);
     await run("B message 1");
-    const bId = chatViewProvider.activeConversationId;
+    surface = chatViewProvider.stateFor(webview);
+    const bId = surface.activeConversationId;
     assert.notEqual(bId, aId);
     assert.equal(
-      chatViewProvider.history.some((item) => String(item.content).includes("A message")),
+      surface.history.some((item) => String(item.content).includes("A message")),
       false,
       "history leaked conversation A's content into conversation B"
     );
@@ -168,8 +203,9 @@ test("HubChat resyncs history across new/switch/delete conversation actions", as
 
     // --- Scenario 2: switching to A must not overwrite A's saved transcript ---
     await handler({ type: "switchConversation", id: aId });
-    assert.equal(chatViewProvider.activeConversationId, aId);
-    assert.equal(chatViewProvider.history.length, 4);
+    surface = chatViewProvider.stateFor(webview);
+    assert.equal(surface.activeConversationId, aId);
+    assert.equal(surface.history.length, 4);
     await run("A message 3");
     aEntry = chatViewProvider.conversations.find((item) => item.id === aId);
     assert.equal(aEntry.transcript.length, 6, "switching back to A did not restore A's history before saving");
@@ -185,8 +221,9 @@ test("HubChat resyncs history across new/switch/delete conversation actions", as
 
     // --- Scenario 3: deleting the active conversation must not let it silently revive ---
     await handler({ type: "deleteConversation", id: aId });
-    assert.equal(chatViewProvider.activeConversationId, null);
-    assert.deepEqual(chatViewProvider.history, []);
+    surface = chatViewProvider.stateFor(webview);
+    assert.equal(surface.activeConversationId, null);
+    assert.deepEqual(surface.history, []);
     assert.equal(chatViewProvider.conversations.some((item) => item.id === aId), false);
     await run("C message 1");
     assert.equal(
@@ -194,7 +231,8 @@ test("HubChat resyncs history across new/switch/delete conversation actions", as
       false,
       "deleted conversation A's content reappeared after deletion"
     );
-    const cEntry = chatViewProvider.conversations.find((item) => item.id === chatViewProvider.activeConversationId);
+    surface = chatViewProvider.stateFor(webview);
+    const cEntry = chatViewProvider.conversations.find((item) => item.id === surface.activeConversationId);
     assert.equal(cEntry.transcript.length, 2);
   } finally {
     Module._load = originalLoad;

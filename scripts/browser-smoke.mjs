@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -39,6 +39,7 @@ const waitFor = async (fn, timeout = 15000) => {
   throw lastError || new Error("browser smoke timeout");
 };
 
+let primaryError = null;
 try {
   const target = await waitFor(async () => {
     const values = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
@@ -138,6 +139,11 @@ try {
   await waitFor(() => evaluate("Boolean(graph.nodes && graph.nodes.length)"));
   assert.equal(await evaluate("graph.nodes[0].x"), layout.expectedX, "node position was not restored");
   assert.equal(await evaluate("camera.x"), layout.cameraX, "camera position was not restored");
+  const liveMatrix = await fetch("http://127.0.0.1:8766/api/matrix").then((response) => response.json());
+  const expectedWebuiAliases = Object.entries(liveMatrix.models || {})
+    .filter(([, model]) => model.available && (model.capabilities || []).includes("chat"))
+    .map(([alias]) => alias);
+  assert.ok(expectedWebuiAliases.length, "capability matrix has no available chat aliases for WebUI verification");
   await navigate("http://127.0.0.1:3000/");
   const webuiModels = await waitFor(() => evaluate(`(async () => {
     const token = localStorage.getItem('token');
@@ -147,12 +153,22 @@ try {
     const body = await response.json();
     return (body.data || []).map(model => model.id);
   })()`), 60000);
-  assert.ok(webuiModels.includes("local-default"), "Open WebUI did not load AetherStack gateway aliases");
+  assert.ok(
+    expectedWebuiAliases.some((alias) => webuiModels.includes(alias)),
+    `Open WebUI did not load a live AetherStack gateway alias (expected one of: ${expectedWebuiAliases.join(", ")})`,
+  );
   assert.equal(webuiModels.includes("tinyllama:latest"), false, "Open WebUI still exposes raw Ollama models");
-  socket.close();
   console.log(JSON.stringify({ ok: true, inspector, layout, webuiModels }));
+  await send("Browser.close").catch(() => {});
+  socket.close();
+} catch (error) {
+  primaryError = error;
 } finally {
-  if (!browser.killed) browser.kill();
+  if (process.platform === "win32" && browser.pid) {
+    spawnSync("taskkill", ["/PID", String(browser.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+  } else if (!browser.killed) {
+    browser.kill();
+  }
   await Promise.race([
     new Promise((resolve) => browser.once("exit", resolve)),
     new Promise((resolve) => setTimeout(resolve, 3000)),
@@ -162,5 +178,15 @@ try {
   if (!resolvedProfile.startsWith(resolvedTmp) || !path.basename(resolvedProfile).startsWith("aetherstack-browser-smoke-")) {
     throw new Error(`refusing to remove unexpected browser profile: ${resolvedProfile}`);
   }
-  fs.rmSync(resolvedProfile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  try {
+    fs.rmSync(resolvedProfile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (cleanupError) {
+    if (primaryError) {
+      primaryError.cleanupError = cleanupError;
+    } else {
+      console.warn(`browser smoke passed but temporary profile cleanup was deferred: ${cleanupError.message}`);
+    }
+  }
 }
+
+if (primaryError) throw primaryError;

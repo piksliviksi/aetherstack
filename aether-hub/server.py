@@ -60,6 +60,7 @@ from matrix import (  # noqa: E402
     route,
 )
 from memory import MemoryStore  # noqa: E402
+from inference_runtime import snapshot as hub_inference_snapshot  # noqa: E402
 from graph import (  # noqa: E402
     auto_connect,
     best_practice_template,
@@ -213,7 +214,7 @@ def _load_host_scan_file() -> dict:
 
 
 def get_inference_status(status_path: Path | None = None) -> tuple[int, dict]:
-    """Read privacy-minimal LiteLLM activity state for local operator UIs."""
+    """Merge privacy-minimal LiteLLM and Hub/host-CLI activity state."""
     path = status_path or Path(
         os.environ.get(
             "AETHER_INFERENCE_STATUS_PATH",
@@ -237,6 +238,7 @@ def get_inference_status(status_path: Path | None = None) -> tuple[int, dict]:
                 {
                     "callId": str(entry.get("callId", ""))[:256],
                     "model": str(entry.get("model", "unknown"))[:256],
+                    "source": "litellm",
                     "startedAt": entry.get("startedAt"),
                 }
             )
@@ -246,20 +248,28 @@ def get_inference_status(status_path: Path | None = None) -> tuple[int, dict]:
         clean_last = None if last is None else {
             "callId": str(last.get("callId", ""))[:256],
             "model": str(last.get("model", "unknown"))[:256],
+            "source": "litellm",
             "startedAt": last.get("startedAt"),
             "finishedAt": last.get("finishedAt"),
             "state": str(last.get("state", "unknown"))[:32],
         }
+        host = hub_inference_snapshot()
+        host_active = list(host.get("active") or [])
+        candidates = [item for item in (clean_last, host.get("last")) if item]
+        merged_last = max(
+            candidates,
+            key=lambda item: item.get("finishedAt") or item.get("startedAt") or 0,
+        ) if candidates else None
         sanitized = {
-            "active": clean_active,
-            "activeCount": len(clean_active),
-            "last": clean_last,
+            "active": clean_active + host_active,
+            "activeCount": len(clean_active) + len(host_active),
+            "last": merged_last,
         }
         if "updatedAt" in value:
             sanitized["updatedAt"] = value.get("updatedAt")
         return 200, sanitized
     except FileNotFoundError:
-        return 200, {"active": [], "activeCount": 0, "last": None}
+        return 200, hub_inference_snapshot()
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return 503, {"error": f"inference status unavailable: {exc}"}
 

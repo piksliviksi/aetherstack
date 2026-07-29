@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.12
+
+- Make the root `VERSION` the release source of truth and fail packaging when the extension, Compose runtime, or changelog disagrees.
+- Add a verified runtime acquisition flow so a Marketplace-only installation can obtain and validate the matching AetherStack runtime before starting services.
+- Isolate Chat context by conversation and VS Code thread, restore visible transcripts as inference context, and persist explicit preset selection truthfully.
+- Put Chat and operations in clearly discoverable VS Code locations and align the extension's UI labels with those locations.
+- Refresh authenticated host CLI providers during the extension lifecycle and include host CLI execution in privacy-minimal active-model telemetry.
+- Keep generated project overviews free of absolute local paths and other machine-specific identity data.
+- Package VSIX files outside the source tree, inspect their identity and contents, and publish the same checked artifact to Marketplace and GitHub Releases; build the runtime archive byte-deterministically.
+
 ## 0.3.11
 
 - Render markdown and syntax-highlighted, copyable code blocks in AetherStack Chat (headings, lists, tables, blockquotes, links, bold/inline code) instead of showing raw text.

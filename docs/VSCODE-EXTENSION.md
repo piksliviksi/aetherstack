@@ -45,9 +45,10 @@ code --install-extension AetherStack.aetherstack
 ### From this repo / VSIX
 
 ```bash
+# Marketplace:
 code --install-extension AetherStack.aetherstack
-# or local VSIX:
-code --install-extension packages/aetherstack-0.3.10.vsix
+# or the exact VSIX downloaded from the v0.3.12 GitHub Release:
+code --install-extension aetherstack-0.3.12.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -70,7 +71,7 @@ Duplicates can hide the Activity Bar icon or confuse settings.
 
 1. Make sure Docker Desktop / Docker Engine is running.
 2. Open **AetherStack → Control & Services**.
-3. Press **Start all services**. If the extension cannot auto-detect the installation, choose the folder containing `docker-compose.yml` and `aether-hub/` once.
+3. Press **Start all services**. If no runtime is present, choose **Install Runtime 0.3.12**. The extension downloads the version-pinned GitHub Release archive, verifies its SHA-256 checksum, validates every archive path, and installs it under VS Code's extension storage. You can instead choose an existing checkout containing `docker-compose.yml`, `litellm_config.yaml`, and `aether-hub/`.
 4. The extension waits for all endpoints and reports either `OK` or the concrete HTTP/connection/startup error.
 
 Successful startup shows:
@@ -105,10 +106,16 @@ Most commands need a workspace root. Opening a single file is not enough.
 
 The extension does **not** add a giant chat panel. Look for:
 
-**A. Activity Bar (left strip)**
+**A. Secondary Side Bar — Chat**
 
-- Icon titled **AetherStack** (often near the **bottom** of the bar).
-- Click it → sidebar **Control & Services**.
+- **View → Appearance → Secondary Side Bar**, then select the **AetherStack** tab.
+- This is the persistent AetherStack webview chat. **AetherStack: Open Chat in Editor** opens an independent editor surface with its own restored context.
+- In VS Code's built-in Chat, enter `@aetherstack` to use the native Chat participant. Its context and selected preset belong to that Chat thread.
+
+**B. Activity Bar (left strip) — operations**
+
+- Icon titled **AetherStack** (often near the bottom of the bar).
+- Click it → **Control & Services**.
 
 If missing:
 
@@ -116,7 +123,7 @@ If missing:
 - `Ctrl+Shift+P` → type `AetherStack` → try **View** / scan commands.
 - **Developer: Reload Window**.
 
-**B. Command Palette (always works)**
+**C. Command Palette (always works)**
 
 `Ctrl+Shift+P` (macOS: `Cmd+Shift+P`) → type **AetherStack**.
 
@@ -163,12 +170,14 @@ The value is kept in VS Code SecretStorage rather than settings JSON.
 
 | Command | When to use |
 |---------|-------------|
-| **Show Chat View** | Focus the permanent AetherStack conversation in the Activity Bar |
-| **Open Chat in Editor** | Open the same conversation as a VS Code editor tab |
+| **Show Chat View** | Focus AetherStack Chat in the Secondary Side Bar |
+| **Open Chat in Editor** | Open an independent AetherStack Chat surface in an editor tab |
 | **Open Hub UI** | Open the Simple service UI, setup helper, and update staging tool |
 | **Open Control Center** | View services, containers, available models, technical errors, and lifecycle controls |
 | **Start / Stop / Restart All Services** | Control the complete local Docker Compose backend |
 | **Refresh Service State** | Re-run health and Compose state checks |
+| **Refresh Authenticated Host CLIs** | Re-probe existing Codex, Claude, and Grok CLI sessions and refresh the Hub matrix; recreate only Hub if its protected bridge configuration is stale |
+| **Install Verified Runtime** | Download, checksum, validate, and install the runtime matching the extension version |
 | **Show Backend Logs** | Open the last 100 Compose log lines in the AetherStack output channel |
 | **Choose Installation Folder** | Set the local AetherStack source/install path |
 | **Scan Project AI History** | Start of a session; after adding chat tools |
@@ -200,11 +209,11 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 ### Active-model display
 
-Enable **Show the currently running model** in the Control Center. LiteLLM then exposes the model alias currently handling a request through Hub `/api/inference/status`, and Chat shows that alias beside its rotating activity line. Telemetry contains only call id, model alias, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
+Enable **Show the currently running model** in the Control Center. Hub `/api/inference/status` merges LiteLLM callbacks with Hub-owned host-CLI call state, and Chat shows the active alias beside its rotating activity line. Telemetry contains only call id, model alias, execution source, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
 
 Chat defaults to **Auto — analyze my request**. Each natural-language message is classified before inference, the selected service is shown immediately, and its smallest useful lead/worker/reviewer team is resolved from currently available models. `/help`, `/presets`, `/auto <goal>`, `/preset <name> <goal>`, and shortcuts such as `/research`, `/plan`, `/code`, `/test`, and `/bugfix` provide explicit control. The transcript survives view restoration, fenced code renders safely, and editable English/Estonian/Ukrainian activity text rotates while inference is running.
 
-Already authenticated Codex, Claude, and Grok host CLIs are discovered by the extension and exposed to the Hub through a Docker-reachable host bridge protected by a random bearer token stored in VS Code SecretStorage. The bridge reuses the CLI login session; it accepts only a fixed CLI alias allowlist and does not reveal the CLI path, copy credentials, create an API key, or enable browser CORS. If Hub is already running with stale bridge settings, extension activation recreates only `aether-hub` and refreshes the matrix automatically. Continue configuration remains limited to LiteLLM-backed models.
+Already authenticated Codex, Claude, and Grok host CLIs are discovered by the extension and exposed to the Hub through a Docker-reachable host bridge protected by a random bearer token stored in VS Code SecretStorage. The bridge reuses the CLI login session; it accepts only a fixed CLI alias allowlist and does not reveal the CLI path, copy credentials, create an API key, or enable browser CORS. Probing runs after commands and views are registered. Normal refresh re-probes the live Hub without a restart; only a stale or missing bridge environment causes `aether-hub` alone to be recreated. Continue configuration remains limited to LiteLLM-backed models.
 
 Hub embeds the complete editable advanced canvas below its presets, and `/graph` opens the same selected or active tree full-page. Positions and camera state persist across both views, empty-canvas dragging pans the tree, and an agent node can carry a local Markdown behavior profile. **Advanced setup** contains technical configuration and the activity-word editor; runtime wording edits persist in `.aetherstack/activity_words.json`.
 
@@ -216,8 +225,8 @@ Hub embeds the complete editable advanced canvas below its presets, and `/graph`
 
 | Path | Commit | Purpose |
 |------|--------|---------|
-| `.aetherstack/project-overview.md` | Yes (no secrets) | Human AI history overview |
-| `.aetherstack/project-overview.json` | Yes (no API key) | Machine scan |
+| `.aetherstack/project-overview.md` | Yes (no secrets or absolute host paths) | Human AI history overview |
+| `.aetherstack/project-overview.json` | Yes (no API key or absolute host paths) | Machine scan using repository-relative paths |
 | `.aetherstack/snapshots/*.md` | Operator choice | Manual notes |
 | `.continue/config.yaml` | Yes if key is env placeholder | Continue → gateway |
 | `.vscode/settings.json` | Yes if no secrets | URLs / default model |
@@ -237,7 +246,7 @@ Hub embeds the complete editable advanced canvas below its presets, and `/graph`
 
 1. Stack running (`start.bat` / `./start.sh`).  
 2. **Wire Continue.dev**.  
-3. Set `AETHERSTACK_API_KEY` for Continue, and use **AetherStack: Set API Key Securely** for the extension.
+3. The extension imports the existing gateway key from the runtime `.env` into VS Code SecretStorage and Continue's private global `.env`; use **AetherStack: Set API Key Securely** if you need to override it.
 4. Select model alias in Continue (`local-default`, `grok-4.5`, …).  
 5. Or **Open Chat UI** (`:3000`).
 
@@ -268,8 +277,8 @@ Hub embeds the complete editable advanced canvas below its presets, and `/graph`
 ### Continue does not see models
 
 - Config path: project `.continue/config.yaml` from **Wire Continue.dev**.  
-- Env `AETHERSTACK_API_KEY` must be set for the VS Code process (set user env and **fully restart** VS Code).  
-- Or configure Continue’s key field manually for local lab only.
+- Re-run **Wire Continue.dev** after the stack is healthy. The generated config uses `${{ secrets.AETHERSTACK_API_KEY }}`, resolved from Continue's private global `~/.continue/.env`.
+- If you maintain Continue configuration manually, set the same existing gateway key there; do not generate a provider key for AetherStack.
 
 ### Expectation: VS Code drives AMD GPU
 
@@ -296,9 +305,10 @@ Start `project-engine` separately; compose stack alone does not start `:8765`.
 Install:     code --install-extension AetherStack.aetherstack
 Reload:      Ctrl+Shift+P → Developer: Reload Window
 Open folder: File → Open Folder
-Find UI:     Activity Bar → AetherStack  OR  Ctrl+Shift+P → AetherStack:
-First run:   Scan Project AI History → Wire Continue.dev
-Chat:        Continue extension  OR  Open Chat UI (:3000)
+Find Chat:   Secondary Side Bar → AetherStack  OR  @aetherstack in VS Code Chat
+Find ops:    Activity Bar → AetherStack → Control & Services
+First run:   Start All Services → Install Runtime 0.3.12 (if prompted)
+Chat:        AetherStack Chat  OR  @aetherstack  OR  optional Open WebUI (:3000)
 Gateway:     http://127.0.0.1:4000/v1
 Engine:      http://127.0.0.1:8765
 ```
@@ -311,4 +321,5 @@ Engine:      http://127.0.0.1:8765
 |------|----------|
 | Extension source | [`integrations/vscode/`](../integrations/vscode/) |
 | Marketplace | [AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
+| Release artifacts | GitHub Release `v0.3.12`: verified VSIX, runtime archive, and SHA-256 files |
 | Package / publish notes | [`integrations/vscode/README.md`](../integrations/vscode/README.md) |

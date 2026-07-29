@@ -32,13 +32,15 @@ If engines are idle, fix **layers 2–3** (Ollama ROCm + adapter profiles), not 
 
 ```bash
 # Probe CUs + backend
-python3 /mnt/d/llm/stack/aether-amd/probe.py
+cd /path/to/aetherstack
+python3 ./aether-amd/probe.py
 
 # Apply profile + install ROCm Ollama if missing
-sudo bash /mnt/d/llm/stack/aether-amd/ensure-backend.sh
+sudo bash ./aether-amd/ensure-backend.sh
 
 # Or from Windows:
-#   wsl -d Debian -- bash -lc 'sudo bash /mnt/d/llm/stack/aether-amd/ensure-backend.sh'
+# From the selected runtime root on Windows:
+#   wsl -d Debian -- bash -lc 'sudo bash ./aether-amd/ensure-backend.sh'
 ```
 
 ## Device profiles

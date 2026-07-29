@@ -16,6 +16,8 @@ import yaml
 
 from agents import apply_runtime_update, plan_event
 from attachments import build_image_content_part, decode_attachment, extract_pdf_text
+from inference_runtime import begin as begin_inference
+from inference_runtime import finish as finish_inference
 from matrix import _score_model
 
 ROOT = Path(__file__).resolve().parent
@@ -549,8 +551,17 @@ def _chat_completion(call: dict[str, Any], messages: list[dict[str, str]] | None
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=180) as response:
-        value = json.loads(response.read().decode("utf-8"))
+    activity_id = begin_inference(model, "host_cli") if host_cli else None
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        if activity_id:
+            finish_inference(activity_id, "failed")
+        raise
+    else:
+        if activity_id:
+            finish_inference(activity_id, "complete")
     choices = value.get("choices") or []
     content = (((choices[0] if choices else {}).get("message") or {}).get("content") or "")
     return {

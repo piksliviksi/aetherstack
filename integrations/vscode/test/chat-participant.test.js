@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createChatRequestHandler } = require("../chat-participant");
+const { createChatRequestHandler, historyFromContext, selectedServiceFromContext } = require("../chat-participant");
 
 function fakeStream() {
   const markdown = [];
@@ -81,4 +81,77 @@ test("/help lists commands without calling the Hub", async () => {
 
   const { markdown } = stream.get();
   assert.ok(markdown.some((m) => m.includes("AetherStack commands")));
+});
+
+test("native Chat context is thread-local and remembers an explicit preset", async () => {
+  const calls = [];
+  const hubChat = fakeHubChat({
+    services: [
+      { id: "coding", label: "Coding", summary: "Implement things" },
+      { id: "research", label: "Research", summary: "Find evidence" },
+    ],
+    run: async (pathname, options) => {
+      calls.push({ pathname, body: options.body });
+      if (pathname === "/api/services/classify") return { service_id: "research", label: "Research", confidence: "high" };
+      return { answer: "done" };
+    },
+  });
+  const handler = createChatRequestHandler(hubChat);
+
+  const codingContext = {
+    history: [
+      { command: "code", prompt: "" },
+      { prompt: "first task" },
+      { response: [{ value: { value: "first answer" } }] },
+    ],
+  };
+  await handler({ prompt: "continue it", command: undefined }, codingContext, fakeStream(), token);
+  assert.equal(calls[0].pathname, "/api/services/coding/run");
+  assert.deepEqual(calls[0].body.history.slice(-2), [
+    { role: "user", content: "first task" },
+    { role: "assistant", content: "first answer" },
+  ]);
+
+  await handler({ prompt: "investigate this", command: undefined }, { history: [] }, fakeStream(), token);
+  assert.equal(calls[1].pathname, "/api/services/classify");
+  assert.equal(calls[2].pathname, "/api/services/research/run");
+  assert.deepEqual(calls[2].body.history, []);
+  assert.equal(selectedServiceFromContext(codingContext, ["coding", "research"]), "coding");
+  assert.deepEqual(historyFromContext({ history: [] }), []);
+});
+
+test("native Chat cancellation aborts the in-flight Hub request", async () => {
+  let cancel;
+  let observedSignal;
+  const cancellationToken = {
+    isCancellationRequested: false,
+    onCancellationRequested: (callback) => {
+      cancel = callback;
+      return { dispose() {} };
+    },
+  };
+  const hubChat = fakeHubChat({
+    run: async (_pathname, options) => {
+      observedSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const error = new Error("cancelled");
+          error.name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    },
+  });
+  const stream = fakeStream();
+  const running = createChatRequestHandler(hubChat)(
+    { prompt: "do something long", command: "code" },
+    { history: [] },
+    stream,
+    cancellationToken,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  cancel();
+  await running;
+  assert.equal(observedSignal.aborted, true);
+  assert.ok(stream.get().markdown.some((value) => /cancelled/i.test(value)));
 });

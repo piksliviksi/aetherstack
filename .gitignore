@@ -15,12 +15,17 @@ webui-up.*
 *.cookie
 cache/
 .cache/
+dist/
+*.vsix
 
 __pycache__/
 *.pyc
 .aetherstack/
 .superpowers/
-.claude/settings.local.json
+.claude/
+/packages/
+/docs/superpowers/
+/a.md
 
 
 # Local-only (do not publish)

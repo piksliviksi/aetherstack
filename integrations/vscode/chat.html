@@ -133,6 +133,7 @@
     <div class="composer-actions">
       <span id="status" class="muted"></span>
       <button type="button" id="attachBtn" class="secondary">Attach</button>
+      <button type="button" id="cancel" class="secondary" hidden>Stop</button>
       <input type="file" id="attachInput" accept="image/*,.pdf" multiple hidden>
       <span id="attachList"></span>
     </div>
@@ -152,6 +153,7 @@
   const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
   let pendingAttachments = [];
   const restored = vscode.getState() || {};
+  let activeConversationId = typeof restored.conversationId === 'string' ? restored.conversationId : null;
   new ResizeObserver((entries) => {
     const width = entries[0].contentRect.width;
     document.body.classList.toggle('wide', width >= 560);
@@ -222,8 +224,8 @@
     $('modeLabel').textContent = service ? service.label || service.id : 'auto';
   }
   function rotateActivity() { const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text); $('activityText').textContent = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : 'Combobulating the agent swarm...'; }
-  function saveState() { vscode.setState({ transcript: transcript.slice(-40), serviceId: $('service').value || 'auto', activeServiceId }); }
-  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
+  function saveState() { vscode.setState({ transcript: transcript.slice(-40), conversationId: activeConversationId, serviceId: $('service').value || 'auto', activeServiceId }); }
+  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('cancel').hidden = !value; $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
   function appendRichText(parent, value) {
     parent.insertAdjacentHTML('beforeend', renderMarkdown(String(value || '')));
     parent.querySelectorAll('pre[data-lang]').forEach((pre) => {
@@ -355,6 +357,7 @@
     $('attachList').textContent = pendingAttachments.length ? pendingAttachments.map((a) => a.name).join(', ') : '';
   }
   $('attachBtn').addEventListener('click', () => $('attachInput').click());
+  $('cancel').addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
   function readAsBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -436,18 +439,32 @@
       addMessage('assistant', message.content || '');
     } else if (message.type === 'conversations') {
       renderHistory(message.items || []);
+    } else if (message.type === 'conversationIdentity') {
+      activeConversationId = typeof message.id === 'string' ? message.id : activeConversationId;
+      saveState();
     } else if (message.type === 'conversationSwitched') {
-      transcript = [];
+      activeConversationId = typeof message.id === 'string' ? message.id : null;
       messageSeq = 0;
       $('messages').replaceChildren();
       const items = Array.isArray(message.transcript) ? message.transcript : [];
+      transcript = items.slice(-40).map((item) => ({
+        id: item.id != null ? item.id : (messageSeq += 1),
+        role: item.role,
+        value: String(item.value || ''),
+        detail: String(item.detail || ''),
+        attachments: item.attachments || [],
+      }));
       if (items.length) {
-        for (const item of items) addMessage(item.role, item.value, item.detail, true);
+        for (const item of transcript) addMessage(item.role, item.value, item.detail, false, item.id, item.attachments);
         $('idleArt').style.display = 'none';
         $('messages').style.flex = '1';
       } else {
         $('idleArt').style.display = 'flex';
         $('messages').style.flex = '0';
+      }
+      if (message.serviceId && ($('service').querySelector(`option[value="${CSS.escape(message.serviceId)}"]`) || message.serviceId === 'auto')) {
+        $('service').value = message.serviceId;
+        renderTeam();
       }
       saveState();
       vscode.postMessage({ type: 'listConversations' });
@@ -476,7 +493,12 @@
       $('status').textContent = message.message || 'Request failed'; $('status').className = 'error';
     }
   });
-  vscode.postMessage({ type: 'ready' });
+  vscode.postMessage({
+    type: 'ready',
+    conversationId: activeConversationId,
+    transcript: transcript.slice(-40),
+    serviceId: restored.serviceId || 'auto',
+  });
 </script>
 </body>
 </html>

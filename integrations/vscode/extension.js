@@ -8,6 +8,8 @@ const { reconcileHostCliBridge } = require("./cli-sync");
 const { parseChatInput, commandHelp } = require("./chat-routing");
 const { createChatRequestHandler } = require("./chat-participant");
 const { capConversations, titleFromTranscript } = require("./conversations");
+const { installRuntime: installRuntimeBundle } = require("./runtime-install");
+const extensionManifest = require("./package.json");
 const {
   SERVICES,
   checkServices,
@@ -115,6 +117,10 @@ function listDirSafe(p, depth = 0, maxDepth = 3) {
   return out;
 }
 
+function repositoryPath(root, target) {
+  return (path.relative(root, target) || ".").split(path.sep).join("/");
+}
+
 function detectSources(root) {
   const sources = [];
   const checks = [
@@ -137,7 +143,7 @@ function detectSources(root) {
           .sort((a, b) => b.mtime - a.mtime)
           .slice(0, 8)
           .map((f) => ({
-            name: path.relative(root, f.path),
+            name: repositoryPath(root, f.path),
             mtime: f.mtime.toISOString(),
             size: f.size,
           })),
@@ -205,16 +211,22 @@ function buildOverview(root) {
   const sources = detectSources(root);
   const modelsGuessed = sampleSourceModels(root, sources);
   const c = cfg();
+  const safeSources = sources.map((source) => ({
+    ...source,
+    // Overview files may be committed. Never persist absolute host paths or
+    // usernames; recent file names are already workspace-relative.
+    path: repositoryPath(root, source.path),
+  }));
   // Never persist secrets into overview JSON written on disk
   const overview = {
     generatedAt: new Date().toISOString(),
-    workspace: root,
+    workspace: ".",
     aetherstack: {
       baseUrl: c.baseUrl,
       chatUiUrl: c.chatUiUrl,
       defaultModel: c.defaultModel,
     },
-    sources,
+    sources: safeSources,
     modelsMentioned: modelsGuessed,
     howToContinue: [
       "Start AetherStack (start.bat / ./start.sh) so LiteLLM :4000 and Open WebUI :3000 are up.",
@@ -236,7 +248,7 @@ function writeOverviewFiles(root, overview) {
   md.push(`# AetherStack project overview`);
   md.push("");
   md.push(`Generated: ${overview.generatedAt}`);
-  md.push(`Workspace: \`${overview.workspace}\``);
+  md.push(`Workspace: \`${overview.workspace}\` (paths are repository-relative)`);
   md.push("");
   md.push(`## Detected AI history sources`);
   if (!overview.sources.length) {
@@ -408,6 +420,8 @@ class OverviewProvider {
         treeCmd("$(comment-discussion) Open AetherStack Chat", "aetherstack.openChat"),
         treeCmd("$(dashboard) Open Control Center", "aetherstack.openControlCenter"),
         treeCmd("$(play) Start all services", "aetherstack.startAll"),
+        treeCmd("$(cloud-download) Install verified runtime", "aetherstack.installRuntime"),
+        treeCmd("$(refresh) Refresh authenticated host CLIs", "aetherstack.refreshHostClis"),
       ];
       const summary = new vscode.TreeItem(
         this.runtime.checking
@@ -599,13 +613,51 @@ async function resolveStackRoot(context, prompt = false) {
     cwd: process.cwd(),
   });
   if (!root && prompt) {
-    root = await chooseStackRoot(context);
+    const choice = await vscode.window.showInformationMessage(
+      `AetherStack Runtime ${extensionManifest.version} is not installed or selected.`,
+      { modal: true, detail: "Install the verified runtime release automatically, or choose an existing AetherStack checkout." },
+      `Install Runtime ${extensionManifest.version}`,
+      "Choose Existing"
+    );
+    if (choice === `Install Runtime ${extensionManifest.version}`) {
+      root = await installManagedRuntime(context);
+    } else if (choice === "Choose Existing") {
+      root = await chooseStackRoot(context);
+    }
   }
   if (root) {
     await context.globalState.update("aetherstack.stackRoot", root);
     await importGatewayKey(context, root);
   }
   return root;
+}
+
+async function installManagedRuntime(context) {
+  if (!context.globalStorageUri || !context.globalStorageUri.fsPath) {
+    throw new Error("VS Code did not provide a managed extension storage directory.");
+  }
+  const result = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `AetherStack: installing verified Runtime ${extensionManifest.version}`,
+      cancellable: false,
+    },
+    () => installRuntimeBundle({
+      version: extensionManifest.version,
+      storagePath: context.globalStorageUri.fsPath,
+    })
+  );
+  await vscode.workspace
+    .getConfiguration("aetherstack")
+    .update("stackPath", result.root, vscode.ConfigurationTarget.Global);
+  await context.globalState.update("aetherstack.stackRoot", result.root);
+  await importGatewayKey(context, result.root);
+  vscode.window.showInformationMessage(
+    result.reused
+      ? `AetherStack Runtime ${result.version} is ready.`
+      : `AetherStack Runtime ${result.version} installed and checksum verified.`
+  );
+  return result.root;
 }
 
 async function chooseStackRoot(context) {
@@ -722,10 +774,10 @@ class HubChat {
     this.panel = null;
     this.view = null;
     this.services = [];
-    this.history = [];
     this.activityWords = [];
     this.conversations = this.context.globalState.get("aetherstack.conversations", []);
-    this.activeConversationId = null;
+    this.surfaceStates = new WeakMap();
+    this.activeRuns = new WeakMap();
   }
 
   async hubRequest(pathname, options = {}) {
@@ -737,17 +789,66 @@ class HubChat {
     return response.body || {};
   }
 
-  async saveConversationSnapshot(transcript) {
+  stateFor(webview = this.activeWebview()) {
+    if (!webview) return { history: [], activeConversationId: null, selectedServiceId: "auto" };
+    let state = this.surfaceStates.get(webview);
+    if (!state) {
+      state = { history: [], activeConversationId: null, selectedServiceId: "auto" };
+      this.surfaceStates.set(webview, state);
+    }
+    return state;
+  }
+
+  sanitizeTranscript(transcript) {
+    return (Array.isArray(transcript) ? transcript : []).slice(-40).flatMap((item) => {
+      if (!item || !["user", "assistant"].includes(item.role)) return [];
+      const value = String(item.value ?? item.content ?? "").slice(0, 200_000);
+      return [{ role: item.role, value }];
+    });
+  }
+
+  async hydrateSurface(webview, message = {}) {
+    const state = this.stateFor(webview);
+    const requestedId = typeof message.conversationId === "string" ? message.conversationId : null;
+    let entry = requestedId ? this.conversations.find((item) => item.id === requestedId) : null;
+    const restored = this.sanitizeTranscript(message.transcript);
+    if (!entry && restored.length) {
+      const now = Date.now();
+      entry = {
+        id: `${now}-${Math.random().toString(36).slice(2, 10)}`,
+        title: titleFromTranscript(restored),
+        transcript: restored,
+        selectedServiceId: String(message.serviceId || "auto"),
+        updatedAt: now,
+      };
+      this.conversations = capConversations([...this.conversations, entry]);
+      await this.context.globalState.update("aetherstack.conversations", this.conversations);
+    }
+    state.activeConversationId = entry ? entry.id : null;
+    state.history = (entry ? this.sanitizeTranscript(entry.transcript) : restored)
+      .map((item) => ({ role: item.role, content: item.value }));
+    state.selectedServiceId = String((entry && entry.selectedServiceId) || message.serviceId || "auto");
+    await webview.postMessage({
+      type: "conversationSwitched",
+      id: state.activeConversationId,
+      transcript: state.history.map((item) => ({ role: item.role, value: item.content })),
+      serviceId: state.selectedServiceId,
+    });
+  }
+
+  async saveConversationSnapshot(transcript, webview = this.activeWebview()) {
     if (!transcript.length) return;
+    const state = this.stateFor(webview);
     const now = Date.now();
     const title = titleFromTranscript(transcript);
-    let entry = this.conversations.find((item) => item.id === this.activeConversationId);
+    let entry = this.conversations.find((item) => item.id === state.activeConversationId);
     if (!entry) {
-      entry = { id: String(now), title, updatedAt: now };
+      entry = { id: `${now}-${Math.random().toString(36).slice(2, 10)}`, title, updatedAt: now };
       this.conversations.push(entry);
-      this.activeConversationId = entry.id;
+      state.activeConversationId = entry.id;
     }
-    entry.transcript = transcript;
+    entry.transcript = this.sanitizeTranscript(transcript);
+    entry.selectedServiceId = state.selectedServiceId;
     entry.title = title;
     entry.updatedAt = now;
     this.conversations = capConversations(this.conversations);
@@ -789,12 +890,17 @@ class HubChat {
 
   async run(message, webview = this.activeWebview()) {
     if (!webview) throw new Error("AetherStack Chat view is not available.");
+    this.activeRuns.get(webview)?.abort();
+    const controller = new AbortController();
+    this.activeRuns.set(webview, controller);
     await webview.postMessage({ type: "busy", value: true });
     let inferenceTimer = null;
     try {
+      const state = this.stateFor(webview);
+      const requestedService = String(message.serviceId || state.selectedServiceId || "auto");
       const parsed = parseChatInput(
         message.prompt,
-        message.serviceId,
+        requestedService,
         this.services.map((service) => service.id)
       );
       if (parsed.action === "error") throw new Error(parsed.message);
@@ -806,12 +912,19 @@ class HubChat {
         return;
       }
       if (parsed.action === "select") {
+        state.selectedServiceId = parsed.serviceId;
         await webview.postMessage({
           type: "route",
           selection: parsed.serviceId === "auto"
             ? { service_id: "", label: "Automatic routing", confidence: "ready", source: "slash-command" }
             : { service_id: parsed.serviceId, label: (this.services.find((item) => item.id === parsed.serviceId) || {}).label, confidence: "fixed", source: "slash-command" },
         });
+        const entry = this.conversations.find((item) => item.id === state.activeConversationId);
+        if (entry) {
+          entry.selectedServiceId = state.selectedServiceId;
+          entry.updatedAt = Date.now();
+          await this.context.globalState.update("aetherstack.conversations", this.conversations);
+        }
         await webview.postMessage({ type: "command", content: parsed.serviceId === "auto" ? "Automatic intent routing is active." : `Preset selected: ${parsed.serviceId}.` });
         return;
       }
@@ -822,11 +935,13 @@ class HubChat {
         throw new Error("No vision-capable model is currently available for the attached image.");
       }
       let serviceId = parsed.serviceId;
+      state.selectedServiceId = parsed.serviceId;
       let selection;
       if (serviceId === "auto") {
         selection = await this.hubRequest("/api/services/classify", {
           method: "POST",
           body: { goal: prompt },
+          signal: controller.signal,
         });
         serviceId = String(selection.service_id || "");
         if (!this.services.some((service) => service.id === serviceId)) {
@@ -856,7 +971,7 @@ class HubChat {
         goal: prompt,
         lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
         token_saver: Boolean(message.tokenSaver),
-        history: this.history.slice(-8),
+        history: state.history.slice(-8),
         attachments,
       };
       let result = null;
@@ -864,7 +979,7 @@ class HubChat {
       try {
         await requestStream(
           `http://127.0.0.1:8766/api/services/${encodeURIComponent(serviceId)}/run/stream`,
-          { method: "POST", body: requestBody },
+          { method: "POST", body: requestBody, signal: controller.signal },
           (event) => {
             if (event.type === "delta") {
               streamedText += event.text || "";
@@ -880,7 +995,8 @@ class HubChat {
             // level error event (which resolves requestStream normally but leaves result unset).
           }
         );
-      } catch {
+      } catch (error) {
+        if (error && error.name === "AbortError") throw error;
         // transport-level failure (connection reset, timeout, non-2xx from requestStream's own
         // reject path) — fall through to the non-streaming retry below.
       }
@@ -891,13 +1007,20 @@ class HubChat {
         result = await this.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
           method: "POST",
           body: requestBody,
+          signal: controller.signal,
         });
       }
       if (selection) result.selection = selection;
-      this.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
-      await this.saveConversationSnapshot(this.history.map((entry) => ({ role: entry.role, value: entry.content })));
+      state.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
+      await this.saveConversationSnapshot(
+        state.history.map((entry) => ({ role: entry.role, value: entry.content })),
+        webview
+      );
+      await webview.postMessage({ type: "conversationIdentity", id: state.activeConversationId, serviceId: state.selectedServiceId });
+      await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
       await webview.postMessage({ type: "result", result, streamed: Boolean(streamedText) });
     } finally {
+      this.activeRuns.delete(webview);
       if (inferenceTimer) clearInterval(inferenceTimer);
       await webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
       await webview.postMessage({ type: "busy", value: false });
@@ -927,29 +1050,39 @@ class HubChat {
       .replace("{{CHAT_RENDER_JS}}", () => renderScript);
     webview.onDidReceiveMessage(async (message) => {
       try {
-        if (message.type === "ready") await this.loadServices(false, webview);
+        if (message.type === "ready") {
+          await this.hydrateSurface(webview, message);
+          await this.loadServices(false, webview);
+        }
         else if (message.type === "refresh") await this.loadServices(true, webview);
         else if (message.type === "run") await this.run(message, webview);
+        else if (message.type === "cancel") this.activeRuns.get(webview)?.abort();
         else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
         else if (message.type === "openEditor") this.showPanel();
         else if (message.type === "listConversations") {
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
         } else if (message.type === "newConversation") {
-          this.activeConversationId = null;
-          this.history = [];
-          await webview.postMessage({ type: "conversationSwitched", transcript: [] });
+          const state = this.stateFor(webview);
+          state.activeConversationId = null;
+          state.history = [];
+          state.selectedServiceId = "auto";
+          await webview.postMessage({ type: "conversationSwitched", id: null, transcript: [], serviceId: "auto" });
         } else if (message.type === "switchConversation") {
+          const state = this.stateFor(webview);
           const entry = this.conversations.find((item) => item.id === message.id);
-          this.activeConversationId = entry ? entry.id : null;
-          this.history = entry ? entry.transcript.map((item) => ({ role: item.role, content: item.value })) : [];
-          await webview.postMessage({ type: "conversationSwitched", transcript: entry ? entry.transcript : [] });
+          state.activeConversationId = entry ? entry.id : null;
+          state.history = entry ? this.sanitizeTranscript(entry.transcript).map((item) => ({ role: item.role, content: item.value })) : [];
+          state.selectedServiceId = String((entry && entry.selectedServiceId) || "auto");
+          await webview.postMessage({ type: "conversationSwitched", id: state.activeConversationId, transcript: entry ? entry.transcript : [], serviceId: state.selectedServiceId });
         } else if (message.type === "deleteConversation") {
+          const state = this.stateFor(webview);
           this.conversations = this.conversations.filter((item) => item.id !== message.id);
           await this.context.globalState.update("aetherstack.conversations", this.conversations);
-          if (this.activeConversationId === message.id) {
-            this.activeConversationId = null;
-            this.history = [];
-            await webview.postMessage({ type: "conversationSwitched", transcript: [] });
+          if (state.activeConversationId === message.id) {
+            state.activeConversationId = null;
+            state.history = [];
+            state.selectedServiceId = "auto";
+            await webview.postMessage({ type: "conversationSwitched", id: null, transcript: [], serviceId: "auto" });
           }
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
         }
@@ -1020,14 +1153,6 @@ async function activate(context) {
   context.subscriptions.push(new vscode.Disposable(() => cliBridge.stop()));
 
   let stackRoot = await resolveStackRoot(context, false);
-  if (stackRoot) {
-    try {
-      const bridgeSync = await reconcileHostCliBridge({ stackRoot, cliBridge, request, runCompose });
-      output.appendLine(`[cli-bridge] ${bridgeSync.reason}${bridgeSync.aliases.length ? `: ${bridgeSync.aliases.join(", ")}` : ""}`);
-    } catch (error) {
-      output.appendLine(`[cli-bridge] Hub synchronization failed: ${error.message || error}`);
-    }
-  }
   let containers = [];
   let technicalError = "";
   let stackActionInProgress = null;
@@ -1148,12 +1273,38 @@ async function activate(context) {
     }
   }
 
+  async function reconcileCliProviders(notify = false) {
+    stackRoot = await resolveStackRoot(context, false);
+    if (!stackRoot) {
+      const reason = "Install or choose AetherStack Runtime before refreshing host CLIs.";
+      if (notify) vscode.window.showWarningMessage(reason);
+      return { changed: false, reason, aliases: [] };
+    }
+    try {
+      const result = await reconcileHostCliBridge({ stackRoot, cliBridge, request, runCompose });
+      output.appendLine(`[cli-bridge] ${result.reason}${result.aliases.length ? `: ${result.aliases.join(", ")}` : ""}`);
+      modelVerificationCache = null;
+      await refreshRuntime(false, true);
+      await hubChat.loadServices(true).catch((error) => output.appendLine(`[cli-bridge] Chat service refresh failed: ${error.message}`));
+      if (notify) {
+        const aliases = result.aliases.length ? result.aliases.join(", ") : "none";
+        vscode.window.showInformationMessage(`AetherStack host CLI providers refreshed: ${aliases}.`);
+      }
+      return result;
+    } catch (error) {
+      output.appendLine(`[cli-bridge] Hub synchronization failed: ${error.message || error}`);
+      if (notify) vscode.window.showErrorMessage(`Cannot refresh AetherStack host CLIs: ${error.message || error}`);
+      throw error;
+    }
+  }
+
   async function runStackAction(action) {
     if (stackActionInProgress) {
       vscode.window.showWarningMessage(`AetherStack is already ${stackActionInProgress}.`);
       return;
     }
     stackActionInProgress = { start: "starting", stop: "stopping", restart: "restarting" }[action] || action;
+    const integrationWarnings = [];
     try {
       stackRoot = await resolveStackRoot(context, true);
       if (!stackRoot) return;
@@ -1197,13 +1348,30 @@ async function activate(context) {
             }
             // startCompose may have created .env from .env.example on first run.
             // Import and sync only after that file is guaranteed to exist.
-            await importGatewayKey(context, stackRoot);
-            if (cfg().autoWireModels) syncContinueGatewayKey(stackRoot);
+            try {
+              await importGatewayKey(context, stackRoot);
+            } catch (error) {
+              integrationWarnings.push(`SecretStorage import: ${error.message || error}`);
+            }
+            if (cfg().autoWireModels) {
+              try {
+                syncContinueGatewayKey(stackRoot);
+              } catch (error) {
+                integrationWarnings.push(`Continue key sync: ${error.message || error}`);
+              }
+            }
           }
         }
       );
 
       if (action !== "stop") modelVerificationCache = null;
+      if (action !== "stop") {
+        try {
+          await reconcileCliProviders(false);
+        } catch (error) {
+          integrationWarnings.push(`Host CLI refresh: ${error.message || error}`);
+        }
+      }
       await refreshRuntime(true, action !== "stop");
       if (action === "start" || action === "restart") {
         let wiring = "";
@@ -1218,7 +1386,7 @@ async function activate(context) {
           }
         }
         vscode.window.showInformationMessage(
-          `AetherStack is up. http://127.0.0.1:3000/ OK · http://127.0.0.1:4000/ OK · http://127.0.0.1:8766/ OK.${wiring}`
+          `AetherStack is up. http://127.0.0.1:3000/ OK · http://127.0.0.1:4000/ OK · http://127.0.0.1:8766/ OK.${wiring}${integrationWarnings.length ? ` Optional integration warnings: ${integrationWarnings.join("; ")}` : ""}`
         );
       } else {
         vscode.window.showInformationMessage("AetherStack services stopped.");
@@ -1244,6 +1412,8 @@ async function activate(context) {
         refresh: "aetherstack.refreshServices",
         logs: "aetherstack.showLogs",
         choosePath: "aetherstack.chooseStackPath",
+        installRuntime: "aetherstack.installRuntime",
+        refreshHostClis: "aetherstack.refreshHostClis",
       };
       if (commands[message.type]) await vscode.commands.executeCommand(commands[message.type]);
       else if (message.type === "openUrl" && message.url) await vscode.commands.executeCommand("aetherstack.openUrl", message.url);
@@ -1290,8 +1460,26 @@ async function activate(context) {
     vscode.commands.registerCommand("aetherstack.startAll", () => runStackAction("start")),
     vscode.commands.registerCommand("aetherstack.stopAll", () => runStackAction("stop")),
     vscode.commands.registerCommand("aetherstack.restartAll", () => runStackAction("restart")),
+    vscode.commands.registerCommand("aetherstack.installRuntime", async () => {
+      try {
+        stackRoot = await installManagedRuntime(context);
+        await refreshRuntime(true, true);
+        await controlCenter.render(`AetherStack Runtime ${extensionManifest.version} is ready at ${stackRoot}.`);
+      } catch (error) {
+        const detail = error.message || String(error);
+        output.appendLine(`[runtime-install] ${detail}`);
+        output.show(true);
+        vscode.window.showErrorMessage(`AetherStack Runtime installation failed: ${detail}`);
+      }
+    }),
+    vscode.commands.registerCommand("aetherstack.refreshHostClis", () => reconcileCliProviders(true)),
     vscode.commands.registerCommand("aetherstack.refreshServices", async () => {
       modelVerificationCache = null;
+      try {
+        await reconcileCliProviders(false);
+      } catch {
+        // The normal service refresh below still reports the actionable state.
+      }
       const runtime = await refreshRuntime(true, true);
       const failures = runtime.services
         .filter((service) => !service.ok)
@@ -1336,6 +1524,9 @@ async function activate(context) {
   }, 10000);
   context.subscriptions.push(new vscode.Disposable(() => clearInterval(monitor)));
   await refreshRuntime(false, true);
+  // Views and commands are now registered. Slow CLI login probes must not make
+  // AetherStack appear missing during extension activation.
+  void reconcileCliProviders(false).catch(() => {});
 
   context.subscriptions.push(
     vscode.commands.registerCommand("aetherstack.scanProject", async () => {
@@ -1550,4 +1741,4 @@ async function activate(context) {
 
 function deactivate() {}
 
-module.exports = { activate, deactivate };
+module.exports = { activate, buildOverview, deactivate, writeOverviewFiles };

@@ -19,6 +19,7 @@ sys.path.insert(0, str(HUB))
 
 import backup  # noqa: E402
 import graph  # noqa: E402
+import inference_runtime  # noqa: E402
 import pipelines  # noqa: E402
 import server as hub_server  # noqa: E402
 
@@ -296,6 +297,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             self.assertTrue((Path(td) / "webui.db.aetherstack-before-gateway.bak").is_file())
 
     def test_inference_status_contains_model_metadata_without_prompt_content(self) -> None:
+        inference_runtime.reset_for_tests()
         with tempfile.TemporaryDirectory() as td:
             status_path = Path(td) / "inference-status.json"
             payload = {
@@ -306,13 +308,49 @@ class SecurityBoundaryTests(unittest.TestCase):
             status_path.write_text(json.dumps(payload), encoding="utf-8")
             code, result = hub_server.get_inference_status(status_path)
             self.assertEqual(code, 200)
-            self.assertEqual(result, payload)
+            self.assertEqual(
+                result,
+                {
+                    "active": [
+                        {
+                            "callId": "call-1",
+                            "model": "local-default",
+                            "source": "litellm",
+                            "startedAt": 1,
+                        }
+                    ],
+                    "activeCount": 1,
+                    "last": None,
+                },
+            )
             self.assertNotIn("messages", json.dumps(result))
             self.assertNotIn("response", json.dumps(result))
 
             missing_code, missing = hub_server.get_inference_status(Path(td) / "missing.json")
             self.assertEqual(missing_code, 200)
             self.assertEqual(missing["activeCount"], 0)
+
+    def test_inference_status_merges_host_cli_activity_without_payloads(self) -> None:
+        inference_runtime.reset_for_tests()
+        call_id = inference_runtime.begin("codex-cli")
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                code, active = hub_server.get_inference_status(Path(td) / "missing.json")
+                self.assertEqual(code, 200)
+                self.assertEqual(active["activeCount"], 1)
+                self.assertEqual(active["active"][0]["model"], "codex-cli")
+                self.assertEqual(active["active"][0]["source"], "host_cli")
+                self.assertNotIn("prompt", json.dumps(active).lower())
+                self.assertNotIn("response", json.dumps(active).lower())
+        finally:
+            inference_runtime.finish(call_id, "complete")
+
+        code, completed = hub_server.get_inference_status(Path("definitely-missing-status.json"))
+        self.assertEqual(code, 200)
+        self.assertEqual(completed["activeCount"], 0)
+        self.assertEqual(completed["last"]["model"], "codex-cli")
+        self.assertEqual(completed["last"]["state"], "complete")
+        inference_runtime.reset_for_tests()
 
     def test_inference_status_is_a_get_endpoint(self) -> None:
         sent = []

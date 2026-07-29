@@ -2,7 +2,7 @@
   "name": "aetherstack",
   "displayName": "AetherStack",
   "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama). Windows, macOS, and Linux.",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "publisher": "AetherStack",
   "license": "MIT",
   "pricing": "Free",
@@ -35,7 +35,13 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "verify:release": "node ../../scripts/verify-release.mjs",
+    "package:vsix": "node ../../scripts/package-vscode.mjs",
+    "verify:vsix": "node ../../scripts/verify-vsix.mjs",
+    "package:runtime": "node ../../scripts/package-runtime.mjs",
+    "verify:runtime": "node ../../scripts/verify-runtime.mjs",
+    "release:check": "npm test && npm run verify:release && npm run package:vsix && npm run verify:vsix && npm run package:runtime && npm run verify:runtime"
   },
   "contributes": {
     "commands": [
@@ -78,6 +84,14 @@
         "command": "aetherstack.refreshServices",
         "title": "AetherStack: Refresh Service State",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "aetherstack.refreshHostClis",
+        "title": "AetherStack: Refresh Authenticated Host CLIs"
+      },
+      {
+        "command": "aetherstack.installRuntime",
+        "title": "AetherStack: Install Verified Runtime"
       },
       {
         "command": "aetherstack.chooseStackPath",
@@ -171,14 +185,23 @@
         "id": "aetherstack.chat",
         "name": "aetherstack",
         "fullName": "AetherStack",
-        "description": "Ask naturally, or use /research /plan /code /test /bugfix /help.",
+        "description": "Ask naturally, or select a dynamic service with /auto, /preset, or a service shortcut.",
         "isSticky": true,
         "commands": [
           { "name": "research", "description": "Find evidence, challenge it, synthesize a sourced conclusion" },
           { "name": "plan", "description": "Turn an objective into a sequenced, risk-aware execution plan" },
+          { "name": "auto", "description": "Return to automatic service selection for this Chat thread" },
+          { "name": "preset", "description": "Select a service preset by name, optionally followed by a goal" },
+          { "name": "presets", "description": "List service presets available on this system" },
           { "name": "code", "description": "Implement a focused feature or refactor with tests and review" },
           { "name": "test", "description": "Design and run efficient unit/integration/regression coverage" },
           { "name": "bugfix", "description": "Reproduce, isolate, repair, and regression-test a defect" },
+          { "name": "ui", "description": "Design a clear accessible user interface" },
+          { "name": "frontend", "description": "Implement and review frontend behavior" },
+          { "name": "backend", "description": "Implement and review backend behavior" },
+          { "name": "security", "description": "Run defensive white-hat security analysis" },
+          { "name": "polish", "description": "Polish quality, usability, and maintainability" },
+          { "name": "docs", "description": "Produce precise technical documentation" },
           { "name": "help", "description": "Show AetherStack commands and available presets" }
         ]
       }

@@ -2,6 +2,7 @@
 # Wire Ollama systemd service for AMD ROCm/DXG on WSL + listen for Docker
 set -euo pipefail
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 sudo tee /etc/systemd/system/ollama.service >/dev/null <<'EOF'
 [Unit]
@@ -44,7 +45,7 @@ sudo mkdir -p /opt/rocm/share/rocdxg
 echo '0x73FF,10,3,2' | sudo tee /opt/rocm/share/rocdxg/dids.conf >/dev/null
 
 # Profile env for interactive shells
-sudo cp /mnt/d/llm/stack/scripts/wsl-rocm-env.sh /etc/profile.d/aether-rocm.sh
+sudo cp "$SCRIPT_DIR/wsl-rocm-env.sh" /etc/profile.d/aether-rocm.sh
 sudo chmod 644 /etc/profile.d/aether-rocm.sh
 
 sudo systemctl daemon-reload

@@ -71,7 +71,7 @@ function findStackRoot({ configuredPath, rememberedPath, workspacePaths = [], ex
   return null;
 }
 
-function request(urlStr, { headers = {}, timeoutMs = 4000, method = "GET", body = null } = {}) {
+function request(urlStr, { headers = {}, timeoutMs = 4000, method = "GET", body = null, signal = null } = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
     const client = url.protocol === "https:" ? https : http;
@@ -104,13 +104,24 @@ function request(urlStr, { headers = {}, timeoutMs = 4000, method = "GET", body 
       }
     );
     req.on("error", reject);
+    const abort = () => {
+      const error = new Error("request cancelled");
+      error.name = "AbortError";
+      error.code = "ABORT_ERR";
+      req.destroy(error);
+    };
+    if (signal) {
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+      req.once("close", () => signal.removeEventListener("abort", abort));
+    }
     req.on("timeout", () => req.destroy(new Error(`timed out after ${timeoutMs} ms`)));
     if (body != null) req.write(typeof body === "string" ? body : JSON.stringify(body));
     req.end();
   });
 }
 
-function requestStream(urlStr, { headers = {}, timeoutMs = 190_000, method = "POST", body = null } = {}, onEvent) {
+function requestStream(urlStr, { headers = {}, timeoutMs = 190_000, method = "POST", body = null, signal = null } = {}, onEvent) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
     const client = url.protocol === "https:" ? https : http;
@@ -157,6 +168,17 @@ function requestStream(urlStr, { headers = {}, timeoutMs = 190_000, method = "PO
       }
     );
     req.on("error", reject);
+    const abort = () => {
+      const error = new Error("request cancelled");
+      error.name = "AbortError";
+      error.code = "ABORT_ERR";
+      req.destroy(error);
+    };
+    if (signal) {
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+      req.once("close", () => signal.removeEventListener("abort", abort));
+    }
     req.on("timeout", () => req.destroy(new Error(`timed out after ${timeoutMs} ms`)));
     if (body != null) req.write(typeof body === "string" ? body : JSON.stringify(body));
     req.end();

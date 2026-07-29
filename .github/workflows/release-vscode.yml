@@ -1,0 +1,113 @@
+name: Release VS Code extension
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vscode-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify and publish tagged VSIX
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: integrations/vscode/package.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            aether-hub/requirements.txt
+            project-engine/requirements.txt
+
+      - name: Match immutable tag to canonical version
+        shell: bash
+        run: |
+          VERSION_VALUE="$(tr -d '\r\n' < VERSION)"
+          if [[ "$GITHUB_REF_NAME" != "v$VERSION_VALUE" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION $VERSION_VALUE"
+            exit 1
+          fi
+          {
+            echo "VERSION_VALUE=$VERSION_VALUE"
+            echo "VSIX=dist/aetherstack-$VERSION_VALUE.vsix"
+            echo "CHECKSUM=dist/aetherstack-$VERSION_VALUE.vsix.sha256"
+            echo "RUNTIME=dist/aetherstack-runtime-$VERSION_VALUE.tar.gz"
+            echo "RUNTIME_CHECKSUM=dist/aetherstack-runtime-$VERSION_VALUE.tar.gz.sha256"
+          } >> "$GITHUB_ENV"
+
+      - name: Run extension tests and build inspected VSIX
+        run: npm --prefix integrations/vscode run release:check
+      - name: Install runtime test dependencies
+        run: python -m pip install -r aether-hub/requirements.txt -r project-engine/requirements.txt
+      - name: Run runtime tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate Compose model
+        run: docker compose --env-file .env.example config --quiet
+
+      - name: Require a Marketplace credential or an already-published matching version
+        shell: bash
+        run: |
+          if [[ -n "$VSCE_PAT" ]]; then
+            echo "Marketplace publication will use the repository secret."
+          else
+            MARKETPLACE_VERSION="$(npx --yes @vscode/vsce@3.9.2 show AetherStack.aetherstack --json | node -e 'let value=""; process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => { const item=JSON.parse(value); process.stdout.write(String(item.versions?.[0]?.version || "")); });')"
+            if [[ "$MARKETPLACE_VERSION" != "$VERSION_VALUE" ]]; then
+              echo "::error::VSCE_PAT is absent and Marketplace has $MARKETPLACE_VERSION, expected $VERSION_VALUE. Publish the checked VSIX with Entra ID first or configure VSCE_PAT."
+              exit 1
+            fi
+            MARKETPLACE_VSIX="https://AetherStack.gallery.vsassets.io/_apis/public/gallery/publisher/AetherStack/extension/aetherstack/$VERSION_VALUE/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage"
+            curl --fail --location --silent --show-error "$MARKETPLACE_VSIX" --output "$VSIX"
+            node scripts/verify-vsix.mjs "$VSIX"
+            echo "Marketplace already contains $VERSION_VALUE; the exact published VSIX will be attached to GitHub without republishing."
+          fi
+
+      - name: Create artifact checksum
+        shell: bash
+        run: |
+          cd dist
+          sha256sum "aetherstack-$VERSION_VALUE.vsix" > "aetherstack-$VERSION_VALUE.vsix.sha256"
+      - name: Retain exact release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: aetherstack-${{ env.VERSION_VALUE }}-release-candidate
+          path: |
+            ${{ env.VSIX }}
+            ${{ env.CHECKSUM }}
+            ${{ env.RUNTIME }}
+            ${{ env.RUNTIME_CHECKSUM }}
+          if-no-files-found: error
+
+      - name: Stage GitHub Release with the checked artifact
+        shell: bash
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          "$VSIX"
+          "$CHECKSUM"
+          "$RUNTIME"
+          "$RUNTIME_CHECKSUM"
+          --verify-tag
+          --draft
+          --generate-notes
+          --title "AetherStack $VERSION_VALUE"
+      - name: Publish the same VSIX to Visual Studio Marketplace
+        if: env.VSCE_PAT != ''
+        shell: bash
+        run: npx --yes @vscode/vsce@3.9.2 publish --packagePath "$VSIX" --pat "$VSCE_PAT"
+      - name: Publish GitHub Release after Marketplace succeeds
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest

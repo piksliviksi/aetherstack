@@ -162,3 +162,37 @@ test("request sends bounded JSON POST bodies for Hub service runs", async () => 
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 });
+
+test("request cancellation closes an in-flight HTTP request", async () => {
+  const http = require("http");
+  const server = http.createServer(() => {});
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const controller = new AbortController();
+    const pending = request(`http://127.0.0.1:${server.address().port}/wait`, { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(pending, (error) => error.name === "AbortError" && error.code === "ABORT_ERR");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("stream cancellation closes an in-flight SSE request", async () => {
+  const http = require("http");
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write('data: {"type":"delta","text":"started"}\n\n');
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const controller = new AbortController();
+    const pending = requestStream(
+      `http://127.0.0.1:${server.address().port}/wait`,
+      { signal: controller.signal },
+      () => controller.abort(),
+    );
+    await assert.rejects(pending, (error) => error.name === "AbortError" && error.code === "ABORT_ERR");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

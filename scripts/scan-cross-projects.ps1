@@ -40,14 +40,14 @@ if ($py) {
   $rootsJson = ($roots | ConvertTo-Json -Compress)
   $code = @'
 import json, os, sys, urllib.request
-sys.path.insert(0, os.path.join(os.environ.get("AETHER_STACK", r"D:\llm\stack"), "aether-hub"))
+sys.path.insert(0, os.path.join(os.environ.get("AETHER_STACK", os.getcwd()), "aether-hub"))
 # fallback path next to script
 script_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else os.getcwd()
 roots = json.loads(os.environ["AETHER_ROOTS"])
 hub = os.environ.get("AETHER_HUB", "http://127.0.0.1:8766")
 # load scanner from repo
 candidates = [
-    os.path.join(r"D:\llm\stack", "aether-hub"),
+    os.path.join(os.environ.get("AETHER_STACK", os.getcwd()), "aether-hub"),
     os.path.join(os.getcwd(), "aether-hub"),
     os.path.join(os.path.dirname(os.getcwd()), "aether-hub"),
 ]

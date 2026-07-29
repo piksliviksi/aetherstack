@@ -234,7 +234,7 @@ def build_install_plan(discover: dict[str, Any], cfg: dict[str, Any] | None = No
                 "elevated": True,
                 "where": "wsl",
                 "title": "Aether AMD adapter + Ollama ROCm (use GPU compute units)",
-                "script": "wsl -d Debian -- bash -lc 'sudo bash /mnt/d/llm/stack/aether-amd/ensure-backend.sh'",
+                "script": "From the selected runtime root: wsl -d Debian -- bash -lc 'sudo bash ./aether-amd/ensure-backend.sh'",
                 "reason": "WSL exposes GPU via DXG/rocminfo, not lspci — userspace adapter applies profile/dids and forces ollama-linux-amd64-rocm",
             }
         )

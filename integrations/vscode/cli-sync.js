@@ -10,11 +10,14 @@ function availableHostCliAliases(matrix) {
     .sort();
 }
 
+function sameAliases(left, right) {
+  return left.length === right.length && left.every((alias, index) => alias === right[index]);
+}
+
 async function reconcileHostCliBridge({ stackRoot, cliBridge, request, runCompose, waitMs = 30_000 }) {
   if (!stackRoot) return { changed: false, reason: "stack root unavailable", aliases: [] };
-  const discovered = await cliBridge.models();
+  const discovered = await cliBridge.models(true);
   const aliases = Object.keys(discovered || {}).sort();
-  if (!aliases.length) return { changed: false, reason: "no authenticated host CLIs", aliases };
 
   let matrixResponse;
   try { matrixResponse = await request(HUB_MATRIX_URL, { timeoutMs: 3000 }); }
@@ -23,8 +26,24 @@ async function reconcileHostCliBridge({ stackRoot, cliBridge, request, runCompos
     return { changed: false, reason: "Hub is offline; bridge will be applied on start", aliases };
   }
   const current = availableHostCliAliases(matrixResponse.body);
-  if (aliases.every((alias) => current.includes(alias))) {
+  if (sameAliases(aliases, current)) {
     return { changed: false, reason: "Hub bridge already current", aliases };
+  }
+
+  // Login/install changes do not normally require a container recreation: the
+  // running Hub can re-probe the same protected bridge. Try that first so a
+  // normal Refresh can add and remove CLI aliases without disrupting Chat.
+  try {
+    const refreshed = await request(HUB_REFRESH_URL, { method: "POST", body: {}, timeoutMs: 30_000 });
+    if (refreshed.status === 200) {
+      const verified = await request(HUB_MATRIX_URL, { timeoutMs: 5000 });
+      const verifiedAliases = availableHostCliAliases(verified.body);
+      if (sameAliases(aliases, verifiedAliases)) {
+        return { changed: true, reason: "Hub re-probed authenticated host CLIs", aliases, applied: verifiedAliases, recreated: false };
+      }
+    }
+  } catch {
+    // A stale/missing bridge token requires recreating only the Hub below.
   }
 
   await runCompose(
@@ -52,10 +71,10 @@ async function reconcileHostCliBridge({ stackRoot, cliBridge, request, runCompos
   // /api/services does not expose full model metadata; verify through /api/matrix.
   const verified = await request(HUB_MATRIX_URL, { timeoutMs: 5000 });
   const verifiedAliases = availableHostCliAliases(verified.body);
-  if (!aliases.every((alias) => verifiedAliases.includes(alias))) {
+  if (!sameAliases(aliases, verifiedAliases)) {
     throw new Error("Hub restarted but did not accept the authenticated host CLI bridge");
   }
-  return { changed: true, reason: "Hub bridge environment refreshed", aliases, applied: verifiedAliases };
+  return { changed: true, reason: "Hub bridge environment refreshed", aliases, applied: verifiedAliases, recreated: true };
 }
 
-module.exports = { availableHostCliAliases, reconcileHostCliBridge };
+module.exports = { availableHostCliAliases, reconcileHostCliBridge, sameAliases };

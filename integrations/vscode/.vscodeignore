@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 test/**
+**/.pytest_cache/**
 **/*.vsix
 **/*.map
 **/.DS_Store

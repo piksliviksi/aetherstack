@@ -6,9 +6,9 @@
 # device — so the ROCm libs are skipped and inference stays on CPU.
 #
 # Usage (inside Debian WSL):
-#   sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh
+#   cd /path/to/aetherstack && sudo bash ./scripts/install-ollama-rocm-wsl.sh
 # From Windows:
-#   wsl -d Debian -- bash -lc 'sudo bash /mnt/d/llm/stack/scripts/install-ollama-rocm-wsl.sh'
+#   .\scripts\auto-install.ps1 -Enable -Yes -IncludeElevated
 set -euo pipefail
 
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

@@ -64,7 +64,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
     },
     env: { openExternal: async () => {} },
     workspace: {
-      workspaceFolders: [{ uri: { fsPath: "D:\\llm\\stack" } }],
+      workspaceFolders: [{ uri: { fsPath: "D:\\workspace\\aetherstack" } }],
       getConfiguration: () => configuration,
       onDidChangeConfiguration: () => new Disposable(),
       openTextDocument: async () => ({}),
@@ -100,7 +100,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
     checkServices: async () => serviceStatus,
     composeDetails: async () => [],
     composeLogs: async () => ({ stdout: "", stderr: "" }),
-    findStackRoot: () => "D:\\llm\\stack",
+    findStackRoot: () => "D:\\workspace\\aetherstack",
     isStackRoot: () => true,
     request: async () => ({ status: 503, body: {} }),
     runCompose: async () => ({ stdout: "", stderr: "" }),
@@ -149,6 +149,8 @@ test("extension activates and registers lifecycle/control commands", async () =>
       "aetherstack.stopAll",
       "aetherstack.restartAll",
       "aetherstack.refreshServices",
+      "aetherstack.refreshHostClis",
+      "aetherstack.installRuntime",
       "aetherstack.showLogs",
     ]) {
       assert.equal(registered.has(command), true, `${command} was not registered`);
@@ -161,6 +163,19 @@ test("extension activates and registers lifecycle/control commands", async () =>
     assert.ok(roots.some((item) => String(item.label).includes("Open AetherStack Chat")));
     assert.ok(roots.some((item) => String(item.label).includes("AetherStack has service errors")));
     assert.ok(roots.some((item) => item.description === "ERROR: connection refused"));
+
+    const temp = fs.mkdtempSync(path.join(require("os").tmpdir(), "aetherstack-overview-"));
+    try {
+      fs.mkdirSync(path.join(temp, ".claude"), { recursive: true });
+      fs.writeFileSync(path.join(temp, ".claude", "session.md"), "# Local session\n");
+      const overview = extension.buildOverview(temp);
+      assert.equal(overview.workspace, ".");
+      assert.equal(overview.sources[0].path, ".claude");
+      assert.equal(overview.sources[0].recent[0].name, ".claude/session.md");
+      assert.equal(JSON.stringify(overview).includes(temp), false, "overview leaked an absolute workspace path");
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
   } finally {
     Module._load = originalLoad;
     for (const disposable of subscriptions.reverse()) disposable.dispose?.();

@@ -2,110 +2,83 @@
 
 Day-to-day extension use: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md).
 
-## Role
+## Runtime and UI boundaries
 
-Open a project folder. Scan stored AI history. Wire OpenAI-compatible clients to the Aether gateway. Continue work through LiteLLM + Hub policy.
+The Marketplace VSIX is the control client. Release `0.3.12` can install its matching, checksum-verified runtime bundle into VS Code extension storage, or operate an existing AetherStack checkout. Docker still has to be installed and running.
 
-## GPU boundary
+| Surface | Location | Responsibility |
+|---|---|---|
+| AetherStack Chat webview | VS Code Secondary Side Bar; optional editor tab | Persistent conversations, automatic/service routing, streamed responses |
+| `@aetherstack` Chat participant | VS Code built-in Chat | Native thread context and slash-command preset routing |
+| Control & Services | VS Code Activity Bar | Install/start/stop/restart, health, containers, models, logs, CLI refresh |
+| Hub UI | `http://127.0.0.1:8766/` | Simple presets and the active graph; advanced configuration |
+| Open WebUI | `http://127.0.0.1:3000/` | Optional local browser chat |
+| LiteLLM | `http://127.0.0.1:4000/v1` | OpenAI-compatible gateway for API-backed/local models |
 
-VS Code does not run local LLM weights on GPU. This holds on Windows, macOS, and Linux.
+Each AetherStack webview surface and native Chat thread owns its own bounded context. A visible restored transcript is rehydrated as inference context; it is not shared with another surface.
 
-| Layer | Process | Local GPU for LLMs |
-|-------|---------|-------------------|
-| VS Code UI | Desktop | No |
-| Continue / Cline / similar | Extension host | No |
-| LiteLLM `:4000` | Docker | Gateway only |
-| Inference | Host Ollama (Metal / ROCm / CUDA / WSL) | Yes |
+## Inference boundary
+
+VS Code does not load model weights or perform GPU inference.
 
 ```text
-VS Code  ──HTTP──►  LiteLLM :4000  ──HTTP──►  Ollama (host or WSL)
+                                      ┌─► provider APIs
+VS Code ─► Aether Hub :8766 ─► LiteLLM :4000 ─► host Ollama / GPU
+                  │
+                  └─► protected host CLI bridge :8767 ─► authenticated Codex/Claude/Grok CLI
 ```
 
-### Windows + Radeon procedure
+The host CLI bridge uses already authenticated CLI sessions. Its random bearer token is stored in VS Code SecretStorage and supplied to Hub through Compose; credentials are not copied and provider API keys are not generated. A refresh re-probes CLI login/install changes in place. Hub recreation is a fallback only when the bridge environment is stale.
 
-1. Run inference in WSL Ollama (ROCm/DXG) or supported native Ollama — [WSL-AMD-GPU.md](./WSL-AMD-GPU.md).  
-2. Start stack (`start.bat`).  
-3. Point clients at `http://127.0.0.1:4000/v1` (or WebUI `:3000`).
+Optional active-model telemetry merges LiteLLM and host-CLI calls. It records model alias, source, call id, state, and timestamps only—never prompts, responses, headers, users, costs, or keys.
 
----
-
-## Install
+## Install and start
 
 | Path | Command |
-|------|---------|
+|---|---|
 | Marketplace | `code --install-extension AetherStack.aetherstack` |
-| Local VSIX | `code --install-extension packages/aetherstack-0.3.10.vsix` |
-| Dev folder | `code --install-extension path/to/integrations/vscode` |
+| GitHub Release VSIX | `code --install-extension aetherstack-0.3.12.vsix` |
+| Development folder | `code --install-extension path/to/integrations/vscode` |
 
-Listing: https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack
+1. Install and start Docker Desktop or Docker Engine.
+2. Install the extension and reload VS Code.
+3. Open **AetherStack → Control & Services** in the Activity Bar.
+4. Press **Start all services**. Choose **Install Runtime 0.3.12** if prompted, or select an existing checkout.
+5. Wait for explicit `OK` state at ports `3000`, `4000`, and `8766`.
+6. Open Chat from the Secondary Side Bar, an editor tab, or `@aetherstack` in VS Code Chat.
 
-## Procedure
+## Continue configuration
 
-1. Start stack: `start.bat` or `./start.sh`.  
-2. Install extension.  
-3. **File → Open Folder** on the project.  
-4. Command Palette:  
-   - `AetherStack: Scan Project AI History`  
-   - `AetherStack: Wire Continue.dev to AetherStack`  
-5. Install Continue (or equivalent) for in-editor chat.  
-6. Select gateway model alias (`local-default`, `grok-4.5`, …).
-
----
-
-## Files written
-
-| Path | Purpose |
-|------|---------|
-| `.aetherstack/project-overview.md` | Human scan report |
-| `.aetherstack/project-overview.json` | Machine scan report |
-| `.aetherstack/snapshots/*.md` | Manual session notes |
-| `.continue/config.yaml` | Continue → gateway |
-| `.vscode/settings.json` | Workspace URLs/model (no secret key) |
-| `.vscode/extensions.json` | Extension recommendations |
-
----
-
-## CLI scan
-
-```powershell
-powershell -File scripts/scan-project-ai.ps1 -Path C:\path\to\project
-```
-
-```bash
-./scripts/scan-project-ai.sh /path/to/project
-```
-
----
-
-## Continue config
+**AetherStack: Wire Continue.dev to AetherStack** writes only live LiteLLM-exposed models. It preserves an existing config unless the user explicitly chooses replacement and uses Continue's secret placeholder:
 
 ```yaml
 name: AetherStack
 version: 1.0.0
 schema: v1
 models:
-  - name: Aether local
+  - name: AetherStack local-default
     provider: openai
     model: local-default
     apiBase: http://127.0.0.1:4000/v1
-    apiKey: ${env:AETHERSTACK_API_KEY}
+    apiKey: ${{ secrets.AETHERSTACK_API_KEY }}
     roles: [chat, edit, apply]
 ```
 
-## Other OpenAI-compatible clients
+The existing `LITELLM_MASTER_KEY` is imported from the runtime `.env` into VS Code SecretStorage and synchronized to Continue's private global `.env`. Project files do not contain the key.
 
-| Field | Value |
-|-------|-------|
-| Base URL | `http://127.0.0.1:4000/v1` |
-| API key | `LITELLM_MASTER_KEY` |
-| Model | Alias from `litellm_config.yaml` |
+## Project overview privacy
 
----
+Project scans write `.aetherstack/project-overview.md` and `.json`. Version `0.3.12` persists `workspace: "."` and repository-relative source paths, not absolute paths or usernames. It does not read provider keys from arbitrary project `.env` files.
+
+## Release boundary
+
+The `v0.3.12` workflow tests source, packages a VSIX and runtime archive, inspects identity/content/source-byte parity/privacy, publishes the exact VSIX to Marketplace, and attaches that same VSIX plus the runtime archive and SHA-256 manifests to the GitHub Release. Without a repository PAT, a matching version must first be published directly with short-lived Microsoft Entra authentication; otherwise the workflow stops. Any failed artifact check prevents publication.
 
 ## Limits
 
 | Limit | Fact |
-|-------|------|
-| Copilot / Cursor private history | Not fully readable without their export |
-| Preferred sources | Project-local: Continue, Claude Code, Aider, WayLog, AetherStack |
-| Gateway | Stack must be running for model list and chat |
+|---|---|
+| Docker | Required; the extension does not install Docker or privileged GPU drivers |
+| Copilot/Cursor private history | Not fully readable without an export |
+| Optional Ollama profile | Not started by the default Compose profile; host Ollama is preferred |
+| Project Data Engine `:8765` | Separate process, not one of the three Compose health endpoints |
