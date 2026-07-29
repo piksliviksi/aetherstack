@@ -1460,8 +1460,9 @@ def _index_html() -> bytes:
 <style>
  :root{{color-scheme:dark;--bg:#090a0b;--panel:#111315;--raised:#17191b;--line:#303336;--line-strong:#4b4f52;--text:#ecebe7;--muted:#9b9b95;--accent:#d6b36a;--good:#76b98a;--warn:#d6a85f;--bad:#d87575}}
  *{{box-sizing:border-box}}
- body{{font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--text);margin:3.7rem max(1rem,3vw) 2rem;font-size:13px;line-height:1.45}}
- h1{{font-size:1.08rem;color:var(--text);letter-spacing:.01em}} h2{{font-size:.76rem;color:var(--muted);margin:1rem 0 .35rem;text-transform:uppercase;letter-spacing:.08em}}
+ body{{font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--text);margin:0 0 2rem;font-size:13px;line-height:1.45}}
+ main{{display:block;padding:1rem max(1rem,3vw) 0}}
+ h1{{font-size:1.08rem;color:var(--text);letter-spacing:.01em;margin:0}} h2{{font-size:.76rem;color:var(--muted);margin:1rem 0 .35rem;text-transform:uppercase;letter-spacing:.08em}}
  a{{color:var(--accent)}} code,pre{{font-family:ui-monospace,Consolas,monospace}}
  table{{border-collapse:collapse;width:100%;margin-top:.5rem}}
  th,td{{border:1px solid var(--line);padding:.28rem .4rem;text-align:center}}
@@ -1472,14 +1473,19 @@ def _index_html() -> bytes:
  ul.rec{{margin:.3rem 0;padding-left:1.1rem}}
  .sev-high{{color:var(--bad)}} .sev-medium{{color:var(--warn)}} .sev-ok{{color:var(--good)}} .sev-info{{color:var(--muted)}}
  .ep{{margin:.2rem 0}} .ep.up{{color:var(--good)}} .ep.dn{{color:#666965}}
- .brand{{display:flex;align-items:center;gap:.55rem}} .brand img{{width:30px;height:30px;border-radius:1px}}
- .top-nav{{position:fixed;z-index:20;top:0;left:0;right:0;display:flex;justify-content:flex-end;gap:0;padding:.65rem max(1rem,3vw);background:#0d0f10;border-bottom:1px solid var(--line)}}
- .top-nav a{{padding:.4rem .68rem;border:1px solid var(--line);border-right:0;color:var(--muted);text-decoration:none}} .top-nav a:last-child{{border-right:1px solid var(--line)}} .top-nav a:hover{{color:var(--text);background:var(--raised)}} .top-nav a.active{{background:var(--accent);color:#17140d;font-weight:800}}
+ header{{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:1rem;min-height:62px;padding:.72rem max(1rem,3vw);border-bottom:1px solid var(--line);background:#0d0f10}}
+ header .brand{{display:flex;align-items:center;gap:.7rem}} header .brand img{{width:34px;height:34px;display:block;border-radius:1px}}
+ header .muted{{color:var(--muted);font-size:12px}}
+ header nav{{display:flex;gap:0;align-items:center;flex-wrap:wrap;border:1px solid var(--line)}}
+ header nav a{{padding:.43rem .72rem;border-right:1px solid var(--line);color:var(--muted);text-decoration:none}} header nav a:last-child{{border-right:0}} header nav a:hover{{color:var(--text);background:var(--raised)}} header nav a.active{{background:var(--accent);color:#17140d;font-weight:800}}
  input,button,select,textarea{{font:inherit;color:var(--text);background:#0b0c0d!important;border:1px solid var(--line)!important;border-radius:1px!important;padding:.32rem .5rem!important}} button{{background:var(--raised)!important;cursor:pointer}} button:hover{{border-color:var(--line-strong)!important;background:#202326!important}}
  a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{{outline:2px solid var(--accent);outline-offset:2px}}
 </style></head><body>
-<nav class="top-nav" aria-label="AetherStack views"><a href="/">Simple</a><a class="active" aria-current="page" href="/advanced">Advanced</a><a href="http://127.0.0.1:3000/">WebUI</a></nav>
-<h1 class="brand"><img src="/aetherstack-icon.png" width="32" height="32" alt=""/>Aether Hub · scan first, then route</h1>
+<header>
+  <div class="brand"><img src="/aetherstack-icon.png" width="34" height="34" alt=""/><div><h1>AetherStack</h1><div class="muted">Choose the work. The system chooses the team.</div></div></div>
+  <nav aria-label="AetherStack views"><a href="/">Simple</a><a class="active" aria-current="page" href="/advanced">Advanced</a><a href="http://127.0.0.1:3000/">WebUI</a></nav>
+</header>
+<main>
 <div class="card">
  <b>System scan</b> —
  Ollama: <b>{"OK" if dsum.get("ollama_ok") else "DOWN"}</b>
@@ -1849,6 +1855,7 @@ async function runSlash(){{
 }}
 </script>
 <p class="muted" style="margin-top:1rem">Memory: POST /api/memory/vectors · POST /api/memory/search · docs/SLASH-COMMANDS.md</p>
+</main>
 </body></html>"""
     return html.encode("utf-8")
 

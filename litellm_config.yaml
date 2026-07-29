@@ -4,11 +4,11 @@
 # Set API keys in .env — unused providers are simply not called.
 
 model_list:
-  # ── Local (WSL Ollama + ROCm/DXG on AMD; keep tiny as default for 6GB WSL) ──
+  # ── Local (host Ollama, AMD ROCm/HIP GPU offload — RX 6600 XT 8GB) ──
   # Prefer models that are actually pulled. Override by pulling + editing here.
   - model_name: local-default
     litellm_params:
-      model: ollama/tinyllama
+      model: ollama/llama3.1:8b
       api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-llama
@@ -481,6 +481,14 @@ litellm_settings:
   cache: false
   # Prefer failing with a clear auth/model error over silent wrong defaults
   # request_timeout: 600
+  # Guardrail: caps total spend across all cloud-provider calls (xai/openai/anthropic/
+  # google/mistral) so a misrouted or fan-out (adaptive/full team) request can't run
+  # away. Local Ollama calls are free and unaffected. Raises BudgetExceededError and
+  # blocks further paid calls once hit; resets automatically each budget_duration.
+  # (Must live here, not general_settings — proxy_server.py only parses budget keys
+  # out of litellm_settings.)
+  max_budget: 20
+  budget_duration: 30d
 
 # Optional: general settings for Redis-backed features
 general_settings:

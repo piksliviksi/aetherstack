@@ -6,6 +6,7 @@ const os = require("os");
 const { createCliBridge } = require("./cli-bridge");
 const { reconcileHostCliBridge } = require("./cli-sync");
 const { parseChatInput, commandHelp } = require("./chat-routing");
+const { createChatRequestHandler } = require("./chat-participant");
 const {
   SERVICES,
   checkServices,
@@ -837,6 +838,7 @@ class HubChat {
       services: this.services,
       activityWords: this.activityWords,
       showActiveModel: cfg().showActiveModel,
+      cwd: workspaceRoot() || "",
       notice,
       error,
     });
@@ -939,6 +941,18 @@ async function activate(context) {
       webviewOptions: { retainContextWhenHidden: true },
     })
   );
+
+  if (typeof vscode.chat?.createChatParticipant === "function") {
+    try {
+      const participant = vscode.chat.createChatParticipant("aetherstack.chat", createChatRequestHandler(hubChat));
+      participant.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "icon.png");
+      context.subscriptions.push(participant);
+    } catch (error) {
+      output.appendLine(`[chat-participant] registration failed: ${error.message || error}`);
+    }
+  } else {
+    output.appendLine("[chat-participant] vscode.chat.createChatParticipant is unavailable on this VS Code build; AetherStack chat stays webview-only.");
+  }
 
   function updateStatusBar() {
     const active = cfg().showActiveModel && provider.inference && Array.isArray(provider.inference.active)

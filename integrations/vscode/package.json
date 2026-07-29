@@ -2,7 +2,7 @@
   "name": "aetherstack",
   "displayName": "AetherStack",
   "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama). Windows, macOS, and Linux.",
-  "version": "0.3.5",
+  "version": "0.3.10",
   "publisher": "AetherStack",
   "license": "MIT",
   "pricing": "Free",
@@ -12,7 +12,7 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.93.0"
   },
   "categories": [
     "Machine Learning",
@@ -166,10 +166,34 @@
         }
       }
     },
+    "chatParticipants": [
+      {
+        "id": "aetherstack.chat",
+        "name": "aetherstack",
+        "fullName": "AetherStack",
+        "description": "Ask naturally, or use /research /plan /code /test /bugfix /help.",
+        "isSticky": true,
+        "commands": [
+          { "name": "research", "description": "Find evidence, challenge it, synthesize a sourced conclusion" },
+          { "name": "plan", "description": "Turn an objective into a sequenced, risk-aware execution plan" },
+          { "name": "code", "description": "Implement a focused feature or refactor with tests and review" },
+          { "name": "test", "description": "Design and run efficient unit/integration/regression coverage" },
+          { "name": "bugfix", "description": "Reproduce, isolate, repair, and regression-test a defect" },
+          { "name": "help", "description": "Show AetherStack commands and available presets" }
+        ]
+      }
+    ],
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "aetherstack",
+          "title": "AetherStack",
+          "icon": "media/icon.svg"
+        }
+      ],
+      "activitybar": [
+        {
+          "id": "aetherstack-ops",
           "title": "AetherStack",
           "icon": "media/icon.svg"
         }
@@ -181,7 +205,9 @@
           "id": "aetherstack.chatView",
           "name": "Chat",
           "type": "webview"
-        },
+        }
+      ],
+      "aetherstack-ops": [
         {
           "id": "aetherstack.overview",
           "name": "Control & Services"

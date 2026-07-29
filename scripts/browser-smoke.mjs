@@ -74,6 +74,16 @@ try {
   assert.equal(await evaluate("document.getElementById('runtime').textContent.includes('Host CLI bridge')"), true, "Host CLI bridge state is hidden");
   assert.equal(await evaluate("[...document.querySelectorAll('header nav a')].map(a=>a.textContent).join('|')"), "Simple|Advanced|WebUI", "Hub navigation order is wrong");
   assert.equal(await evaluate("document.querySelector('header nav a.active')?.textContent"), "Simple", "Simple mode is not highlighted");
+  assert.equal(await evaluate("[...document.querySelectorAll('#statusbar .chip')].some(chip => chip.textContent.includes('cloud spend'))"), true, "Cost dashboard chip is missing from the status bar");
+
+  // Follow the real "Advanced" link (not graph.html directly) — it serves a separate,
+  // server-rendered page in server.py whose header used to drift from Simple's.
+  const advancedHref = await evaluate("document.querySelector('header nav a:nth-child(2)').getAttribute('href')");
+  await navigate(`http://127.0.0.1:8766${advancedHref}`);
+  assert.equal(await evaluate("[...document.querySelectorAll('header nav a')].map(a=>a.textContent).join('|')"), "Simple|Advanced|WebUI", "Advanced page nav order/labels drifted from Simple");
+  assert.equal(await evaluate("document.querySelector('header nav a.active')?.textContent"), "Advanced", "Advanced page is not highlighting itself");
+  assert.equal(await evaluate("document.querySelector('header .brand h1')?.textContent"), "AetherStack", "Advanced page header no longer matches Simple's brand block");
+  await navigate("http://127.0.0.1:8766/");
   await evaluate("localStorage.clear(); advancedPanel.open=true; advancedPanel.dispatchEvent(new Event('toggle')); true");
   assert.equal(await evaluate("localStorage.getItem(HUB_GRAPH_OPEN_KEY)"), "1");
 

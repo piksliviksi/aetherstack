@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.10
+
+- Reskin AetherStack Chat as a plain monospace terminal: full-width monospace type, an "AE" mark instead of any generic branding, a bordered composer with a native `<fieldset>/<legend>` label showing the active routing mode (like a labeled terminal pane), a `>` prompt marker, and a bottom status line (workspace path, last reply's token count).
+- Show a subtle animated ASCII "AE" mark (built from a small dot-matrix bitmap, not hand-typed art) filling the message area before the first message is sent, replacing the blank empty state.
+- When "Show active model" is on, the active-model badge now renders in front of the rotating activity phrase in the composer, not after it.
+- Add 9 more playful English/Estonian/Ukrainian phrases to the local activity-words database (`aether-hub/activity_words.json` and the live copy in `.aetherstack/`).
+
+## 0.3.9
+
+- Split the AetherStack Chat webview and the Control & Services tree into separate view containers: Chat stays alone in the Secondary Side Bar tab (matching the single-webview look of Claude Code/Codex/Grok), and Control & Services moves to its own Activity Bar icon. Previously both were stacked in one container, so the chat tab always showed the services/health/commands tree underneath it.
+
+## 0.3.8
+
+- Move the AetherStack view container from the Activity Bar to the Secondary Side Bar (`secondarySidebar` in `viewsContainers`), so it shows up as its own tab next to Claude Code, Codex, and other agent sidebars instead of only in the primary Activity Bar.
+- Remove the AetherStack brand bar (logo + Simple/Advanced/WebUI nav) from the Hub's Simple and Advanced pages.
+
+## 0.3.7
+
+- Fix the Activity Bar icon rendering as a blank filled square: VS Code masks view-container icons to a single color using the SVG's alpha channel, so the opaque background tile in `media/icon.svg` was swallowing the glyph. The icon is now the glyph alone on a transparent background.
+- Strip the Routing/Lean-delivery/Token-saver toolbar and the Dynamic-team/agent-graph panel out of AetherStack Chat's visible UI; the chat is now a plain message list and composer like Claude Code/Codex. Auto-routing and default lean/token settings still apply under the hood, and `/preset`, `/research`, `/plan`, `/code`, `/test`, `/bugfix`, `/auto`, `/help` still work — the controls are just no longer shown.
+- Drop the canned greeting message and verbose subtitle; the chat now opens blank like a normal chat client.
+
+## 0.3.6
+
+- (Version bumped for a build that was packaged but never installed; superseded by 0.3.7 above.)
+
 ## 0.3.5
 
 - Route Open WebUI through AetherHub's authenticated OpenAI-compatible facade so its Base Model list follows the live capability matrix, including authenticated host CLIs, while raw Ollama model entries are hidden.

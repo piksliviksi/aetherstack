@@ -96,6 +96,24 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Backs LiteLLM's spend/budget tracking (/global/spend, /key/info). Internal-only,
+  # not published to the host — nothing outside the compose network needs it.
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: aether-postgres
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=${LITELLM_DB_PASSWORD:-litellm-local}
+      - POSTGRES_DB=litellm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   # Capability matrix sync + shared agent memory (Redis-backed)
   aether-hub:
     build: ./aether-hub
@@ -155,6 +173,7 @@ services:
       - ./aether-hub/bootstrap.yaml:/app/bootstrap.yaml:ro
       - ./aether-hub/profiles:/app/profiles:ro
       - ./aether-hub/static:/app/static:ro
+      - ./litellm_config.yaml:/app/litellm_config.yaml:ro
       - ./combos:/combos:ro
       - ./pipelines:/pipelines
       - ./.aetherstack:/host-aetherstack
@@ -205,10 +224,13 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - AETHER_INFERENCE_STATUS_PATH=/aetherstack-state/inference-status.json
+      - DATABASE_URL=postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm-local}@postgres:5432/litellm
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
@@ -221,3 +243,4 @@ volumes:
   ollama_data:
   open_webui_data:
   redis_data:
+  postgres_data:

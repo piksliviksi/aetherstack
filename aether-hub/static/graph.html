@@ -14,6 +14,16 @@
     html, body { height: 100%; margin: 0; font-family: ui-sans-serif, system-ui, sans-serif;
       background: var(--bg); color: var(--text); overflow: hidden; }
     body { display: flex; flex-direction: column; }
+    header { position:sticky; top:0; z-index:21; display:flex; justify-content:space-between; align-items:center; gap:1rem; min-height:62px; padding:.72rem max(1rem,3vw); border-bottom:1px solid var(--border); background:#0d0f10; flex: 0 0 auto; }
+    header .brand { display:flex; align-items:center; gap:.7rem; }
+    header .logo { width:34px; height:34px; display:block; border-radius:1px; }
+    header h1 { margin:0 0 .05rem; font-size:1rem; letter-spacing:.01em; }
+    header .muted { color: var(--muted); font-size: 12px; }
+    header nav { display:flex; gap:0; align-items:center; flex-wrap:wrap; border:1px solid var(--border); }
+    header nav a { padding:.43rem .72rem; border-right:1px solid var(--border); color:var(--muted); text-decoration:none; font-size:13px; }
+    header nav a:last-child { border-right:0; }
+    header nav a:hover { color:var(--text); background:var(--panel-raised); }
+    header nav a.active { color:#17140d; background:var(--accent); font-weight:800; }
     #toolbar {
       display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
       padding: .4rem .55rem; border-bottom: 1px solid var(--border); background: #0d0f10;
@@ -28,12 +38,6 @@
     #toolbar button.primary:hover { background:#e0c17d; border-color:#e0c17d; }
     #toolbar .grow { flex: 1; }
     #toolbar .muted { color: var(--muted); font-size: 11px; }
-    #toolbar .brand-icon { width: 24px; height: 24px; border-radius: 1px; }
-    #toolbar .view-nav { display:flex; align-items:center; border:1px solid var(--border); }
-    #toolbar .view-nav a { padding:.3rem .5rem; border-right:1px solid var(--border); color:var(--muted); text-decoration:none; font-size:11px; }
-    #toolbar .view-nav a:last-child { border-right:0; }
-    #toolbar .view-nav a:hover { color:var(--text); background:var(--panel-raised); }
-    #toolbar .view-nav a.active { color:#17140d; background:var(--accent); font-weight:800; }
     #wrap { display: flex; flex: 1 1 auto; min-height: 0; }
     #palette {
       width: 170px; flex: 0 0 170px; border-right: 1px solid var(--border); background: var(--panel);
@@ -103,7 +107,6 @@
 </head>
 <body>
   <div id="toolbar">
-    <img class="brand-icon" src="/aetherstack-icon.png" width="24" height="24" alt="" />
     <strong id="graphTitle" style="color:var(--accent)">Aether Graph</strong>
     <select id="servicePreset" title="Load a live service preset"><option value="active">Active preset</option></select>
     <button type="button" class="primary" id="btnActive">Load preset tree</button>
@@ -116,7 +119,6 @@
     <button type="button" id="btnToPipe">Export pipeline JSON</button>
     <span class="grow"></span>
     <span class="muted">Drag canvas to pan · node headers to move · ports to wire</span>
-    <nav class="view-nav" aria-label="AetherStack views"><a href="/">Simple</a><a class="active" href="/advanced" aria-current="page">Advanced</a><a href="http://127.0.0.1:3000/">WebUI</a></nav>
   </div>
   <div id="wrap">
     <div id="palette"><h3>Node library</h3><div id="paletteTypes"></div><div class="palette-actions"><button type="button" id="btnDel">Delete selected node</button></div></div>

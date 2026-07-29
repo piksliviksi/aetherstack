@@ -1,16 +1,37 @@
 {
   "scripts": {
     "research-code-test": {
-      "up": 1,
+      "up": 2,
       "down": 0,
       "hw_votes": {
         "medium": 1
       },
       "voters": {
-        "local:research-code-test": "up"
+        "local:research-code-test": "up",
+        "ui:research-code-test": "up"
+      },
+      "score": 2,
+      "updated_at": 1785071955.8465402
+    },
+    "fable-local-loop": {
+      "up": 1,
+      "down": 0,
+      "hw_votes": {},
+      "voters": {
+        "ui:fable-local-loop": "up"
       },
       "score": 1,
-      "updated_at": 1784971123.8879864
+      "updated_at": 1785071953.6803575
+    },
+    "premium-review": {
+      "up": 1,
+      "down": 0,
+      "hw_votes": {},
+      "voters": {
+        "ui:premium-review": "up"
+      },
+      "score": 1,
+      "updated_at": 1785071953.0805197
     }
   }
 }

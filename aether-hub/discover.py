@@ -191,7 +191,40 @@ def discover_services() -> dict[str, Any]:
         "redis": {"ok": redis_ok, "port": 6379},
         "open_webui": {"ok": webui, "hint": "http://127.0.0.1:3000"},
         "hub": {"port": int(os.environ.get("AETHER_HUB_PORT", "8766"))},
+        "spend": discover_spend(litellm_base, key),
     }
+
+
+def discover_spend(litellm_base: str, key: str) -> dict[str, Any]:
+    """Cloud-provider spend vs the litellm_settings.max_budget guardrail. Local Ollama
+    calls are free and excluded from this figure by LiteLLM itself."""
+    code, body = _http(
+        f"{litellm_base.rstrip('/')}/global/spend",
+        timeout=5.0,
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    if code != 200 or not isinstance(body, dict):
+        return {"ok": False}
+    return {
+        "ok": True,
+        "spend": body.get("spend") or 0.0,
+        "max_budget": body.get("max_budget"),
+        "budget_duration": _litellm_budget_duration(),
+    }
+
+
+def _litellm_budget_duration() -> str | None:
+    path = "/app/litellm_config.yaml"
+    if not os.path.exists(path):
+        return None
+    try:
+        import yaml
+
+        with open(path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return (cfg.get("litellm_settings") or {}).get("budget_duration")
+    except Exception:
+        return None
 
 
 # Primary + multi-account slots (personal / subscription vs enterprise API)
