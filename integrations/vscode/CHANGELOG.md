@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.11
+
+- Render markdown and syntax-highlighted, copyable code blocks in AetherStack Chat (headings, lists, tables, blockquotes, links, bold/inline code) instead of showing raw text.
+- Add per-message hover actions: copy any message, edit-and-resend a prior prompt, or regenerate an assistant reply.
+- Add multi-conversation history: a responsive rail (permanent column when wide, toggled drawer when narrow) to start, switch between, and delete conversations, each persisted independently.
+- Support attaching images and PDFs to a chat prompt: PDFs are text-extracted into the prompt, images route the final answer to a vision-capable model automatically (with a clear error if none is configured), both bounded to 8MB.
+- Stream the final answer token-by-token as it's generated, with automatic fallback to a normal blocking response if the streaming connection drops mid-reply.
+
 ## 0.3.10
 
 - Reskin AetherStack Chat as a plain monospace terminal: full-width monospace type, an "AE" mark instead of any generic branding, a bordered composer with a native `<fieldset>/<legend>` label showing the active routing mode (like a labeled terminal pane), a `>` prompt marker, and a bottom status line (workspace path, last reply's token count).

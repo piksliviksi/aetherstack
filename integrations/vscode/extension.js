@@ -7,6 +7,7 @@ const { createCliBridge } = require("./cli-bridge");
 const { reconcileHostCliBridge } = require("./cli-sync");
 const { parseChatInput, commandHelp } = require("./chat-routing");
 const { createChatRequestHandler } = require("./chat-participant");
+const { capConversations, titleFromTranscript } = require("./conversations");
 const {
   SERVICES,
   checkServices,
@@ -16,6 +17,7 @@ const {
   isStackRoot,
   normalizeLocalUiUrl,
   request,
+  requestStream,
   runCompose,
   restartCompose,
   selectAvailableModels,
@@ -722,6 +724,8 @@ class HubChat {
     this.services = [];
     this.history = [];
     this.activityWords = [];
+    this.conversations = this.context.globalState.get("aetherstack.conversations", []);
+    this.activeConversationId = null;
   }
 
   async hubRequest(pathname, options = {}) {
@@ -731,6 +735,27 @@ class HubChat {
       throw new Error(detail || `Aether Hub returned HTTP ${response.status}`);
     }
     return response.body || {};
+  }
+
+  async saveConversationSnapshot(transcript) {
+    if (!transcript.length) return;
+    const now = Date.now();
+    const title = titleFromTranscript(transcript);
+    let entry = this.conversations.find((item) => item.id === this.activeConversationId);
+    if (!entry) {
+      entry = { id: String(now), title, updatedAt: now };
+      this.conversations.push(entry);
+      this.activeConversationId = entry.id;
+    }
+    entry.transcript = transcript;
+    entry.title = title;
+    entry.updatedAt = now;
+    this.conversations = capConversations(this.conversations);
+    await this.context.globalState.update("aetherstack.conversations", this.conversations);
+  }
+
+  conversationSummaries() {
+    return capConversations(this.conversations).map(({ id, title, updatedAt }) => ({ id, title, updatedAt }));
   }
 
   async loadServices(force = false, webview = this.activeWebview()) {
@@ -751,79 +776,127 @@ class HubChat {
     return (this.view && this.view.webview) || (this.panel && this.panel.webview) || null;
   }
 
+  async hasVisionModel() {
+    try {
+      const matrix = await this.hubRequest("/api/matrix");
+      return Object.values(matrix.models || {}).some(
+        (model) => model.available && model.executor !== "host_cli" && (model.capabilities || []).includes("vision")
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async run(message, webview = this.activeWebview()) {
     if (!webview) throw new Error("AetherStack Chat view is not available.");
-    const parsed = parseChatInput(
-      message.prompt,
-      message.serviceId,
-      this.services.map((service) => service.id)
-    );
-    if (parsed.action === "error") throw new Error(parsed.message);
-    if (parsed.action === "help" || parsed.action === "presets") {
-      const content = parsed.action === "help"
-        ? commandHelp(this.services)
-        : this.services.map((service) => `/${service.id} — ${service.label}: ${service.summary}`).join("\n");
-      await webview.postMessage({ type: "command", content });
-      return;
-    }
-    if (parsed.action === "select") {
-      await webview.postMessage({
-        type: "route",
-        selection: parsed.serviceId === "auto"
-          ? { service_id: "", label: "Automatic routing", confidence: "ready", source: "slash-command" }
-          : { service_id: parsed.serviceId, label: (this.services.find((item) => item.id === parsed.serviceId) || {}).label, confidence: "fixed", source: "slash-command" },
-      });
-      await webview.postMessage({ type: "command", content: parsed.serviceId === "auto" ? "Automatic intent routing is active." : `Preset selected: ${parsed.serviceId}.` });
-      return;
-    }
-    const prompt = String(parsed.prompt || "").trim();
-    if (!prompt) throw new Error("Enter a goal first.");
-    let serviceId = parsed.serviceId;
-    let selection;
-    if (serviceId === "auto") {
-      selection = await this.hubRequest("/api/services/classify", {
-        method: "POST",
-        body: { goal: prompt },
-      });
-      serviceId = String(selection.service_id || "");
-      if (!this.services.some((service) => service.id === serviceId)) {
-        throw new Error("AetherStack could not map this request to an available service preset.");
-      }
-      selection.source = "intent-analysis";
-    } else if (parsed.command) {
-      const service = this.services.find((item) => item.id === serviceId) || {};
-      selection = { service_id: serviceId, label: service.label || serviceId, confidence: "fixed", source: "slash-command" };
-    }
-    if (selection) await webview.postMessage({ type: "route", selection });
-    await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
     await webview.postMessage({ type: "busy", value: true });
     let inferenceTimer = null;
-    const publishInference = async () => {
-      if (!cfg().showActiveModel) return;
-      try {
-        const inference = await fetchInferenceStatus();
-        await webview.postMessage({ type: "inference", inference });
-      } catch {
-        /* The normal service result will still report the models used. */
-      }
-    };
     try {
+      const parsed = parseChatInput(
+        message.prompt,
+        message.serviceId,
+        this.services.map((service) => service.id)
+      );
+      if (parsed.action === "error") throw new Error(parsed.message);
+      if (parsed.action === "help" || parsed.action === "presets") {
+        const content = parsed.action === "help"
+          ? commandHelp(this.services)
+          : this.services.map((service) => `/${service.id} — ${service.label}: ${service.summary}`).join("\n");
+        await webview.postMessage({ type: "command", content });
+        return;
+      }
+      if (parsed.action === "select") {
+        await webview.postMessage({
+          type: "route",
+          selection: parsed.serviceId === "auto"
+            ? { service_id: "", label: "Automatic routing", confidence: "ready", source: "slash-command" }
+            : { service_id: parsed.serviceId, label: (this.services.find((item) => item.id === parsed.serviceId) || {}).label, confidence: "fixed", source: "slash-command" },
+        });
+        await webview.postMessage({ type: "command", content: parsed.serviceId === "auto" ? "Automatic intent routing is active." : `Preset selected: ${parsed.serviceId}.` });
+        return;
+      }
+      const prompt = String(parsed.prompt || "").trim();
+      if (!prompt) throw new Error("Enter a goal first.");
+      const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+      if (attachments.some((item) => item.type === "image") && !(await this.hasVisionModel())) {
+        throw new Error("No vision-capable model is currently available for the attached image.");
+      }
+      let serviceId = parsed.serviceId;
+      let selection;
+      if (serviceId === "auto") {
+        selection = await this.hubRequest("/api/services/classify", {
+          method: "POST",
+          body: { goal: prompt },
+        });
+        serviceId = String(selection.service_id || "");
+        if (!this.services.some((service) => service.id === serviceId)) {
+          throw new Error("AetherStack could not map this request to an available service preset.");
+        }
+        selection.source = "intent-analysis";
+      } else if (parsed.command) {
+        const service = this.services.find((item) => item.id === serviceId) || {};
+        selection = { service_id: serviceId, label: service.label || serviceId, confidence: "fixed", source: "slash-command" };
+      }
+      if (selection) await webview.postMessage({ type: "route", selection });
+      await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
+      const publishInference = async () => {
+        if (!cfg().showActiveModel) return;
+        try {
+          const inference = await fetchInferenceStatus();
+          await webview.postMessage({ type: "inference", inference });
+        } catch {
+          /* The normal service result will still report the models used. */
+        }
+      };
       if (cfg().showActiveModel) {
         inferenceTimer = setInterval(publishInference, 1200);
         await publishInference();
       }
-      const result = await this.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
-        method: "POST",
-        body: {
-          goal: prompt,
-          lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
-          token_saver: Boolean(message.tokenSaver),
-          history: this.history.slice(-8),
-        },
-      });
+      const requestBody = {
+        goal: prompt,
+        lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
+        token_saver: Boolean(message.tokenSaver),
+        history: this.history.slice(-8),
+        attachments,
+      };
+      let result = null;
+      let streamedText = "";
+      try {
+        await requestStream(
+          `http://127.0.0.1:8766/api/services/${encodeURIComponent(serviceId)}/run/stream`,
+          { method: "POST", body: requestBody },
+          (event) => {
+            if (event.type === "delta") {
+              streamedText += event.text || "";
+              webview.postMessage({ type: "delta", text: event.text || "" });
+            } else if (event.type === "done") {
+              result = event.result;
+            }
+            // event.type === "error" (an application-level failure reported by the server after
+            // the stream started) is deliberately not thrown here — see the note at the top of
+            // this task. result stays null, so the `if (!result)` fallback below correctly
+            // triggers a non-streaming retry regardless of whether this was a transport failure
+            // (caught by the outer try/catch via requestStream's own reject) or an application-
+            // level error event (which resolves requestStream normally but leaves result unset).
+          }
+        );
+      } catch {
+        // transport-level failure (connection reset, timeout, non-2xx from requestStream's own
+        // reject path) — fall through to the non-streaming retry below.
+      }
+      if (!result) {
+        if (streamedText) {
+          await webview.postMessage({ type: "deltaInterrupted" });
+        }
+        result = await this.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
+          method: "POST",
+          body: requestBody,
+        });
+      }
       if (selection) result.selection = selection;
       this.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
-      await webview.postMessage({ type: "result", result });
+      await this.saveConversationSnapshot(this.history.map((entry) => ({ role: entry.role, value: entry.content })));
+      await webview.postMessage({ type: "result", result, streamed: Boolean(streamedText) });
     } finally {
       if (inferenceTimer) clearInterval(inferenceTimer);
       await webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
@@ -847,9 +920,11 @@ class HubChat {
   configureWebview(webview) {
     webview.options = { enableScripts: true };
     const template = fs.readFileSync(path.join(this.context.extensionPath, "chat.html"), "utf8");
+    const renderScript = fs.readFileSync(path.join(this.context.extensionPath, "chat-render.js"), "utf8");
     webview.html = template
       .replaceAll("{{NONCE}}", nonce())
-      .replaceAll("{{CSP_SOURCE}}", webview.cspSource);
+      .replaceAll("{{CSP_SOURCE}}", webview.cspSource)
+      .replace("{{CHAT_RENDER_JS}}", () => renderScript);
     webview.onDidReceiveMessage(async (message) => {
       try {
         if (message.type === "ready") await this.loadServices(false, webview);
@@ -857,6 +932,27 @@ class HubChat {
         else if (message.type === "run") await this.run(message, webview);
         else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
         else if (message.type === "openEditor") this.showPanel();
+        else if (message.type === "listConversations") {
+          await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
+        } else if (message.type === "newConversation") {
+          this.activeConversationId = null;
+          this.history = [];
+          await webview.postMessage({ type: "conversationSwitched", transcript: [] });
+        } else if (message.type === "switchConversation") {
+          const entry = this.conversations.find((item) => item.id === message.id);
+          this.activeConversationId = entry ? entry.id : null;
+          this.history = entry ? entry.transcript.map((item) => ({ role: item.role, content: item.value })) : [];
+          await webview.postMessage({ type: "conversationSwitched", transcript: entry ? entry.transcript : [] });
+        } else if (message.type === "deleteConversation") {
+          this.conversations = this.conversations.filter((item) => item.id !== message.id);
+          await this.context.globalState.update("aetherstack.conversations", this.conversations);
+          if (this.activeConversationId === message.id) {
+            this.activeConversationId = null;
+            this.history = [];
+            await webview.postMessage({ type: "conversationSwitched", transcript: [] });
+          }
+          await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
+        }
       } catch (error) {
         await webview.postMessage({ type: "error", message: error.message || String(error) });
       }

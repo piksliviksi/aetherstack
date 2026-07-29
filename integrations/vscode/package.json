@@ -2,7 +2,7 @@
   "name": "aetherstack",
   "displayName": "AetherStack",
   "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama). Windows, macOS, and Linux.",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "publisher": "AetherStack",
   "license": "MIT",
   "pricing": "Free",

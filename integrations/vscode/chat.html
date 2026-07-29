@@ -27,10 +27,23 @@
     .message .role { color: var(--vscode-descriptionForeground); }
     .message.user .role::before { content: '› '; }
     .message.assistant .role::before { content: 'AE '; font-weight: 700; }
-    .message pre { overflow: auto; margin: 6px 0 0; padding: 9px; border-radius: 2px; background: var(--vscode-textCodeBlock-background); }
+    .message pre { position: relative; overflow: auto; margin: 6px 0 0; padding: 9px; border-radius: 2px; background: var(--vscode-textCodeBlock-background); }
+    .message pre .lang-label { position: absolute; top: 4px; right: 34px; font-size: 10px; color: var(--vscode-descriptionForeground); }
+    .message pre .copy-code { position: absolute; top: 2px; right: 4px; padding: 2px 6px; font-size: 10px; }
+    .tok-kw { color: var(--vscode-symbolIcon-keywordForeground, #c586c0); }
+    .tok-str { color: var(--vscode-symbolIcon-stringForeground, #ce9178); }
+    .tok-num { color: var(--vscode-symbolIcon-numberForeground, #b5cea8); }
+    table { border-collapse: collapse; margin: 6px 0; }
+    th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 8px; text-align: left; }
+    blockquote { margin: 6px 0; padding: 2px 10px; border-left: 3px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
     .message code { font-family: inherit; }
     .message strong { color: var(--vscode-testing-iconPassed); }
     .role { display: block; margin-bottom: 3px; }
+    .message { position: relative; }
+    .message .msg-actions { position: absolute; top: 0; right: 0; display: none; gap: 4px; }
+    .message:hover .msg-actions { display: flex; }
+    .message:focus-within .msg-actions { display: flex; }
+    .message .msg-actions button { padding: 1px 6px; font-size: 10px; }
     .composer {
       position: relative;
       border: 1px solid var(--vscode-panel-border);
@@ -70,9 +83,30 @@
     .idle-art { display: none; flex: 1; align-items: center; justify-content: center; }
     .idle-art pre { margin: 0; color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.1; text-align: center; animation: idle-breathe 4s ease-in-out infinite; }
     @keyframes idle-breathe { 0%, 100% { opacity: .18; } 50% { opacity: .4; } }
+    body.wide { display: flex; align-items: stretch; }
+    body.wide main { flex: 1 1 auto; max-width: 980px; min-width: 0; margin: 0; }
+    body.wide .history-rail { display: block; width: 220px; flex: none; border-right: 1px solid var(--vscode-panel-border); padding: 14px 10px 14px 16px; overflow-y: auto; }
+    body:not(.wide) .history-rail { display: none; }
+    body:not(.wide) .history-rail.open { display: block; position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--vscode-editor-background); border-right: 1px solid var(--vscode-panel-border); z-index: 20; padding: 10px; overflow-y: auto; }
+    .history-item { padding: 5px 4px; cursor: pointer; border-radius: 2px; font-size: 12px; }
+    .history-item:hover { background: var(--vscode-list-hoverBackground); }
+    .history-item .del { float: right; opacity: .5; background: transparent; border: none; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; }
+    .history-item .del:hover { opacity: 1; }
+    .history-item:focus-visible, .history-item .del:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    .history-rail.busy { opacity: .6; }
+    #historyToggle { display: none; }
+    body:not(.wide) #historyToggle { display: inline-block; }
   </style>
 </head>
 <body>
+<button id="historyToggle" class="secondary" type="button">☰</button>
+<div class="history-rail" id="historyRail">
+  <div class="composer-actions" style="justify-content:space-between;margin-bottom:8px">
+    <strong class="muted">History</strong>
+    <button id="newConversation" class="secondary" type="button">New</button>
+  </div>
+  <div id="historyList"></div>
+</div>
 <main>
   <header>
     <div class="brandmark"><span class="ae">AE</span><h1>AetherStack</h1></div>
@@ -96,10 +130,16 @@
     </div>
     <div class="prompt-row"><textarea id="prompt" placeholder="Ask anything, or use /research, /plan, /code, /test, /bugfix, /help…"></textarea></div>
     <div id="inference"><span id="activeModels"></span> <span id="activityText"></span></div>
-    <div class="composer-actions"><span id="status" class="muted"></span></div>
+    <div class="composer-actions">
+      <span id="status" class="muted"></span>
+      <button type="button" id="attachBtn" class="secondary">Attach</button>
+      <input type="file" id="attachInput" accept="image/*,.pdf" multiple hidden>
+      <span id="attachList"></span>
+    </div>
   </fieldset>
   <div class="statusline"><span id="cwdLine"></span><span id="tokenLine"></span></div>
 </main>
+<script nonce="{{NONCE}}">{{CHAT_RENDER_JS}}</script>
 <script nonce="{{NONCE}}">
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
@@ -108,9 +148,64 @@
   let activeServiceId = '';
   let activityTimer = null;
   let showActiveModel = false;
+  let historyBusy = false;
+  const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+  let pendingAttachments = [];
   const restored = vscode.getState() || {};
+  new ResizeObserver((entries) => {
+    const width = entries[0].contentRect.width;
+    document.body.classList.toggle('wide', width >= 560);
+  }).observe(document.body);
+  function renderHistory(items) {
+    $('historyList').replaceChildren(...items.map((item) => {
+      const row = text('div', '', 'history-item');
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', `Switch to conversation: ${item.title}`);
+      row.append(text('span', item.title));
+      const del = text('button', '✕', 'del');
+      del.type = 'button';
+      del.setAttribute('aria-label', 'Delete conversation');
+      del.addEventListener('click', (event) => { event.stopPropagation(); vscode.postMessage({ type: 'deleteConversation', id: item.id }); });
+      row.append(del);
+      const switchTo = () => { if (!historyBusy) vscode.postMessage({ type: 'switchConversation', id: item.id }); };
+      row.addEventListener('click', switchTo);
+      row.addEventListener('keydown', (event) => {
+        if (event.target !== row) return;
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); switchTo(); }
+      });
+      return row;
+    }));
+  }
   let transcript = Array.isArray(restored.transcript) ? restored.transcript.slice(-40) : [];
-  const text = (tag, value, className) => { const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
+  let streamingBox = null;
+  let streamingRaw = '';
+  function startStreamingMessage() {
+    $('idleArt').style.display = 'none';
+    $('messages').style.flex = '1';
+    streamingRaw = '';
+    const box = text('article', '', 'message assistant');
+    box.append(text('span', 'AetherStack', 'role'));
+    const body = text('div', '');
+    box.append(body);
+    $('messages').append(box);
+    streamingBox = box;
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function appendStreamingDelta(chunk) {
+    if (!streamingBox) startStreamingMessage();
+    streamingRaw += chunk;
+    const body = streamingBox.children[1];
+    body.replaceChildren();
+    appendRichText(body, streamingRaw);
+    streamingBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function finishStreamingMessage() {
+    if (streamingBox) streamingBox.remove();
+    streamingBox = null;
+    streamingRaw = '';
+  }
+  const text = (tag, value, className) =>{ const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
   function selected() { return services.find((item) => item.id === ($('service').value === 'auto' ? activeServiceId : $('service').value)); }
   function graphNode(agent, label) { const node = text('div', '', 'graph-node'); node.append(text('strong', label || (agent && agent.label) || 'Stage')); if (agent) node.append(text('code', agent.model || 'unresolved')); return node; }
   function renderGraph(service) { const agents = (service && service.agents) || []; const lead = agents.find((a) => a.role === 'mastermind'); const reviewer = agents.find((a) => a.role === 'supervisor'); const workers = agents.filter((a) => a.role === 'worker'); const flow = $('serviceGraph'); flow.replaceChildren(graphNode(lead, (lead && lead.label) || 'Lead'), text('div', '↓', 'graph-arrow')); const row = text('div', '', 'graph-row'); row.append(...(workers.length ? workers.map((agent) => graphNode(agent, agent.label)) : [graphNode(null, 'Workers resolve after task detection')])); flow.append(row, text('div', '↓', 'graph-arrow'), graphNode(reviewer, (reviewer && reviewer.label) || 'Review'), text('div', '↓', 'graph-arrow'), graphNode(lead, 'Synthesis')); }
@@ -130,26 +225,69 @@
   function saveState() { vscode.setState({ transcript: transcript.slice(-40), serviceId: $('service').value || 'auto', activeServiceId }); }
   function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
   function appendRichText(parent, value) {
-    const parts = String(value || '').split(/```/);
-    parts.forEach((part, index) => {
-      if (index % 2 === 0) {
-        const line = text('div', '');
-        const bold = part.split(/\*\*(.+?)\*\*/g);
-        bold.forEach((chunk, i) => line.append(i % 2 === 0 ? document.createTextNode(chunk) : text('strong', chunk)));
-        parent.append(line);
-      } else { const pre = document.createElement('pre'); const code = text('code', part.replace(/^\w+\s*\n/, '')); pre.append(code); parent.append(pre); }
+    parent.insertAdjacentHTML('beforeend', renderMarkdown(String(value || '')));
+    parent.querySelectorAll('pre[data-lang]').forEach((pre) => {
+      const lang = pre.getAttribute('data-lang');
+      if (lang) pre.appendChild(text('span', lang, 'lang-label'));
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'secondary copy-code'; button.textContent = 'Copy';
+      button.addEventListener('click', () => navigator.clipboard.writeText(pre.querySelector('code').textContent));
+      pre.appendChild(button);
     });
   }
-  function addMessage(role, value, detail, persist = true) {
+  let messageSeq = 0;
+  function addMessage(role, value, detail, persist = true, explicitId, messageAttachments = []) {
     $('idleArt').style.display = 'none';
     $('messages').style.flex = '1';
+    const id = explicitId != null ? explicitId : (messageSeq += 1);
     const box = text('article', '', `message ${role}`);
+    box.tabIndex = 0;
+    box.dataset.msgId = String(id);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
     appendRichText(box, value);
     if (detail) box.append(text('div', detail, 'muted'));
+    const actions = text('div', '', 'msg-actions');
+    const copyBtn = document.createElement('button'); copyBtn.type = 'button'; copyBtn.className = 'secondary'; copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', () => navigator.clipboard.writeText(String(value || '')).catch(() => {}));
+    actions.append(copyBtn);
+    if (role === 'user') {
+      const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.className = 'secondary'; editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => editMessage(id));
+      actions.append(editBtn);
+    } else {
+      const regenBtn = document.createElement('button'); regenBtn.type = 'button'; regenBtn.className = 'secondary'; regenBtn.textContent = 'Regenerate';
+      regenBtn.addEventListener('click', () => regenerateFrom(id));
+      actions.append(regenBtn);
+    }
+    box.append(actions);
     $('messages').append(box);
-    if (persist) { transcript.push({ role, value: String(value || ''), detail: String(detail || '') }); saveState(); }
+    if (persist) { transcript.push({ id, role, value: String(value || ''), detail: String(detail || ''), attachments: messageAttachments }); saveState(); }
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function truncateTranscriptFrom(id) {
+    const index = transcript.findIndex((item) => item.id === id);
+    if (index === -1) return;
+    transcript = transcript.slice(0, index);
+    $('messages').replaceChildren();
+    transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id, item.attachments || []));
+    if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
+    saveState();
+  }
+  function editMessage(id) {
+    const item = transcript.find((entry) => entry.id === id);
+    if (!item) return;
+    truncateTranscriptFrom(id);
+    $('prompt').value = item.value;
+    $('prompt').focus();
+  }
+  function regenerateFrom(id) {
+    const index = transcript.findIndex((item) => item.id === id);
+    const prior = index > 0 ? transcript[index - 1] : null;
+    if (!prior || prior.role !== 'user') return;
+    truncateTranscriptFrom(prior.id);
+    $('prompt').value = prior.value;
+    pendingAttachments = prior.attachments || [];
+    sendPrompt();
   }
   function buildIdleArt() {
     const A = ['01110', '10001', '10001', '11111', '10001', '10001', '10001'];
@@ -157,7 +295,18 @@
     return A.map((row, i) => (row + '0' + E[i]).split('').map((bit) => (bit === '1' ? ',,' : '..')).join('')).join('\n');
   }
   $('idleArtPre').textContent = buildIdleArt();
-  transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false));
+  (function backfillTranscriptIds() {
+    // Legacy transcripts saved before id tracking (commit 5574691) have no id field at all.
+    // Mint real ids and persist them into the transcript array itself, not just the DOM.
+    let nextId = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
+    let backfilled = false;
+    for (const item of transcript) {
+      if (item.id == null) { item.id = ++nextId; backfilled = true; }
+    }
+    if (backfilled) saveState();
+  })();
+  transcript.forEach((item) => addMessage(item.role, item.value, item.detail, false, item.id, item.attachments || []));
+  messageSeq = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
   if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
   let pickerIndex = -1;
   function pickerOptions() { return [{ id: 'auto', label: 'Auto — analyze my request' }, ...services.map((service) => ({ id: service.id, label: service.label || service.id }))]; }
@@ -202,12 +351,48 @@
   $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
+  function renderAttachmentList() {
+    $('attachList').textContent = pendingAttachments.length ? pendingAttachments.map((a) => a.name).join(', ') : '';
+  }
+  $('attachBtn').addEventListener('click', () => $('attachInput').click());
+  function readAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+  $('attachInput').addEventListener('change', async () => {
+    for (const file of Array.from($('attachInput').files || [])) {
+      if (file.size > MAX_ATTACHMENT_BYTES) { $('status').textContent = `${file.name} exceeds the 8MB attachment limit.`; $('status').className = 'error'; continue; }
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      const isImage = file.type.startsWith('image/');
+      if (!isPdf && !isImage) { $('status').textContent = `${file.name}: only images and PDFs are supported.`; $('status').className = 'error'; continue; }
+      const base64 = await readAsBase64(file);
+      pendingAttachments.push({ type: isPdf ? 'pdf' : 'image', name: file.name, mime: file.type || (isPdf ? 'application/pdf' : 'image/png'), data: base64 });
+    }
+    $('attachInput').value = '';
+    renderAttachmentList();
+  });
+  $('historyToggle').addEventListener('click', () => $('historyRail').classList.toggle('open'));
+  $('newConversation').addEventListener('click', () => { if (!historyBusy) vscode.postMessage({ type: 'newConversation' }); });
+  document.addEventListener('click', (event) => {
+    if ($('historyRail').classList.contains('open') && !$('historyRail').contains(event.target) && event.target !== $('historyToggle')) $('historyRail').classList.remove('open');
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && $('historyRail').classList.contains('open')) { event.preventDefault(); $('historyRail').classList.remove('open'); }
+  });
+  vscode.postMessage({ type: 'listConversations' });
   function sendPrompt() {
     const prompt = $('prompt').value.trim();
-    if (!prompt || $('prompt').disabled || !$('service').value) return;
-    addMessage('user', prompt);
+    if ((!prompt && !pendingAttachments.length) || $('prompt').disabled || !$('service').value) return;
+    addMessage('user', prompt, '', true, undefined, pendingAttachments);
     $('prompt').value = '';
-    vscode.postMessage({ type: 'run', serviceId: $('service').value, prompt, leanMode: $('lean').value, tokenSaver: $('tokenSaver').checked });
+    $('prompt').disabled = true;
+    vscode.postMessage({ type: 'run', serviceId: $('service').value, prompt, leanMode: $('lean').value, tokenSaver: $('tokenSaver').checked, attachments: pendingAttachments });
+    pendingAttachments = [];
+    renderAttachmentList();
   }
   $('prompt').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendPrompt(); }
@@ -230,6 +415,8 @@
       $('status').className = message.error ? 'error' : 'muted';
     } else if (message.type === 'busy') {
       $('prompt').disabled = Boolean(message.value); $('refresh').disabled = Boolean(message.value);
+      historyBusy = Boolean(message.value);
+      $('historyRail').classList.toggle('busy', historyBusy);
       $('status').textContent = message.value ? 'The agent team is working…' : '';
       setBusy(Boolean(message.value));
     } else if (message.type === 'inference') {
@@ -247,7 +434,33 @@
       renderTeam(); saveState();
     } else if (message.type === 'command') {
       addMessage('assistant', message.content || '');
+    } else if (message.type === 'conversations') {
+      renderHistory(message.items || []);
+    } else if (message.type === 'conversationSwitched') {
+      transcript = [];
+      messageSeq = 0;
+      $('messages').replaceChildren();
+      const items = Array.isArray(message.transcript) ? message.transcript : [];
+      if (items.length) {
+        for (const item of items) addMessage(item.role, item.value, item.detail, true);
+        $('idleArt').style.display = 'none';
+        $('messages').style.flex = '1';
+      } else {
+        $('idleArt').style.display = 'flex';
+        $('messages').style.flex = '0';
+      }
+      saveState();
+      vscode.postMessage({ type: 'listConversations' });
+      $('historyRail').classList.remove('open');
+    } else if (message.type === 'delta') {
+      appendStreamingDelta(message.text || '');
+    } else if (message.type === 'deltaInterrupted') {
+      if (streamingBox) {
+        const body = streamingBox.children[1];
+        body.append(text('div', 'connection interrupted — retrying without streaming…', 'error'));
+      }
     } else if (message.type === 'result') {
+      finishStreamingMessage();
       const result = message.result || {};
       activeServiceId = result.service_id || (result.selection && result.selection.service_id) || activeServiceId;
       renderTeam();
@@ -258,6 +471,7 @@
       const selection = result.selection ? `${result.selection.source === 'intent-analysis' ? 'Auto-selected' : 'Selected'} ${result.selection.label} · ` : '';
       addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${selection}${team || 'dynamic team'}${tokens}`);
     } else if (message.type === 'error') {
+      finishStreamingMessage();
       setBusy(false);
       $('status').textContent = message.message || 'Request failed'; $('status').className = 'error';
     }

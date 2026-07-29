@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const test = require("node:test");
 
-const { findStackRoot, normalizeLocalUiUrl, request, selectAvailableModels } = require("../stack-control");
+const { findStackRoot, normalizeLocalUiUrl, request, requestStream, selectAvailableModels } = require("../stack-control");
 
 test("findStackRoot walks up from a workspace nested in AetherStack", () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-extension-"));
@@ -78,6 +78,58 @@ test("request returns HTTP status and parsed JSON without external dependencies"
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
+});
+
+test("requestStream parses SSE events as they arrive", async () => {
+  const http = require("http");
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.write('data: {"type":"delta","text":"a"}\n\n');
+    res.write('data: {"type":"delta","text":"b"}\n\n');
+    res.write('data: {"type":"done","result":{"answer":"ab"}}\n\n');
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+  const events = [];
+  await requestStream(`http://127.0.0.1:${port}/x`, { method: "POST", body: {} }, (event) => events.push(event));
+  server.close();
+  assert.deepEqual(events, [
+    { type: "delta", text: "a" },
+    { type: "delta", text: "b" },
+    { type: "done", result: { answer: "ab" } },
+  ]);
+});
+
+test("requestStream rejects on a non-2xx status", async () => {
+  const http = require("http");
+  const server = http.createServer((req, res) => {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "boom" }));
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+  await assert.rejects(
+    () => requestStream(`http://127.0.0.1:${port}/x`, { method: "POST", body: {} }, () => {}),
+    /boom|HTTP 500/
+  );
+  server.close();
+});
+
+test("requestStream skips a malformed chunk without aborting the stream", async () => {
+  const http = require("http");
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.write('data: not valid json\n\n');
+    res.write('data: {"type":"delta","text":"ok"}\n\n');
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+  const events = [];
+  await requestStream(`http://127.0.0.1:${port}/x`, { method: "POST", body: {} }, (event) => events.push(event));
+  server.close();
+  assert.deepEqual(events, [{ type: "delta", text: "ok" }]);
 });
 
 test("request sends bounded JSON POST bodies for Hub service runs", async () => {
