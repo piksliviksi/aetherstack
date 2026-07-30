@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const https = require("https");
-const { execFile } = require("child_process");
+const { spawn } = require("child_process");
 const { URL } = require("url");
 
 const SERVICES = [
@@ -216,26 +216,68 @@ async function checkServices() {
   };
 }
 
+const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
+
+function appendBoundedOutput(current, chunk, limit = MAX_CAPTURE_BYTES) {
+  const next = current + chunk.toString();
+  if (Buffer.byteLength(next) <= limit) return next;
+  const marker = "\n...[earlier command output truncated; process continued]...\n";
+  let tail = next.slice(Math.max(0, next.length - limit));
+  while (Buffer.byteLength(marker + tail) > limit && tail.length) {
+    tail = tail.slice(Math.max(1, Math.ceil(tail.length * 0.02)));
+  }
+  return marker + tail;
+}
+
 function execFileResult(file, args, options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(
-      file,
-      args,
-      { windowsHide: true, maxBuffer: 4 * 1024 * 1024, ...options },
-      (error, stdout, stderr) => {
-        const result = { stdout: stdout || "", stderr: stderr || "", code: error ? error.code : 0 };
-        if (error) {
-          error.result = result;
-          reject(error);
-        } else {
-          resolve(result);
-        }
+    const { timeout = 0, onOutput = null, captureBytes = MAX_CAPTURE_BYTES, ...spawnOptions } = options;
+    const child = spawn(file, args, { windowsHide: true, ...spawnOptions });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+
+    const capture = (stream) => (chunk) => {
+      if (stream === "stdout") stdout = appendBoundedOutput(stdout, chunk, captureBytes);
+      else stderr = appendBoundedOutput(stderr, chunk, captureBytes);
+      if (onOutput) onOutput(chunk.toString(), stream);
+    };
+    child.stdout.on("data", capture("stdout"));
+    child.stderr.on("data", capture("stderr"));
+
+    const timer = timeout > 0
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill();
+        }, timeout)
+      : null;
+
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      error.result = { stdout, stderr, code: error.code || 1 };
+      reject(error);
+    });
+    child.once("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      const result = { stdout, stderr, code: code ?? (timedOut ? "ETIMEDOUT" : 1), signal, streamed: Boolean(onOutput) };
+      if (code === 0 && !timedOut) {
+        resolve(result);
+        return;
       }
-    );
+      const error = new Error(timedOut ? `${file} timed out after ${timeout} ms` : `${file} exited with code ${code ?? signal}`);
+      error.code = timedOut ? "ETIMEDOUT" : code;
+      error.result = result;
+      reject(error);
+    });
   });
 }
 
-async function startCompose(stackRoot) {
+async function startCompose(stackRoot, { onOutput = null } = {}) {
   if (!isStackRoot(stackRoot)) throw new Error(`Not an AetherStack installation: ${stackRoot}`);
 
   const envFile = path.join(stackRoot, ".env");
@@ -247,19 +289,21 @@ async function startCompose(stackRoot) {
 
   const windowsScript = path.join(stackRoot, "start.ps1");
   const unixScript = path.join(stackRoot, "start.sh");
+  const progressEnv = { ...process.env, COMPOSE_PROGRESS: "plain", BUILDKIT_PROGRESS: "plain" };
   const command = process.platform === "win32" && fs.existsSync(windowsScript)
-    ? { file: "powershell.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript, "-NoBrowser"], env: process.env }
+    ? { file: "powershell.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript, "-NoBrowser"], env: progressEnv }
     : process.platform !== "win32" && fs.existsSync(unixScript)
-      ? { file: "bash", args: [unixScript], env: { ...process.env, AETHER_NO_BROWSER: "1" } }
+      ? { file: "bash", args: [unixScript], env: { ...progressEnv, AETHER_NO_BROWSER: "1" } }
       : null;
   try {
     if (command) {
       return await execFileResult(command.file, command.args, {
         cwd: stackRoot,
         env: command.env,
+        onOutput,
         // A first start may need to pull the compact chat and embedding models
         // over a slow connection. The progress UI remains visible throughout.
-        timeout: 35 * 60_000,
+        timeout: 60 * 60_000,
       });
     }
     await execFileResult("docker", ["info"], { cwd: stackRoot, timeout: 15_000 });
@@ -291,16 +335,39 @@ async function runCompose(stackRoot, args, { timeoutMs = 2 * 60_000 } = {}) {
 }
 
 async function stopCompose(stackRoot) {
-  return runCompose(stackRoot, ["stop"]);
+  // Use the platform lifecycle entrypoint so AetherStack-owned host helpers
+  // (currently the user-space macOS Ollama process) stop with Compose. Fall
+  // back to direct Compose only for incomplete/developer installations.
+  const windowsScript = path.join(stackRoot, "stop.ps1");
+  const unixScript = path.join(stackRoot, "stop.sh");
+  try {
+    if (process.platform === "win32" && fs.existsSync(windowsScript)) {
+      return await execFileResult("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript], {
+        cwd: stackRoot,
+        timeout: 5 * 60_000,
+      });
+    }
+    if (process.platform !== "win32" && fs.existsSync(unixScript)) {
+      return await execFileResult("bash", [unixScript], { cwd: stackRoot, timeout: 5 * 60_000 });
+    }
+    return await runCompose(stackRoot, ["--profile", "*", "stop"]);
+  } catch (error) {
+    if (error.code === "ENOENT") throw new Error("Docker lifecycle command was not found.");
+    const detail = conciseError(error.result && (error.result.stderr || error.result.stdout));
+    throw new Error(`AetherStack stop failed${detail ? `: ${detail}` : ""}`);
+  }
 }
 
 async function restartCompose(stackRoot) {
-  // `docker compose restart` does not apply changed images, builds, Compose
-  // configuration, or environment values. Recreate so the button does what an
-  // operator reasonably expects after an AetherStack update.
-  return runCompose(stackRoot, ["up", "-d", "--build", "--force-recreate"], {
-    timeoutMs: 5 * 60_000,
-  });
+  // Run the bootstrap after stopping every profile. It reselects host versus
+  // managed Ollama, reapplies changed environment, and ensures required models.
+  const stopped = await stopCompose(stackRoot);
+  const started = await startCompose(stackRoot);
+  return {
+    ...started,
+    stdout: `${stopped.stdout || ""}${started.stdout || ""}`,
+    stderr: `${stopped.stderr || ""}${started.stderr || ""}`,
+  };
 }
 
 async function composeDetails(stackRoot) {
@@ -400,6 +467,7 @@ module.exports = {
   requestStream,
   composeDetails,
   composeLogs,
+  execFileResult,
   restartCompose,
   runCompose,
   selectAvailableModels,

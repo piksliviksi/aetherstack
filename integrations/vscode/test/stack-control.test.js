@@ -4,7 +4,20 @@ const os = require("os");
 const path = require("path");
 const test = require("node:test");
 
-const { findStackRoot, normalizeLocalUiUrl, request, requestStream, selectAvailableModels } = require("../stack-control");
+const { execFileResult, findStackRoot, normalizeLocalUiUrl, request, requestStream, selectAvailableModels } = require("../stack-control");
+
+test("command execution streams output without killing a cold pull at the capture limit", async () => {
+  let streamedBytes = 0;
+  const result = await execFileResult(
+    process.execPath,
+    ["-e", "process.stderr.write('x'.repeat(6 * 1024 * 1024))"],
+    { onOutput: (chunk) => { streamedBytes += Buffer.byteLength(chunk); } }
+  );
+  assert.equal(result.code, 0);
+  assert.equal(streamedBytes, 6 * 1024 * 1024);
+  assert.ok(Buffer.byteLength(result.stderr) <= 4 * 1024 * 1024);
+  assert.match(result.stderr, /earlier command output truncated; process continued/);
+});
 
 test("findStackRoot walks up from a workspace nested in AetherStack", () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-extension-"));

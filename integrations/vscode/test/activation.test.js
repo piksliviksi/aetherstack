@@ -4,8 +4,9 @@ const fs = require("fs");
 const path = require("path");
 const test = require("node:test");
 
-test("chat exposes auto service selection, active graph, and model activity state", () => {
+test("chat exposes compact actions, dynamic presets, and model activity state", () => {
   const html = fs.readFileSync(path.resolve(__dirname, "..", "chat.html"), "utf8");
+  const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "package.json"), "utf8"));
   assert.match(html, /Auto — analyze my request/);
   assert.match(html, /Active preset node graph/);
   assert.match(html, /activeModels/);
@@ -15,11 +16,25 @@ test("chat exposes auto service selection, active graph, and model activity stat
   assert.match(html, /message.type === 'route'/);
   assert.match(html, /vscode\.getState/);
   assert.doesNotMatch(html, /history-rail|historyToggle|historyRail/);
-  assert.match(html, /class="header-actions"[\s\S]*id="newConversation"[\s\S]*id="historyMenuButton"[\s\S]*id="refresh"[\s\S]*id="advanced"/);
-  assert.match(html, /id="historyMenu" hidden/);
+  assert.doesNotMatch(html, /class="header-actions"|id="historyMenuButton"|id="historyMenu"/);
+  assert.equal(
+    (manifest.contributes.menus["view/title"] || []).some((item) => item.when === "view == aetherstack.chatView"),
+    false,
+    "AetherStack still contributes buttons to the Chat view title area",
+  );
+  assert.match(html, /id="actionMenu" hidden[\s\S]*id="menuFilter"[\s\S]*id="showActiveModel"[\s\S]*id="setApiKey"[\s\S]*id="openSettings"[\s\S]*id="presetMenuList"/);
+  assert.match(html, /id="activeModels"[\s\S]*id="send"/);
+  assert.match(html, /Answering:|Used:/);
+  assert.match(html, /Rename conversation/);
+  assert.match(html, /function applyMenuFilter/);
+  assert.match(html, /ICON_PATHS/);
+  assert.doesNotMatch(html, /rgba\(|#[0-9a-f]{3,8}/i);
   assert.match(html, /function renderIdleLogo/);
   assert.match(html, /requestAnimationFrame\(renderIdleLogo\)/);
   assert.match(html, /prefers-reduced-motion/);
+  const inlineScripts = [...html.matchAll(/<script nonce="\{\{NONCE\}\}">([\s\S]*?)<\/script>/g)];
+  assert.ok(inlineScripts.length >= 2);
+  assert.doesNotThrow(() => new Function(inlineScripts.at(-1)[1]));
 });
 
 test("one-button startup delegates to the platform bootstrap scripts", () => {
@@ -27,7 +42,35 @@ test("one-button startup delegates to the platform bootstrap scripts", () => {
   assert.match(control, /start\.ps1/);
   assert.match(control, /start\.sh/);
   assert.match(control, /AETHER_NO_BROWSER/);
+  assert.match(control, /COMPOSE_PROGRESS: "plain"/);
+  assert.match(control, /stop\.ps1/);
+  assert.match(control, /stop\.sh/);
+  assert.match(control, /\["--profile", "\*", "stop"\]/);
   assert.match(control, /powershell\.exe/);
+  const compose = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "docker-compose.yml"), "utf8");
+  assert.match(compose, /AETHER_OLLAMA_PORT:-11434/);
+  assert.match(compose, /RAG_EMBEDDING_ENGINE=ollama/);
+  assert.match(compose, /RAG_EMBEDDING_MODEL=nomic-embed-text/);
+  assert.doesNotMatch(compose, /container_name:/);
+  assert.match(fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.ps1"), "utf8"), /Select-FallbackOllamaPort/);
+  const unixStart = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.sh"), "utf8");
+  assert.match(unixStart, /select_fallback_port/);
+  assert.match(unixStart, /start_macos_host_ollama/);
+  assert.match(unixStart, /Ollama-darwin\.zip/);
+  assert.match(unixStart, /codesign --verify --deep --strict/);
+  const unixStop = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "stop.sh"), "utf8");
+  assert.match(unixStop, /managed-ollama\.pid/);
+  const artifactTest = fs.readFileSync(path.resolve(__dirname, "e2e", "extension-host.js"), "utf8");
+  assert.match(artifactTest, /AETHERSTACK_ONE_CLICK_OK/);
+  assert.match(artifactTest, /AETHERSTACK_E2E_REQUIRE_ACCELERATOR/);
+  assert.match(artifactTest, /size_vram/);
+  const oneClickVerifier = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "scripts", "verify-one-click.mjs"), "utf8");
+  assert.match(oneClickVerifier, /bin", "code\.cmd/);
+  assert.match(oneClickVerifier, /extensionDevelopmentPath/);
+  assert.match(oneClickVerifier, /--install-extension/);
+  assert.match(oneClickVerifier, /empty-workspace/);
+  assert.match(oneClickVerifier, /clean one-click test requires free loopback port/);
+  assert.match(oneClickVerifier, /const cleanupRoot = evidence\?\.stackPath/);
   const extension = fs.readFileSync(path.resolve(__dirname, "..", "extension.js"), "utf8");
   assert.match(extension, /if \(!root && prompt\) root = await installManagedRuntime\(context\)/);
   assert.match(extension, /bundled-runtime/);

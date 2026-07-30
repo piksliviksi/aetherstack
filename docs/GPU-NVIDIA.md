@@ -48,6 +48,6 @@ docker compose -f docker-compose.yml -f docker-compose.nvidia.yml \
 ## Verify
 
 ```bash
-docker exec aether-ollama nvidia-smi   # if using container profile
+docker compose exec ollama nvidia-smi   # if using container profile
 curl http://127.0.0.1:11434/api/tags
 ```

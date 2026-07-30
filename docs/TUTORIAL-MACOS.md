@@ -1,6 +1,6 @@
 # AetherStack on macOS (OSX)
 
-Works on **macOS Sonoma 14+** (Intel or Apple Silicon) with Docker Desktop and a current Ollama release.
+Works on **macOS Sonoma 14+** (Intel or Apple Silicon) with Docker Desktop. AetherStack reuses a healthy host Ollama; when none is installed, Start can download the official signed macOS app into the current user's AetherStack tools directory and launch its CLI automatically.
 
 The control plane (Open WebUI, LiteLLM, Redis, Postgres, Hub) runs in Docker. Local models run best via **host Ollama**: Metal acceleration on Apple M-series systems and CPU inference on Intel Macs.
 
@@ -11,13 +11,13 @@ See Ollama's current [macOS requirements](https://docs.ollama.com/macos) and [GP
 | Tool | Install |
 |------|---------|
 | **Docker Desktop for Mac** | [docs.docker.com/desktop/setup/install/mac-install](https://docs.docker.com/desktop/setup/install/mac-install/) |
-| **Ollama** (local GPU) | [ollama.com/download](https://ollama.com/download) → macOS |
+| **Ollama** (local GPU) | Optional manual install; otherwise AetherStack installs the signed user-space app on first Start |
 | **Git** | Xcode CLT or [git-scm.com](https://git-scm.com) |
 | **VS Code** | [code.visualstudio.com](https://code.visualstudio.com) + [AetherStack extension](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
 
 1. Install Docker Desktop and **start it** (whale icon in the menu bar).  
 2. Wait until Docker reports **Running**.  
-3. Install Ollama app and pull a model:
+3. Optional: install Ollama yourself and pull a model. If omitted, AetherStack Start provisions the compact coding and embedding models with visible progress:
 
 ```bash
 ollama pull llama3.1:8b
@@ -49,6 +49,14 @@ Stop:
 ```
 
 `start.sh` detects macOS and opens the browser with `open` when available.
+
+When host Ollama is missing, `start.sh` downloads
+`https://ollama.com/download/Ollama-darwin.zip`, verifies the macOS code
+signature, installs it under
+`~/Library/Application Support/AetherStack/tools/Ollama.app`, and runs its CLI.
+Set `AETHER_AUTO_INSTALL_OLLAMA=0` to opt out and use the Docker CPU fallback.
+`stop.sh` stops that host process only when AetherStack started it; an Ollama
+service that was already running remains user-owned and untouched.
 
 ## Manual compose (same as Linux)
 
@@ -85,6 +93,27 @@ curl -s -X POST http://127.0.0.1:8766/api/combos/inline_fable/launch
 # or private multi-agent:
 curl -s -X POST http://127.0.0.1:8766/api/combos/private_local/launch
 ```
+
+### Reproducible packaged-extension proof
+
+On a dedicated physical Apple Silicon test Mac with Docker Desktop running and
+VS Code installed, the repository gate installs the exact VSIX into an isolated
+profile, presses Start through the extension command, provisions an empty
+Ollama model store, restarts, performs real inference, requires nonzero
+GPU-resident model memory, and stops the stack:
+
+```bash
+npm --prefix integrations/vscode run release:check
+node scripts/verify-one-click.mjs \
+  --restart \
+  --require-accelerator \
+  --evidence dist/macos-metal-evidence.json
+```
+
+The same contract is available as the manually dispatched
+`Native macOS Metal one-click evidence` workflow. It intentionally targets a
+dedicated self-hosted Apple Silicon runner: GitHub-hosted macOS machines cannot
+run the Docker control plane because nested virtualization is unavailable.
 
 ### Tips
 

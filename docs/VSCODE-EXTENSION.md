@@ -47,8 +47,8 @@ code --install-extension AetherStack.aetherstack
 ```bash
 # Marketplace:
 code --install-extension AetherStack.aetherstack
-# or the exact VSIX downloaded from the v0.3.13 GitHub Release:
-code --install-extension aetherstack-0.3.13.vsix
+# or the exact VSIX downloaded from the v0.3.14 GitHub Release:
+code --install-extension aetherstack-0.3.14.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -72,7 +72,8 @@ Duplicates can hide the Activity Bar icon or confuse settings.
 1. Install Docker Desktop / Docker Engine. It may be stopped; AetherStack attempts to start it.
 2. Open **AetherStack → Control & Services**.
 3. Press **Start all services**. If no runtime is present, the extension takes the version-matched archive bundled inside the VSIX, verifies its SHA-256 checksum, validates every archive path, and installs it under VS Code extension storage without another prompt or download. It then runs the platform bootstrap, prefers accelerated host Ollama, or starts the bundled CPU fallback and provisions a tool-capable compact model when no host Ollama is reachable. **Choose Installation Folder** remains available for an existing checkout.
-4. The extension waits for all endpoints and reports either `OK` or the concrete HTTP/connection/startup error.
+4. The extension automatically opens the **AetherStack** Output panel and streams image-layer bytes, extraction, model pulls, container creation, and health checks. A compact notification mirrors the current step. A healthy slow first install may run for up to 60 minutes; it is not left looking frozen.
+5. The extension waits for all endpoints and reports either `OK` or the concrete HTTP/connection/startup error.
 
 Successful startup shows:
 
@@ -209,9 +210,9 @@ Open Settings → search **AetherStack**, or edit `settings.json`:
 
 ### Active-model display
 
-Enable **Show the currently running model** in the Control Center. Hub `/api/inference/status` merges LiteLLM callbacks with Hub-owned host-CLI call state, and Chat shows the active alias beside its rotating activity line. Telemetry contains only call id, model alias, execution source, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
+Enable **Show the currently running model** in the Control Center or toggle **Show answering model** in Chat's `/` menu. Hub `/api/inference/status` merges LiteLLM callbacks with Hub-owned host-CLI call state. Chat shows **Answering: model** at the lower-right of the composer while inference runs and retains **Used: model** beside Send afterward. Telemetry contains only call id, model alias, execution source, state, and timestamps. It does not record prompts, responses, headers, users, costs, or API keys.
 
-Chat defaults to **Auto — analyze my request**. Each natural-language message is classified before inference, the selected service is shown immediately, and its smallest useful lead/worker/reviewer team is resolved from currently available models. `/help`, `/presets`, `/auto <goal>`, `/preset <name> <goal>`, and shortcuts such as `/research`, `/plan`, `/code`, `/test`, and `/bugfix` provide explicit control. The transcript survives view restoration, fenced code renders safely, and editable English/Estonian/Ukrainian activity text rotates while inference is running.
+Chat defaults to **Auto — analyze my request**. Each natural-language message is classified before inference, the selected service is shown immediately, and its smallest useful lead/worker/reviewer team is resolved from currently available models. The searchable `/` menu contains dynamic preset shortcuts, session/model controls, recent conversations, runtime/settings, and gateway/host-CLI access actions without a permanent history rail or header toolbar. Conversation and message editing/deletion use small monochrome SVG hover controls. `/help`, `/presets`, `/auto <goal>`, `/preset <name> <goal>`, and shortcuts such as `/research`, `/plan`, `/code`, `/test`, and `/bugfix` provide explicit control. The transcript survives view restoration, fenced code renders safely, and editable English/Estonian/Ukrainian activity text rotates while inference is running.
 
 Already authenticated Codex, Claude, and Grok host CLIs are discovered by the extension and exposed to the Hub through a Docker-reachable host bridge protected by a random bearer token stored in VS Code SecretStorage. The bridge reuses the CLI login session; it accepts only a fixed CLI alias allowlist and does not reveal the CLI path, copy credentials, create an API key, or enable browser CORS. Probing runs after commands and views are registered. Normal refresh re-probes the live Hub without a restart; only a stale or missing bridge environment causes `aether-hub` alone to be recreated. Continue configuration remains limited to LiteLLM-backed models.
 

@@ -23,6 +23,11 @@ function Get-DotEnvValue([string]$Name) {
 function Get-HostOllamaUrl {
   $value = if ($env:OLLAMA_BASE_URL) { $env:OLLAMA_BASE_URL } else { Get-DotEnvValue "OLLAMA_BASE_URL" }
   if (-not $value) { $value = "http://127.0.0.1:11434" }
+  if ($value -match '^https?://ollama(?::11434)?/?$') {
+    $fallbackPort = if ($env:AETHER_OLLAMA_PORT) { $env:AETHER_OLLAMA_PORT } else { Get-DotEnvValue "AETHER_OLLAMA_PORT" }
+    if (-not $fallbackPort) { $fallbackPort = "11434" }
+    return "http://127.0.0.1:$fallbackPort"
+  }
   return ($value -replace "host\.docker\.internal", "127.0.0.1" -replace "gateway\.docker\.internal", "127.0.0.1").TrimEnd('/')
 }
 
@@ -112,6 +117,31 @@ function Set-DotEnvValue([string]$Name, [string]$Value) {
   [System.IO.File]::WriteAllLines($path, [string[]]$next, $utf8NoBom)
 }
 
+function Test-LocalPortAvailable([int]$Port) {
+  $listener = $null
+  try {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+    $listener.Start()
+    return $true
+  } catch {
+    return $false
+  } finally {
+    if ($listener) { $listener.Stop() }
+  }
+}
+
+function Select-FallbackOllamaPort {
+  $configured = if ($env:AETHER_OLLAMA_PORT) { $env:AETHER_OLLAMA_PORT } else { Get-DotEnvValue "AETHER_OLLAMA_PORT" }
+  $candidates = @($configured, 11434, 11436, 11437, 11438, 11439, 11440, 11441, 11442, 11443, 11444) |
+    Where-Object { $_ -and "$_" -match '^\d+$' } |
+    Select-Object -Unique
+  foreach ($candidate in $candidates) {
+    $port = [int]$candidate
+    if ($port -ge 1024 -and $port -le 65535 -and (Test-LocalPortAvailable $port)) { return $port }
+  }
+  throw "No free loopback port is available for the bundled Ollama fallback (tried 11434 and 11436-11444)."
+}
+
 function Wait-Ollama {
   $deadline = (Get-Date).AddSeconds(90)
   do {
@@ -122,12 +152,25 @@ function Wait-Ollama {
 }
 
 function Ensure-OllamaModels {
+  param([switch]$Container)
   $wanted = if ($env:AETHER_OLLAMA_MODELS) { $env:AETHER_OLLAMA_MODELS } else { Get-DotEnvValue "AETHER_OLLAMA_MODELS" }
   if (-not $wanted) { $wanted = "qwen2.5-coder:1.5b,nomic-embed-text" }
   foreach ($model in @($wanted -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
     Write-Host "  Ensuring Ollama model: $model" -ForegroundColor DarkCyan
-    $body = @{ name = $model; stream = $false } | ConvertTo-Json -Compress
-    Invoke-RestMethod -Method Post -Uri "$script:HostOllamaUrl/api/pull" -Body $body -ContentType "application/json" -TimeoutSec 900 | Out-Null
+    if ($Container) {
+      docker compose --profile with-ollama-container exec -T ollama ollama pull $model
+      if ($LASTEXITCODE -ne 0) { throw "Ollama model pull failed: $model" }
+    } elseif (Get-Command ollama -ErrorAction SilentlyContinue) {
+      & ollama pull $model
+      if ($LASTEXITCODE -ne 0) { throw "Ollama model pull failed: $model" }
+    } elseif (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+      $body = @{ name = $model; stream = $true } | ConvertTo-Json -Compress
+      & curl.exe --fail --show-error --no-buffer --max-time 900 -X POST "$script:HostOllamaUrl/api/pull" -H "Content-Type: application/json" -d $body
+      if ($LASTEXITCODE -ne 0) { throw "Ollama model pull failed: $model" }
+    } else {
+      $body = @{ name = $model; stream = $false } | ConvertTo-Json -Compress
+      Invoke-RestMethod -Method Post -Uri "$script:HostOllamaUrl/api/pull" -Body $body -ContentType "application/json" -TimeoutSec 900 | Out-Null
+    }
   }
 }
 
@@ -174,8 +217,14 @@ Write-Host "  Starting containers (Open WebUI, LiteLLM, Redis, Hub)..." -Foregro
 $useContainerOllama = -not (Test-Ollama)
 if ($useContainerOllama) {
   Write-Host "  Host Ollama is unavailable; starting the bundled CPU fallback." -ForegroundColor Yellow
+  $fallbackPort = Select-FallbackOllamaPort
+  if ($fallbackPort -ne 11434) {
+    Write-Host "  Port 11434 is occupied; using fallback port $fallbackPort." -ForegroundColor Yellow
+  }
   Set-DotEnvValue "OLLAMA_BASE_URL" "http://ollama:11434"
-  $script:HostOllamaUrl = "http://127.0.0.1:11434"
+  Set-DotEnvValue "AETHER_OLLAMA_PORT" "$fallbackPort"
+  $env:AETHER_OLLAMA_PORT = "$fallbackPort"
+  $script:HostOllamaUrl = "http://127.0.0.1:$fallbackPort"
   docker compose --profile with-ollama-container up -d --build
 } else {
   docker compose up -d --build
@@ -186,7 +235,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Wait-Ollama
-Ensure-OllamaModels
+Ensure-OllamaModels -Container:$useContainerOllama
 docker compose restart aether-hub litellm | Out-Null
 Wait-CoreServices
 docker compose ps

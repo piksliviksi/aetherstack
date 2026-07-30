@@ -30,9 +30,127 @@ fi
 
 docker_ollama_url="${OLLAMA_BASE_URL:-$(sed -n 's/^[[:space:]]*OLLAMA_BASE_URL[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r' | sed "s/^[\"']//;s/[\"']$//")}"
 docker_ollama_url="${docker_ollama_url:-http://host.docker.internal:11434}"
+configured_fallback_port="${AETHER_OLLAMA_PORT:-$(sed -n 's/^[[:space:]]*AETHER_OLLAMA_PORT[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r' | sed "s/^[\"']//;s/[\"']$//")}"
+configured_fallback_port="${configured_fallback_port:-11434}"
+if [[ "$docker_ollama_url" =~ ^https?://ollama(:11434)?/?$ ]]; then
+  docker_ollama_url="http://127.0.0.1:${configured_fallback_port}"
+fi
 host_ollama_url="${docker_ollama_url//host.docker.internal/127.0.0.1}"
 host_ollama_url="${host_ollama_url//gateway.docker.internal/127.0.0.1}"
 host_ollama_url="${host_ollama_url%/}"
+
+set_env_value() {
+  local key="$1" value="$2" tmp
+  tmp="$(mktemp "$ROOT/.env.tmp.XXXXXX")"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { replaced = 0 }
+    $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      if (!replaced) print key "=" value
+      replaced = 1
+      next
+    }
+    { print }
+    END { if (!replaced) print key "=" value }
+  ' .env > "$tmp"
+  mv "$tmp" .env
+}
+
+port_is_available() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    ! lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  elif command -v ss >/dev/null 2>&1; then
+    ! ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"
+  elif command -v netstat >/dev/null 2>&1; then
+    ! netstat -an 2>/dev/null | grep -E "[.:]$port[[:space:]].*LISTEN" >/dev/null
+  else
+    ! curl -s --connect-timeout 1 "http://127.0.0.1:$port/" >/dev/null 2>&1
+  fi
+}
+
+select_fallback_port() {
+  local candidate
+  for candidate in "$configured_fallback_port" 11434 11436 11437 11438 11439 11440 11441 11442 11443 11444; do
+    [[ "$candidate" =~ ^[0-9]+$ ]] || continue
+    (( candidate >= 1024 && candidate <= 65535 )) || continue
+    if port_is_available "$candidate"; then printf '%s\n' "$candidate"; return 0; fi
+  done
+  return 1
+}
+
+start_macos_host_ollama() {
+  [[ "$OS_NAME" == "Darwin" ]] || return 1
+  [[ "${AETHER_AUTO_INSTALL_OLLAMA:-1}" != "0" ]] || return 1
+  [[ "$host_ollama_url" =~ ^https?://(127\.0\.0\.1|localhost)(:[0-9]+)?$ ]] || return 1
+
+  local cli="" candidate tools_root staging archive bind pid log
+  for candidate in \
+    "$(command -v ollama 2>/dev/null || true)" \
+    "/Applications/Ollama.app/Contents/Resources/ollama" \
+    "$HOME/Applications/Ollama.app/Contents/Resources/ollama" \
+    "$HOME/Library/Application Support/AetherStack/tools/Ollama.app/Contents/Resources/ollama"; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then cli="$candidate"; break; fi
+  done
+
+  if [[ -z "$cli" ]]; then
+    command -v curl >/dev/null 2>&1 || { yellow "  Host Ollama is absent and curl is unavailable; using the CPU container fallback."; return 1; }
+    command -v ditto >/dev/null 2>&1 || { yellow "  Host Ollama is absent and macOS ditto is unavailable; using the CPU container fallback."; return 1; }
+    tools_root="${AETHERSTACK_TOOL_DIR:-$HOME/Library/Application Support/AetherStack/tools}"
+    mkdir -p "$tools_root"
+    if [[ -e "$tools_root/Ollama.app" ]]; then
+      red "  ERROR: $tools_root/Ollama.app exists but has no executable CLI."
+      red "  Remove or repair that local tool, then press Start again."
+      return 1
+    fi
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/aetherstack-ollama.XXXXXX")"
+    archive="$staging/Ollama-darwin.zip"
+    cyan "  Host Ollama is absent. Downloading the official macOS app for Metal inference..."
+    if ! curl --fail --location --progress-bar --retry 3 \
+      https://ollama.com/download/Ollama-darwin.zip -o "$archive"; then
+      rm -rf "$staging"
+      yellow "  Ollama download failed; using the CPU container fallback."
+      return 1
+    fi
+    ditto -x -k "$archive" "$staging/unpacked"
+    candidate="$staging/unpacked/Ollama.app/Contents/Resources/ollama"
+    if [[ ! -x "$candidate" ]]; then
+      rm -rf "$staging"
+      yellow "  Official Ollama archive did not contain the expected CLI; using the CPU container fallback."
+      return 1
+    fi
+    if command -v codesign >/dev/null 2>&1 && ! codesign --verify --deep --strict "$staging/unpacked/Ollama.app" >/dev/null 2>&1; then
+      rm -rf "$staging"
+      red "  ERROR: downloaded Ollama.app failed the macOS code-signature check."
+      return 1
+    fi
+    mv "$staging/unpacked/Ollama.app" "$tools_root/Ollama.app"
+    rm -rf "$staging"
+    cli="$tools_root/Ollama.app/Contents/Resources/ollama"
+    green "  Verified host Ollama installed under $tools_root/Ollama.app"
+  fi
+
+  mkdir -p "$ROOT/.aetherstack"
+  bind="${host_ollama_url#http://}"
+  bind="${bind#https://}"
+  log="$ROOT/.aetherstack/managed-ollama.log"
+  cyan "  Starting host Ollama at $host_ollama_url (Apple Metal when supported)..."
+  nohup env OLLAMA_HOST="$bind" "$cli" serve >"$log" 2>&1 < /dev/null &
+  pid=$!
+  printf '%s\n' "$pid" > "$ROOT/.aetherstack/managed-ollama.pid"
+  printf '%s\n' "$cli" > "$ROOT/.aetherstack/managed-ollama.command"
+  for _ in $(seq 1 45); do
+    if curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; then
+      green "  Host Ollama is ready."
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then break; fi
+    sleep 2
+  done
+  yellow "  Host Ollama did not become ready; see $log. Using the CPU container fallback."
+  kill "$pid" 2>/dev/null || true
+  rm -f "$ROOT/.aetherstack/managed-ollama.pid" "$ROOT/.aetherstack/managed-ollama.command"
+  return 1
+}
 
 # Scan host before bring-up (Ollama / Docker / ports)
 if [[ -x "$ROOT/scripts/scan-system.sh" ]] || [[ -f "$ROOT/scripts/scan-system.sh" ]]; then
@@ -85,12 +203,26 @@ if ! docker info >/dev/null 2>&1; then
   fi
 fi
 
+# On Apple Silicon, provision and launch host Ollama before deciding whether
+# the Linux-VM CPU fallback is necessary. The app is installed in user space,
+# code-signature checked, and only the process started here is lifecycle-owned.
+if ! curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; then
+  start_macos_host_ollama || true
+fi
+
 # host.docker.internal is set in compose (needed on Docker Desktop Mac/Win + some Linux)
 cyan "  Starting containers (Open WebUI, LiteLLM, Redis, Postgres, Hub)..."
+use_container_ollama=0
 if ! curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; then
+  use_container_ollama=1
   yellow "  Host Ollama is unavailable; starting the bundled CPU fallback."
+  fallback_port="$(select_fallback_port)" || { red "  ERROR: no free loopback port for bundled Ollama (tried 11434 and 11436-11444)."; exit 1; }
+  if [[ "$fallback_port" != "11434" ]]; then yellow "  Port 11434 is occupied; using fallback port $fallback_port."; fi
+  set_env_value "OLLAMA_BASE_URL" "http://ollama:11434"
+  set_env_value "AETHER_OLLAMA_PORT" "$fallback_port"
   export OLLAMA_BASE_URL="http://ollama:11434"
-  host_ollama_url="http://127.0.0.1:11434"
+  export AETHER_OLLAMA_PORT="$fallback_port"
+  host_ollama_url="http://127.0.0.1:$fallback_port"
   "${DC[@]}" --profile with-ollama-container up -d --build
 else
   "${DC[@]}" up -d --build
@@ -110,7 +242,16 @@ for model in "${startup_models[@]}"; do
   [[ -z "$model" ]] && continue
   if [[ ! "$model" =~ ^[A-Za-z0-9._:/-]+$ ]]; then red "  ERROR: invalid Ollama model name: $model"; exit 1; fi
   cyan "  Ensuring Ollama model: $model"
-  curl -fsS --max-time 900 -X POST "$host_ollama_url/api/pull" -H 'Content-Type: application/json' -d "{\"name\":\"$model\",\"stream\":false}" >/dev/null
+  if (( use_container_ollama )); then
+    "${DC[@]}" --profile with-ollama-container exec -T ollama ollama pull "$model"
+  elif command -v ollama >/dev/null 2>&1; then
+    ollama pull "$model"
+  else
+    # Ollama's streaming NDJSON includes layer names, byte totals, and completed
+    # bytes. Keep it visible when only the HTTP service (not its CLI) exists.
+    curl -fS --no-buffer --max-time 900 -X POST "$host_ollama_url/api/pull" \
+      -H 'Content-Type: application/json' -d "{\"name\":\"$model\",\"stream\":true}"
+  fi
 done
 "${DC[@]}" restart aether-hub litellm >/dev/null
 

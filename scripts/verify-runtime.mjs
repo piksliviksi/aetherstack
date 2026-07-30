@@ -50,6 +50,12 @@ for (const entry of entries) {
 for (const required of ["LICENSE", "VERSION", "docker-compose.yml", "aether-hub/server.py", "aether-hub/inference_runtime.py"]) {
   if (!entries.includes(required)) fail(`required entry is missing: ${required}`);
 }
+const detailed = spawnSync("tar", ["-tvzf", artifact], { encoding: "utf8" });
+if (detailed.error || detailed.status !== 0) fail(detailed.error?.message ?? detailed.stderr.trim());
+for (const executable of ["start.sh", "stop.sh", "scripts/scan-system.sh"]) {
+  const line = detailed.stdout.split(/\r?\n/).find((candidate) => candidate.trimEnd().endsWith(` ${executable}`));
+  if (!line || !/^-rwxr-xr-x\b/.test(line)) fail(`runtime entry is not executable: ${executable}`);
+}
 
 const destination = mkdtempSync(join(tmpdir(), "aetherstack-runtime-verify-"));
 try {

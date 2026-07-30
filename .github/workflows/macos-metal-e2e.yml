@@ -1,0 +1,104 @@
+name: Native macOS Metal one-click evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aetherstack-macos-metal-e2e
+  cancel-in-progress: false
+
+jobs:
+  one-click-metal:
+    # GitHub-hosted macOS runners cannot run Docker Desktop/Colima because
+    # nested virtualization is unsupported. This label intentionally targets
+    # a dedicated physical Apple Silicon runner with Docker Desktop running.
+    runs-on: [self-hosted, macOS, ARM64, aetherstack-metal]
+    timeout-minutes: 90
+    env:
+      AETHER_NO_BROWSER: "1"
+      AETHER_OLLAMA_MODELS: qwen2.5-coder:1.5b,nomic-embed-text
+      OLLAMA_HOST: 127.0.0.1:11435
+      OLLAMA_BASE_URL: http://host.docker.internal:11435
+      OLLAMA_MODELS: ${{ runner.temp }}/aetherstack-ollama-models-${{ github.run_id }}
+      COMPOSE_PROJECT_NAME: aetherstackmacmetal${{ github.run_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prove native Apple Silicon prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          sw_vers
+          sysctl -n machdep.cpu.brand_string
+          command -v docker
+          docker info
+          docker compose version
+          command -v ollama
+          test -x "/Applications/Visual Studio Code.app/Contents/MacOS/Electron"
+
+      - name: Start an isolated empty host Ollama store
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OLLAMA_MODELS"
+          nohup ollama serve >"$RUNNER_TEMP/aetherstack-ollama.log" 2>&1 &
+          echo "OLLAMA_PID=$!" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 60); do
+            curl -sf http://127.0.0.1:11435/api/tags >/dev/null && exit 0
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/aetherstack-ollama.log"
+          exit 1
+
+      - name: Build and inspect the exact release artifacts
+        run: npm --prefix integrations/vscode run release:check
+
+      - name: Install the VSIX, press Start, restart, infer, prove Metal, and stop
+        run: >-
+          node scripts/verify-one-click.mjs
+          --restart
+          --require-accelerator
+          --evidence dist/macos-metal-evidence.json
+
+      - name: Independently validate evidence contract
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const evidence = JSON.parse(fs.readFileSync("dist/macos-metal-evidence.json", "utf8"));
+          if (evidence.inference?.platform?.os !== "darwin") throw new Error("not macOS");
+          if (evidence.inference?.platform?.arch !== "arm64") throw new Error("not Apple Silicon");
+          if (evidence.inference?.managedContainer) throw new Error("used CPU container fallback");
+          if (!evidence.inference?.loadedModels?.some((model) => model.sizeVram > 0)) throw new Error("no Metal/GPU model memory");
+          if (!evidence.inference?.content?.includes("AETHERSTACK_ONE_CLICK_OK")) throw new Error("real inference proof missing");
+          if (!evidence.stopped) throw new Error("extension lifecycle stop proof missing");
+          NODE
+
+      - name: Retain reproducible native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aetherstack-macos-metal-${{ github.run_id }}
+          path: |
+            dist/aetherstack-*.vsix
+            dist/aetherstack-runtime-*.tar.gz
+            dist/aetherstack-runtime-*.tar.gz.sha256
+            dist/macos-metal-evidence.json
+            ${{ runner.temp }}/aetherstack-ollama.log
+          if-no-files-found: warn
+
+      - name: Stop isolated Ollama
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${OLLAMA_PID:-}" =~ ^[0-9]+$ ]]; then kill "$OLLAMA_PID" 2>/dev/null || true; fi

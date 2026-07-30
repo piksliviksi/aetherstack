@@ -4,11 +4,11 @@ Day-to-day extension use: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md).
 
 ## Runtime and UI boundaries
 
-The Marketplace VSIX is the control client and carries its matching checksum-verified runtime bundle. Release `0.3.13` installs that runtime automatically into VS Code extension storage when **Start all services** is pressed, or it can operate an existing AetherStack checkout. Docker must be installed; AetherStack starts Docker Desktop when it is installed but stopped.
+The Marketplace VSIX is the control client and carries its matching checksum-verified runtime bundle. Release `0.3.14` installs that runtime automatically into VS Code extension storage when **Start all services** is pressed, or it can operate an existing AetherStack checkout. Docker must be installed; AetherStack starts Docker Desktop when it is installed but stopped.
 
 | Surface | Location | Responsibility |
 |---|---|---|
-| AetherStack Chat webview | VS Code Secondary Side Bar; optional editor tab | Persistent conversations, automatic/service routing, streamed responses |
+| AetherStack Chat webview | VS Code Secondary Side Bar; optional editor tab | Compact action/slash menu, persistent conversations, automatic/service routing, streamed responses, optional active-model label |
 | `@aetherstack` Chat participant | VS Code built-in Chat | Native thread context and slash-command preset routing |
 | Control & Services | VS Code Activity Bar | Install/start/stop/restart, health, containers, models, logs, CLI refresh |
 | Hub UI | `http://127.0.0.1:8766/` | Simple presets and the active graph; advanced configuration |
@@ -37,13 +37,13 @@ Optional active-model telemetry merges LiteLLM and host-CLI calls. It records mo
 | Path | Command |
 |---|---|
 | Marketplace | `code --install-extension AetherStack.aetherstack` |
-| GitHub Release VSIX | `code --install-extension aetherstack-0.3.13.vsix` |
+| GitHub Release VSIX | `code --install-extension aetherstack-0.3.14.vsix` |
 | Development folder | `code --install-extension path/to/integrations/vscode` |
 
 1. Install and start Docker Desktop or Docker Engine.
 2. Install the extension and reload VS Code.
 3. Open **AetherStack → Control & Services** in the Activity Bar.
-4. Press **Start all services**. The bundled Runtime 0.3.13 is installed automatically on first use and the platform bootstrap starts every service.
+4. Press **Start all services**. The bundled Runtime 0.3.14 is installed automatically on first use and the platform bootstrap starts every service. The AetherStack Output panel opens automatically and shows image/model download and health progress; slow healthy cold installs have a 60-minute window.
 5. Wait for explicit `OK` state at ports `3000`, `4000`, and `8766`.
 6. Open Chat from the Secondary Side Bar, an editor tab, or `@aetherstack` in VS Code Chat.
 
@@ -68,11 +68,11 @@ The existing `LITELLM_MASTER_KEY` is imported from the runtime `.env` into VS Co
 
 ## Project overview privacy
 
-Project scans write `.aetherstack/project-overview.md` and `.json`. Version `0.3.13` persists `workspace: "."` and repository-relative source paths, not absolute paths or usernames. It does not read provider keys from arbitrary project `.env` files.
+Project scans write `.aetherstack/project-overview.md` and `.json`. Version `0.3.14` persists `workspace: "."` and repository-relative source paths, not absolute paths or usernames. It does not read provider keys from arbitrary project `.env` files.
 
 ## Release boundary
 
-The `v0.3.13` workflow tests source, packages a VSIX and runtime archive, inspects identity/content/source-byte parity/privacy, publishes the exact VSIX to Marketplace, and attaches that same VSIX plus the runtime archive and SHA-256 manifests to the GitHub Release. Without a repository PAT, a matching version must first be published directly with short-lived Microsoft Entra authentication; otherwise the workflow stops. Any failed artifact check prevents publication.
+The `v0.3.14` workflow tests source, packages a VSIX and runtime archive, inspects identity/content/source-byte parity/privacy, publishes the exact VSIX to Marketplace, and attaches that same VSIX plus the runtime archive and SHA-256 manifests to the GitHub Release. Without a repository PAT, a matching version must first be published directly with short-lived Microsoft Entra authentication; otherwise the workflow stops. Any failed artifact check prevents publication.
 
 ## Limits
 

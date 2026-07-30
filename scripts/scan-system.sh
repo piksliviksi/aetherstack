@@ -40,10 +40,10 @@ report = {
   "host": socket.gethostname(),
   "os": platform.platform(),
   "ram_gb": round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 ** 3), 1),
-  "docker": {"ok": ${docker_ok}, "containers": json.loads('''${containers}''')},
+  "docker": {"ok": json.loads("${docker_ok}"), "containers": json.loads('''${containers}''')},
   "containers": json.loads('''${containers}'''),
-  "ollama": {"localhost_ok": ${ollama_ok}, "base_url": "${host_ollama_url}", "models": json.loads('''${ollama_models}''')},
-  "hub": {"ok": ${hub_ok}, "url": "${HUB_URL}"},
+  "ollama": {"localhost_ok": json.loads("${ollama_ok}"), "base_url": "${host_ollama_url}", "models": json.loads('''${ollama_models}''')},
+  "hub": {"ok": json.loads("${hub_ok}"), "url": "${HUB_URL}"},
 }
 path = ".aetherstack/system-scan.json"
 with open(path, "w", encoding="utf-8") as f:
@@ -51,7 +51,7 @@ with open(path, "w", encoding="utf-8") as f:
 print("Wrote", path)
 print(json.dumps(report, indent=2)[:2000])
 # push to hub
-if ${hub_ok}:
+if json.loads("${hub_ok}"):
     import urllib.request
     body = json.dumps({"host_scan": report}).encode()
     req = urllib.request.Request("${HUB_URL}/api/discover", data=body, headers={"Content-Type": "application/json"}, method="POST")

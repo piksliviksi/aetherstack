@@ -838,7 +838,7 @@ class HubChat {
     }
     entry.transcript = this.sanitizeTranscript(transcript);
     entry.selectedServiceId = state.selectedServiceId;
-    entry.title = title;
+    if (!entry.customTitle) entry.title = title;
     entry.updatedAt = now;
     this.conversations = capConversations(this.conversations);
     await this.context.globalState.update("aetherstack.conversations", this.conversations);
@@ -1047,6 +1047,24 @@ class HubChat {
         else if (message.type === "run") await this.run(message, webview);
         else if (message.type === "cancel") this.activeRuns.get(webview)?.abort();
         else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
+        else if (message.type === "action") {
+          if (message.action === "toggleActiveModel") {
+            await vscode.workspace.getConfiguration("aetherstack")
+              .update("showActiveModel", Boolean(message.value), vscode.ConfigurationTarget.Global);
+            await webview.postMessage({ type: "inferenceSetting", enabled: Boolean(message.value) });
+            return;
+          }
+          const commands = {
+            openControlCenter: ["aetherstack.openControlCenter"],
+            openSettings: ["workbench.action.openSettings", "@ext:AetherStack.aetherstack"],
+            setApiKey: ["aetherstack.setApiKey"],
+            refreshHostClis: ["aetherstack.refreshHostClis"],
+            configureWorkspace: ["aetherstack.configureWorkspace"],
+          };
+          const invocation = commands[message.action];
+          if (!invocation) throw new Error("Unknown AetherStack action");
+          await vscode.commands.executeCommand(...invocation);
+        }
         else if (message.type === "openEditor") this.showPanel();
         else if (message.type === "listConversations") {
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
@@ -1074,6 +1092,31 @@ class HubChat {
             await webview.postMessage({ type: "conversationSwitched", id: null, transcript: [], serviceId: "auto" });
           }
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
+        } else if (message.type === "renameConversation") {
+          const entry = this.conversations.find((item) => item.id === message.id);
+          if (!entry) return;
+          const title = await vscode.window.showInputBox({
+            title: "Rename AetherStack conversation",
+            value: entry.title,
+            prompt: "Conversation name",
+            validateInput: (value) => value.trim() ? null : "Enter a name.",
+          });
+          if (title === undefined) return;
+          entry.title = title.trim().slice(0, 80);
+          entry.customTitle = true;
+          entry.updatedAt = Date.now();
+          this.conversations = capConversations(this.conversations);
+          await this.context.globalState.update("aetherstack.conversations", this.conversations);
+          await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
+        } else if (message.type === "updateConversation") {
+          const state = this.stateFor(webview);
+          const entry = this.conversations.find((item) => item.id === state.activeConversationId);
+          if (!entry) return;
+          entry.transcript = this.sanitizeTranscript(message.transcript);
+          entry.selectedServiceId = String(message.serviceId || state.selectedServiceId || "auto");
+          entry.updatedAt = Date.now();
+          this.conversations = capConversations(this.conversations);
+          await this.context.globalState.update("aetherstack.conversations", this.conversations);
         }
       } catch (error) {
         await webview.postMessage({ type: "error", message: error.message || String(error) });
@@ -1298,6 +1341,10 @@ async function activate(context) {
       stackRoot = await resolveStackRoot(context, true);
       if (!stackRoot) return;
       output.appendLine(`\n[${new Date().toISOString()}] ${action} in ${stackRoot}`);
+      if (action === "start" || action === "restart") {
+        output.appendLine("First installation can download several gigabytes. Image layers, model pulls, and health checks follow below.");
+        output.show(true);
+      }
       const actionVerb = { start: "starting", stop: "stopping", restart: "restarting" }[action];
       await vscode.window.withProgress(
         {
@@ -1307,9 +1354,26 @@ async function activate(context) {
         },
         async (progress) => {
           if (action === "start") {
-            const result = await startCompose(stackRoot);
-            output.append(result.stdout);
-            output.append(result.stderr);
+            let lastProgressAt = 0;
+            const result = await startCompose(stackRoot, {
+              onOutput: (chunk) => {
+                output.append(chunk);
+                const now = Date.now();
+                if (now - lastProgressAt < 750) return;
+                const line = chunk
+                  .split(/[\r\n]+/)
+                  .map((part) => part.replace(/\x1b\[[0-9;]*m/g, "").trim())
+                  .filter(Boolean)
+                  .at(-1);
+                if (!line) return;
+                lastProgressAt = now;
+                progress.report({ message: line.length > 140 ? `${line.slice(0, 137)}…` : line });
+              },
+            });
+            if (!result.streamed) {
+              output.append(result.stdout);
+              output.append(result.stderr);
+            }
           } else if (action === "stop") {
             const result = await stopCompose(stackRoot);
             output.append(result.stdout);

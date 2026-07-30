@@ -19,7 +19,7 @@ Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
 **[How to use the VS Code extension](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
 
-1. Install Docker Desktop / Docker Engine, open AetherStack **Control & Services**, and press **Start all services**. The extension installs the checksum-verified runtime bundled in the VSIX automatically, starts the platform bootstrap, prefers an existing accelerated host Ollama, and falls back to its container runtime when Ollama is absent.
+1. Install Docker Desktop / Docker Engine, open AetherStack **Control & Services**, and press **Start all services**. The extension installs the checksum-verified runtime bundled in the VSIX automatically, starts the platform bootstrap, prefers an existing accelerated host Ollama, and falls back to its container runtime when Ollama is absent. On macOS it can download the official signed Ollama app into the user's AetherStack tools directory and launch its host CLI so Apple Silicon inference stays on Metal.
 2. The extension checks `:3000`, `:4000`, and `:8766`, verifies capability-matrix candidates through LiteLLM provider health, then wires only responding models into a new Continue config.
 3. Open **AetherStack → Chat** from the Secondary Side Bar, open it in an editor, or use `@aetherstack` in VS Code's built-in Chat. Leave routing on **Auto** and ask naturally; intent analysis activates Research, Planning, Design, Build, Test, Bug-fix, Security, Polish, or Writing. Use `/help`, `/presets`, `/research`, `/plan`, `/code`, `/test`, `/bugfix`, or `/preset <name>` when you want explicit control.
 4. In Hub, expand the complete **Advanced active-preset node graph** below the presets to edit the selected capability-resolved tree, or open `/graph` full-page. Use the separate **Advanced setup** button for technical configuration and the local multilingual inference-activity wording database. Open WebUI (`:3000`) only when you want that separate client.
@@ -53,7 +53,7 @@ Sidebar: **AetherStack → Control & Services**.
 
 ## Prerequisites
 
-1. Install Docker Desktop / Docker Engine and keep its daemon running. The extension starts the AetherStack services itself.
+1. Install Docker Desktop / Docker Engine and keep its daemon running. The extension starts the AetherStack services itself. Docker installation is intentionally not automated because it has a separate vendor license and may require administrator approval; “one click” begins after this OS prerequisite is accepted.
 2. Optional: [Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue) for in-editor chat.
 3. Optional: host or WSL Ollama for `local-*` models.
 

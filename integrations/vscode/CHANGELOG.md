@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.14
+
+- Keep cold one-click deployment alive when multi-gigabyte Docker image pull output exceeds the extension's bounded diagnostic capture, and stream bootstrap activity into VS Code instead of appearing frozen.
+- Detect an occupied but unresponsive Ollama port and automatically select and persist a free loopback port for the bundled CPU fallback on Windows, Linux, and macOS.
+- Route Open WebUI embeddings to the provisioned Ollama `nomic-embed-text` model so a clean volume does not download SentenceTransformers during UI startup and miss its health window.
+- Add an artifact-level Extension Host smoke test that activates the exact packaged extension, executes **Start all services**, and verifies its managed runtime plus all three HTTP surfaces.
+- Show first-install image layers, extraction, model pulls, and health checks automatically in the AetherStack Output panel; retain the concise current step in VS Code's progress notification and allow a slow healthy cold install up to 60 minutes.
+- Stop profile-gated fallback services with the rest of the stack, and make Restart rerun the full backend-selection and model-provisioning bootstrap.
+- Package Linux/macOS shell entrypoints as executable files and fix the portable system scan's JSON-to-Python boolean conversion.
+- Remove Chat's webview and VS Code title toolbars in favor of a searchable, compact monochrome composer menu containing dynamic slash presets, session/model controls, conversations, runtime/settings, and credential/CLI access actions; add small SVG edit/delete controls and show the answering or last-used model beside Send.
+- Make the exact-VSIX Extension Host gate perform real `local-default` inference and retain model, token, platform, and loaded-memory evidence instead of treating three healthy HTTP ports as sufficient proof.
+- Provision a signed user-space Ollama app automatically on macOS when host Ollama is absent, prefer that host process for Apple Metal, and stop only the host process that AetherStack itself started.
+- Add a dedicated physical Apple Silicon workflow and cross-platform one-click verifier; the Metal gate rejects Intel, the Docker CPU fallback, zero GPU-resident model memory, missing inference, and incomplete lifecycle shutdown.
+- Remove global Compose container names and reject occupied public ports before a clean verifier run, preventing stale or unrelated containers from being mistaken for the current isolated deployment.
+
 ## 0.3.13
 
 - Make **Start all services** genuinely single-action on a Marketplace-only install: the VSIX now carries the checksum-verified matching runtime, installs it automatically, starts Docker Desktop when available, and invokes the same platform bootstrap used by source installs.

@@ -6,94 +6,107 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src 'nonce-{{NONCE}}';">
   <title>AetherStack Chat</title>
   <style>
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; border-radius: 0 !important; }
     body, textarea, input, button, select {
       font-family: var(--vscode-editor-font-family, 'SF Mono', Consolas, monospace);
       font-size: var(--vscode-editor-font-size, 13px);
     }
     body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); line-height: 1.5; }
     main { width: min(980px, 100%); margin: 0 auto; padding: 14px 16px; display: flex; flex-direction: column; min-height: 100vh; }
-    header, .composer-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    header { position: relative; z-index: 5; justify-content: space-between; margin-bottom: 10px; }
-    .header-actions { position: relative; display: flex; gap: 6px; align-items: center; }
-    .brandmark { display: flex; align-items: center; gap: 8px; }
-    .ae { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-weight: 700; font-size: 11px; border-radius: 3px; }
+    header { margin-bottom: 8px; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 7px; }
+    .brandmark { display: flex; align-items: center; gap: 7px; color: var(--vscode-descriptionForeground); }
+    .ae { font-weight: 700; font-size: 11px; }
     h1 { margin: 0; font-size: 13px; font-weight: 600; }
     .muted { color: var(--vscode-descriptionForeground); }
     .toolbar, .agents { display: none; }
     select, textarea { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); font: inherit; }
-    #route { margin: 0 0 8px; min-height: 18px; color: var(--vscode-textLink-foreground); }
+    #route { margin: 0 0 8px; min-height: 18px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    #route:empty { display: none; }
     #messages { flex: 1; display: grid; gap: 12px; align-content: start; margin: 4px 0 12px; }
     .message { white-space: pre-wrap; overflow-wrap: anywhere; }
     .message .role { color: var(--vscode-descriptionForeground); }
     .message.user .role::before { content: '› '; }
     .message.assistant .role::before { content: 'AE '; font-weight: 700; }
-    .message pre { position: relative; overflow: auto; margin: 6px 0 0; padding: 9px; border-radius: 2px; background: var(--vscode-textCodeBlock-background); }
+    .message pre { position: relative; overflow: auto; margin: 6px 0 0; padding: 9px; background: var(--vscode-textCodeBlock-background); }
     .message pre .lang-label { position: absolute; top: 4px; right: 34px; font-size: 10px; color: var(--vscode-descriptionForeground); }
     .message pre .copy-code { position: absolute; top: 2px; right: 4px; padding: 2px 6px; font-size: 10px; }
-    .tok-kw { color: var(--vscode-symbolIcon-keywordForeground, #c586c0); }
-    .tok-str { color: var(--vscode-symbolIcon-stringForeground, #ce9178); }
-    .tok-num { color: var(--vscode-symbolIcon-numberForeground, #b5cea8); }
+    .tok-kw, .tok-str, .tok-num { color: inherit; }
     table { border-collapse: collapse; margin: 6px 0; }
     th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 8px; text-align: left; }
     blockquote { margin: 6px 0; padding: 2px 10px; border-left: 3px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
     .message code { font-family: inherit; }
-    .message strong { color: var(--vscode-testing-iconPassed); }
+    .message strong { color: inherit; }
     .role { display: block; margin-bottom: 3px; }
     .message { position: relative; }
-    .message .msg-actions { position: absolute; top: 0; right: 0; display: none; gap: 4px; }
+    .message .msg-actions { position: absolute; top: 0; right: 0; display: none; gap: 1px; }
     .message:hover .msg-actions { display: flex; }
     .message:focus-within .msg-actions { display: flex; }
-    .message .msg-actions button { padding: 1px 6px; font-size: 10px; }
+    .message .msg-actions button, .icon-button { width: 22px; height: 22px; padding: 0; display: inline-grid; place-items: center; color: var(--vscode-descriptionForeground); background: transparent; border: 0; font-size: 12px; }
+    .message .msg-actions button:hover, .icon-button:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+    .icon-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     .composer {
       position: relative;
       border: 1px solid var(--vscode-panel-border);
       padding: 2px 10px 8px;
       margin-top: auto;
     }
-    .composer legend { padding: 0 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
-    .composer legend button { all: unset; cursor: pointer; }
-    .composer legend button:hover, .composer legend button:focus-visible { color: var(--vscode-foreground); text-decoration: underline; }
     .model-picker {
       position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px;
       background: var(--vscode-dropdown-background, var(--vscode-editor-background));
-      border: 1px solid var(--vscode-panel-border); border-radius: 3px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.3); z-index: 10;
+      border: 1px solid var(--vscode-panel-border);
+      box-shadow: 0 2px 8px var(--vscode-widget-shadow); z-index: 10;
     }
     .model-picker-title { padding: 7px 10px 4px; font-size: 11px; color: var(--vscode-descriptionForeground); }
     .model-picker-list { max-height: 240px; overflow: auto; }
     .model-picker-item { display: flex; gap: 6px; align-items: baseline; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
-    .model-picker-item .marker { color: var(--vscode-testing-iconPassed); width: 1em; flex: none; }
+    .model-picker-item .marker { color: inherit; width: 1em; flex: none; }
     .model-picker-item.current { font-weight: 700; }
     .model-picker-item.active, .model-picker-item:hover { background: var(--vscode-list-hoverBackground); }
     .model-picker-help { padding: 4px 10px 7px; font-size: 10px; color: var(--vscode-descriptionForeground); }
     .prompt-row { display: flex; align-items: flex-start; gap: 6px; }
-    .prompt-row::before { content: '>'; color: var(--vscode-testing-iconPassed); padding-top: 6px; }
-    textarea { flex: 1; width: 100%; min-height: 24px; max-height: 220px; resize: vertical; border: 0; background: transparent; padding: 6px 0; outline: none; }
+    textarea { flex: 1; width: 100%; min-height: 44px; max-height: 220px; resize: vertical; border: 0; background: transparent; padding: 7px 2px; outline: none; }
     textarea:disabled { opacity: .55; cursor: wait; }
-    #inference { min-height: 20px; margin: 2px 0; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 7px; }
-    #inference.busy::before { content: '◌'; color: var(--vscode-progressBar-background); animation: spin 1s linear infinite; }
-    #activeModels { color: var(--vscode-testing-iconPassed); font-weight: 600; }
-    button { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 1px solid var(--vscode-button-border, transparent); padding: 5px 10px; cursor: pointer; }
-    button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+    #inference { min-width: 0; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 6px; overflow: hidden; }
+    #inference.busy::before { content: '·'; animation: pulse 1s ease-in-out infinite; }
+    #activityText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #activeModels { max-width: min(38vw, 360px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    button, button.secondary { color: var(--vscode-foreground); background: transparent; border: 1px solid var(--vscode-panel-border); padding: 5px 10px; cursor: pointer; }
     button:disabled { opacity: .55; cursor: wait; }
     #status { min-height: 18px; }
-    .error { color: var(--vscode-errorForeground); }
-    .statusline { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: inherit; font-weight: 600; }
+    .composer-footer { min-height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .composer-left, .composer-right { min-width: 0; display: flex; align-items: center; gap: 3px; }
+    .composer-left { flex: 1; }
+    .composer-right { justify-content: flex-end; }
+    #modeLabel { width: auto; max-width: 150px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    #send { border: 1px solid var(--vscode-panel-border); color: var(--vscode-foreground); width: 28px; height: 28px; }
+    #status, #attachList { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .statusline { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 10px; }
+    @keyframes pulse { 50% { opacity: .2; } }
     .idle-art { display: none; flex: 1 1 55vh; min-height: 280px; width: 100%; align-items: stretch; justify-content: stretch; overflow: hidden; }
     .idle-art pre { width: 100%; height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: clamp(5px, .85vw, 10px); line-height: .9; letter-spacing: 0; text-align: center; opacity: .58; user-select: none; }
-    .history-menu { position: absolute; top: calc(100% + 6px); right: 0; width: min(360px, calc(100vw - 32px)); max-height: min(440px, 70vh); overflow-y: auto; padding: 8px; background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); box-shadow: 0 8px 22px rgba(0,0,0,.38); }
-    .history-menu[hidden] { display: none; }
-    .history-menu.busy { opacity: .6; }
-    .history-title { padding: 2px 4px 7px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+    .action-menu { position: absolute; left: 0; bottom: calc(100% + 6px); width: min(520px, calc(100vw - 32px)); max-height: min(610px, 76vh); padding: 0; background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); box-shadow: 0 8px 22px var(--vscode-widget-shadow); z-index: 20; }
+    .action-menu[hidden] { display: none; }
+    .action-menu.busy { opacity: .6; pointer-events: none; }
+    .menu-filter { padding: 6px; border-bottom: 1px solid var(--vscode-panel-border); }
+    #menuFilter { width: 100%; height: 28px; padding: 4px 7px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); outline: none; }
+    #menuFilter:focus { border-color: var(--vscode-focusBorder); }
+    .menu-scroll { max-height: min(560px, calc(76vh - 42px)); overflow-y: auto; padding: 4px; }
+    .menu-section[hidden], .menu-row[hidden] { display: none; }
+    .menu-title { padding: 7px 7px 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--vscode-descriptionForeground); }
+    .menu-row { width: 100%; min-height: 31px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 7px; color: var(--vscode-foreground); background: transparent; border: 0; text-align: left; }
+    .menu-row:hover, .menu-row:focus-visible { background: var(--vscode-list-hoverBackground); outline: none; }
+    .menu-row small { max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); }
+    .menu-empty { padding: 16px 9px; color: var(--vscode-descriptionForeground); }
     .history-empty { padding: 8px 4px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-    .history-item { display: flex; justify-content: space-between; gap: 8px; padding: 6px 5px; cursor: pointer; border-radius: 2px; font-size: 12px; }
+    .history-item { display: flex; justify-content: space-between; gap: 8px; padding: 4px 5px 4px 7px; cursor: pointer; font-size: 12px; }
     .history-item:hover { background: var(--vscode-list-hoverBackground); }
     .history-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .history-item .del { flex: none; opacity: .5; background: transparent; border: none; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; }
-    .history-item .del:hover { opacity: 1; }
-    .history-item:focus-visible, .history-item .del:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    .history-icons { display: flex; flex: none; gap: 1px; }
+    .history-item .edit, .history-item .del { opacity: .55; }
+    .history-item .edit:hover, .history-item .del:hover { opacity: 1; }
+    .history-item:focus-visible, .history-item button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    @media (max-width: 520px) { main { padding: 10px; } #activeModels { max-width: 34vw; } .statusline { display: none; } }
     @media (prefers-reduced-motion: reduce) { .idle-art pre { opacity: .42; } }
   </style>
 </head>
@@ -101,16 +114,6 @@
 <main>
   <header>
     <div class="brandmark"><span class="ae">AE</span><h1>AetherStack</h1></div>
-    <div class="header-actions">
-      <button id="newConversation" class="secondary" type="button">New</button>
-      <button id="historyMenuButton" class="secondary" type="button" aria-haspopup="true" aria-expanded="false">History</button>
-      <button id="refresh" class="secondary" type="button">Refresh</button>
-      <button id="advanced" class="secondary" type="button">Advanced</button>
-      <div class="history-menu" id="historyMenu" hidden>
-        <div class="history-title">Conversations</div>
-        <div id="historyList"></div>
-      </div>
-    </div>
   </header>
   <section class="toolbar">
     <label>Routing<select id="service"></select></label>
@@ -122,20 +125,65 @@
   <div id="messages"></div>
   <div id="idleArt" class="idle-art"><pre id="idleArtPre"></pre></div>
   <fieldset class="composer">
-    <legend><button type="button" id="modeLabel" title="Switch preset">auto</button></legend>
+    <div class="action-menu" id="actionMenu" hidden>
+      <div class="menu-filter"><input id="menuFilter" type="search" placeholder="Filter actions and commands…" autocomplete="off" aria-label="Filter AetherStack actions"></div>
+      <div class="menu-scroll" id="menuScroll">
+        <section class="menu-section" data-menu-section>
+          <div class="menu-title">Session</div>
+          <button id="newConversation" class="menu-row" type="button"><span>New conversation</span><small>Ctrl+N</small></button>
+          <button id="clearConversation" class="menu-row" type="button"><span>Clear current conversation</span></button>
+        </section>
+        <section class="menu-section" data-menu-section>
+          <div class="menu-title">Model and routing</div>
+          <button id="showActiveModel" class="menu-row" type="button"><span>Show answering model</span><small id="showActiveModelState">Off</small></button>
+          <button id="leanModeMenu" class="menu-row" type="button"><span>Lean delivery</span><small id="leanModeState">Balanced</small></button>
+          <button id="tokenSaverMenu" class="menu-row" type="button"><span>Prefer lower token cost</span><small id="tokenSaverState">Off</small></button>
+          <button id="refresh" class="menu-row" type="button"><span>Refresh models and presets</span></button>
+        </section>
+        <section class="menu-section" data-menu-section>
+          <div class="menu-title">Runtime and access</div>
+          <button id="openControlCenter" class="menu-row" type="button"><span>Services and runtime</span></button>
+          <button id="setApiKey" class="menu-row" type="button"><span>Manage gateway credential</span><small>SecretStorage</small></button>
+          <button id="refreshHostClis" class="menu-row" type="button"><span>Refresh authenticated host CLIs</span></button>
+          <button id="configureWorkspace" class="menu-row" type="button"><span>Configure workspace model access</span></button>
+        </section>
+        <section class="menu-section" data-menu-section>
+          <div class="menu-title">Configuration</div>
+          <button id="openSettings" class="menu-row" type="button"><span>Extension settings</span></button>
+          <button id="advanced" class="menu-row" type="button"><span>Advanced Hub</span></button>
+        </section>
+        <section class="menu-section" data-menu-section>
+          <div class="menu-title">Slash commands</div>
+          <div id="presetMenuList"></div>
+        </section>
+        <section class="menu-section" data-menu-section>
+          <div class="menu-title">Recent conversations</div>
+          <div id="historyList"></div>
+        </section>
+        <div id="menuEmpty" class="menu-empty" hidden>No matching actions.</div>
+      </div>
+    </div>
     <div id="modelPicker" class="model-picker" hidden>
       <div class="model-picker-title">Select preset</div>
       <div id="modelPickerList" class="model-picker-list" role="listbox"></div>
       <div class="model-picker-help">↑↓ Navigate · Enter Select · Esc Cancel</div>
     </div>
     <div class="prompt-row"><textarea id="prompt" placeholder="Ask anything, or use /research, /plan, /code, /test, /bugfix, /help…"></textarea></div>
-    <div id="inference"><span id="activeModels"></span> <span id="activityText"></span></div>
-    <div class="composer-actions">
-      <span id="status" class="muted"></span>
-      <button type="button" id="attachBtn" class="secondary">Attach</button>
-      <button type="button" id="cancel" class="secondary" hidden>Stop</button>
+    <div class="composer-footer">
+      <div class="composer-left">
+        <button type="button" id="actionMenuButton" class="icon-button" aria-haspopup="true" aria-expanded="false" title="Actions and slash commands">/</button>
+        <button type="button" id="attachBtn" class="icon-button" title="Attach image or PDF" aria-label="Attach image or PDF"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 8.5 9.8 4.2a2.1 2.1 0 0 1 3 3l-5.5 5.5a3.5 3.5 0 0 1-5-5l5.4-5.4"/></svg></button>
+        <button type="button" id="modeLabel" class="icon-button" title="Switch preset">auto</button>
+        <button type="button" id="cancel" class="icon-button" title="Stop generation" aria-label="Stop generation" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8"/></svg></button>
+        <div id="inference"><span id="activityText"></span></div>
+        <span id="status" class="muted"></span>
+        <span id="attachList" class="muted"></span>
+      </div>
+      <div class="composer-right">
+        <span id="activeModels"></span>
+        <button type="button" id="send" class="icon-button" title="Send (Enter)" aria-label="Send"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4"/></svg></button>
+      </div>
       <input type="file" id="attachInput" accept="image/*,.pdf" multiple hidden>
-      <span id="attachList"></span>
     </div>
   </fieldset>
   <div class="statusline"><span id="cwdLine"></span><span id="tokenLine"></span></div>
@@ -161,11 +209,13 @@
       row.setAttribute('role', 'button');
       row.setAttribute('aria-label', `Switch to conversation: ${item.title}`);
       row.append(text('span', item.title));
-      const del = text('button', '✕', 'del');
-      del.type = 'button';
-      del.setAttribute('aria-label', 'Delete conversation');
-      del.addEventListener('click', (event) => { event.stopPropagation(); vscode.postMessage({ type: 'deleteConversation', id: item.id }); });
-      row.append(del);
+      const icons = text('span', '', 'history-icons');
+      const edit = iconButton('edit', 'Rename conversation', (event) => { event.stopPropagation(); vscode.postMessage({ type: 'renameConversation', id: item.id }); });
+      edit.classList.add('edit');
+      const del = iconButton('delete', 'Delete conversation', (event) => { event.stopPropagation(); vscode.postMessage({ type: 'deleteConversation', id: item.id }); });
+      del.classList.add('del');
+      icons.append(edit, del);
+      row.append(icons);
       const switchTo = () => { if (!historyBusy) vscode.postMessage({ type: 'switchConversation', id: item.id }); };
       row.addEventListener('click', switchTo);
       row.addEventListener('keydown', (event) => {
@@ -175,6 +225,7 @@
       return row;
     });
     $('historyList').replaceChildren(...(rows.length ? rows : [text('div', 'No conversations yet.', 'history-empty')]));
+    applyMenuFilter();
   }
   let transcript = Array.isArray(restored.transcript) ? restored.transcript.slice(-40) : [];
   let streamingBox = null;
@@ -205,6 +256,25 @@
     streamingRaw = '';
   }
   const text = (tag, value, className) =>{ const node = document.createElement(tag); node.textContent = value == null ? '' : String(value); if (className) node.className = className; return node; };
+  const ICON_PATHS = {
+    copy: ['M5 5h7v7H5z', 'M10 5V3H3v7h2'],
+    edit: ['m3 11-.5 2.5L5 13l7.2-7.2-2-2Z', 'm9.7 4.3 2 2'],
+    regenerate: ['M12.5 5.5V2.8l-1.7 1.7A5 5 0 1 0 13 9'],
+    delete: ['M3 4.5h10M6 4.5V3h4v1.5M5 6.5v6M8 6.5v6M11 6.5v6M4.5 4.5l.5 9h6l.5-9'],
+  };
+  function iconButton(icon, label, handler) {
+    const button = text('button', '', 'icon-button');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16'); svg.setAttribute('aria-hidden', 'true');
+    for (const data of ICON_PATHS[icon] || []) {
+      const pathNode = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      pathNode.setAttribute('d', data); svg.append(pathNode);
+    }
+    button.append(svg);
+    button.type = 'button'; button.title = label; button.setAttribute('aria-label', label);
+    button.addEventListener('click', handler);
+    return button;
+  }
   function selected() { return services.find((item) => item.id === ($('service').value === 'auto' ? activeServiceId : $('service').value)); }
   function graphNode(agent, label) { const node = text('div', '', 'graph-node'); node.append(text('strong', label || (agent && agent.label) || 'Stage')); if (agent) node.append(text('code', agent.model || 'unresolved')); return node; }
   function renderGraph(service) { const agents = (service && service.agents) || []; const lead = agents.find((a) => a.role === 'mastermind'); const reviewer = agents.find((a) => a.role === 'supervisor'); const workers = agents.filter((a) => a.role === 'worker'); const flow = $('serviceGraph'); flow.replaceChildren(graphNode(lead, (lead && lead.label) || 'Lead'), text('div', '↓', 'graph-arrow')); const row = text('div', '', 'graph-row'); row.append(...(workers.length ? workers.map((agent) => graphNode(agent, agent.label)) : [graphNode(null, 'Workers resolve after task detection')])); flow.append(row, text('div', '↓', 'graph-arrow'), graphNode(reviewer, (reviewer && reviewer.label) || 'Review'), text('div', '↓', 'graph-arrow'), graphNode(lead, 'Synthesis')); }
@@ -219,10 +289,45 @@
     }
     renderGraph(service);
     $('modeLabel').textContent = service ? service.label || service.id : 'auto';
+    renderPresetMenu();
+  }
+  function renderPresetMenu() {
+    const options = [
+      { command: '/auto ', summary: 'Analyze the request and choose a preset' },
+      { command: '/help', summary: 'Show chat commands' },
+      ...services.map((service) => ({ command: `/${service.id} `, summary: service.summary || service.label || service.id })),
+    ];
+    $('presetMenuList').replaceChildren(...options.map((option) => {
+      const row = text('button', '', 'menu-row'); row.type = 'button';
+      row.append(text('span', option.command.trim()), text('small', option.summary));
+      row.addEventListener('click', () => { $('prompt').value = option.command; closeActionMenu(); $('prompt').focus(); });
+      return row;
+    }));
+    applyMenuFilter();
+  }
+  function applyMenuFilter() {
+    const query = String($('menuFilter').value || '').trim().toLowerCase();
+    let visibleRows = 0;
+    for (const section of document.querySelectorAll('[data-menu-section]')) {
+      let sectionRows = 0;
+      for (const row of section.querySelectorAll('.menu-row, .history-item')) {
+        const visible = !query || row.textContent.toLowerCase().includes(query);
+        row.hidden = !visible;
+        if (visible) sectionRows += 1;
+      }
+      section.hidden = sectionRows === 0;
+      visibleRows += sectionRows;
+    }
+    $('menuEmpty').hidden = visibleRows !== 0;
+  }
+  function updateMenuStates() {
+    $('showActiveModelState').textContent = showActiveModel ? 'On' : 'Off';
+    $('leanModeState').textContent = $('lean').value[0].toUpperCase() + $('lean').value.slice(1);
+    $('tokenSaverState').textContent = $('tokenSaver').checked ? 'On' : 'Off';
   }
   function rotateActivity() { const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text); $('activityText').textContent = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : 'Combobulating the agent swarm...'; }
   function saveState() { vscode.setState({ transcript: transcript.slice(-40), conversationId: activeConversationId, serviceId: $('service').value || 'auto', activeServiceId }); }
-  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('cancel').hidden = !value; $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; $('activeModels').textContent = ''; } }
+  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('cancel').hidden = !value; $('send').disabled = Boolean(value); $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; } }
   function appendRichText(parent, value) {
     parent.insertAdjacentHTML('beforeend', renderMarkdown(String(value || '')));
     parent.querySelectorAll('pre[data-lang]').forEach((pre) => {
@@ -246,18 +351,16 @@
     appendRichText(box, value);
     if (detail) box.append(text('div', detail, 'muted'));
     const actions = text('div', '', 'msg-actions');
-    const copyBtn = document.createElement('button'); copyBtn.type = 'button'; copyBtn.className = 'secondary'; copyBtn.textContent = 'Copy';
-    copyBtn.addEventListener('click', () => navigator.clipboard.writeText(String(value || '')).catch(() => {}));
+    const copyBtn = iconButton('copy', 'Copy message', () => navigator.clipboard.writeText(String(value || '')).catch(() => {}));
     actions.append(copyBtn);
     if (role === 'user') {
-      const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.className = 'secondary'; editBtn.textContent = 'Edit';
-      editBtn.addEventListener('click', () => editMessage(id));
+      const editBtn = iconButton('edit', 'Edit message', () => editMessage(id));
       actions.append(editBtn);
     } else {
-      const regenBtn = document.createElement('button'); regenBtn.type = 'button'; regenBtn.className = 'secondary'; regenBtn.textContent = 'Regenerate';
-      regenBtn.addEventListener('click', () => regenerateFrom(id));
+      const regenBtn = iconButton('regenerate', 'Regenerate response', () => regenerateFrom(id));
       actions.append(regenBtn);
     }
+    actions.append(iconButton('delete', 'Delete message', () => deleteMessage(id)));
     box.append(actions);
     $('messages').append(box);
     if (persist) { transcript.push({ id, role, value: String(value || ''), detail: String(detail || ''), attachments: messageAttachments }); saveState(); }
@@ -300,6 +403,14 @@
         for (let z = -3; z <= 3; z += 1) idlePoints.push({ x: (x + sx / 2 - 5.25), y: (3.25 - y - sy / 2), z: z * .42 });
       }
     }
+  }
+  function deleteMessage(id) {
+    transcript = transcript.filter((entry) => entry.id !== id);
+    const node = $('messages').querySelector(`[data-msg-id="${CSS.escape(String(id))}"]`);
+    if (node) node.remove();
+    if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
+    saveState();
+    vscode.postMessage({ type: 'updateConversation', transcript, serviceId: $('service').value || 'auto' });
   }
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   let idleFrame = 0;
@@ -374,6 +485,7 @@
     }));
   }
   function openModelPicker() {
+    setActionMenuOpen(false);
     const options = pickerOptions();
     pickerIndex = Math.max(0, options.findIndex((option) => option.id === ($('service').value || 'auto')));
     renderModelPicker();
@@ -399,8 +511,30 @@
     if (!$('modelPicker').hidden && !$('modelPicker').contains(event.target) && event.target !== $('modeLabel')) closeModelPicker();
   });
   $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
-  $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
-  $('advanced').addEventListener('click', () => vscode.postMessage({ type: 'openAdvanced' }));
+  function closeActionMenu() { setActionMenuOpen(false); }
+  $('refresh').addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'refresh' }); });
+  $('advanced').addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'openAdvanced' }); });
+  for (const [id, action] of [
+    ['openControlCenter', 'openControlCenter'],
+    ['openSettings', 'openSettings'],
+    ['setApiKey', 'setApiKey'],
+    ['refreshHostClis', 'refreshHostClis'],
+    ['configureWorkspace', 'configureWorkspace'],
+  ]) $('' + id).addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'action', action }); });
+  $('showActiveModel').addEventListener('click', () => {
+    showActiveModel = !showActiveModel; updateMenuStates();
+    if (!showActiveModel) $('activeModels').textContent = '';
+    vscode.postMessage({ type: 'action', action: 'toggleActiveModel', value: showActiveModel });
+  });
+  $('leanModeMenu').addEventListener('click', () => {
+    const modes = ['off', 'balanced', 'strict'];
+    $('lean').value = modes[(modes.indexOf($('lean').value) + 1) % modes.length];
+    updateMenuStates();
+  });
+  $('tokenSaverMenu').addEventListener('click', () => { $('tokenSaver').checked = !$('tokenSaver').checked; updateMenuStates(); });
+  $('clearConversation').addEventListener('click', () => {
+    if (!historyBusy) { closeActionMenu(); vscode.postMessage({ type: 'newConversation' }); }
+  });
   function renderAttachmentList() {
     $('attachList').textContent = pendingAttachments.length ? pendingAttachments.map((a) => a.name).join(', ') : '';
   }
@@ -426,18 +560,34 @@
     $('attachInput').value = '';
     renderAttachmentList();
   });
-  function setHistoryOpen(open) {
-    $('historyMenu').hidden = !open;
-    $('historyMenuButton').setAttribute('aria-expanded', String(open));
-    if (open) vscode.postMessage({ type: 'listConversations' });
+  function setActionMenuOpen(open) {
+    if (open) closeModelPicker();
+    $('actionMenu').hidden = !open;
+    $('actionMenuButton').setAttribute('aria-expanded', String(open));
+    if (open) {
+      $('menuFilter').value = '';
+      applyMenuFilter();
+      vscode.postMessage({ type: 'listConversations' });
+      requestAnimationFrame(() => $('menuFilter').focus());
+    }
   }
-  $('historyMenuButton').addEventListener('click', () => setHistoryOpen($('historyMenu').hidden));
-  $('newConversation').addEventListener('click', () => { if (!historyBusy) vscode.postMessage({ type: 'newConversation' }); });
+  $('menuFilter').addEventListener('input', applyMenuFilter);
+  $('menuFilter').addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      const first = [...$('menuScroll').querySelectorAll('.menu-row:not([hidden]), .history-item:not([hidden])')][0];
+      if (first) { event.preventDefault(); first.focus(); }
+    }
+  });
+  $('actionMenuButton').addEventListener('click', () => setActionMenuOpen($('actionMenu').hidden));
+  $('newConversation').addEventListener('click', () => { if (!historyBusy) { closeActionMenu(); vscode.postMessage({ type: 'newConversation' }); } });
   document.addEventListener('click', (event) => {
-    if (!$('historyMenu').hidden && !$('historyMenu').contains(event.target) && event.target !== $('historyMenuButton')) setHistoryOpen(false);
+    if (!$('actionMenu').hidden && !$('actionMenu').contains(event.target) && event.target !== $('actionMenuButton')) setActionMenuOpen(false);
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !$('historyMenu').hidden) { event.preventDefault(); setHistoryOpen(false); $('historyMenuButton').focus(); }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n' && !historyBusy) {
+      event.preventDefault(); closeActionMenu(); vscode.postMessage({ type: 'newConversation' }); return;
+    }
+    if (event.key === 'Escape' && !$('actionMenu').hidden) { event.preventDefault(); setActionMenuOpen(false); $('actionMenuButton').focus(); }
   });
   vscode.postMessage({ type: 'listConversations' });
   function sendPrompt() {
@@ -453,6 +603,7 @@
   $('prompt').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendPrompt(); }
   });
+  $('send').addEventListener('click', sendPrompt);
   window.addEventListener('message', (event) => {
     const message = event.data || {};
     if (message.type === 'state') {
@@ -460,6 +611,7 @@
       services = Array.isArray(message.services) ? message.services : [];
       activityWords = Array.isArray(message.activityWords) ? message.activityWords : [];
       showActiveModel = Boolean(message.showActiveModel);
+      updateMenuStates();
       $('cwdLine').textContent = message.cwd || '';
       const auto = text('option', 'Auto — analyze my request'); auto.value = 'auto';
       $('service').replaceChildren(auto, ...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
@@ -472,16 +624,16 @@
     } else if (message.type === 'busy') {
       $('prompt').disabled = Boolean(message.value); $('refresh').disabled = Boolean(message.value);
       historyBusy = Boolean(message.value);
-      $('historyMenu').classList.toggle('busy', historyBusy);
+      $('actionMenu').classList.toggle('busy', historyBusy);
       $('newConversation').disabled = historyBusy;
-      $('historyMenuButton').disabled = historyBusy;
       $('status').textContent = message.value ? 'The agent team is working…' : '';
       setBusy(Boolean(message.value));
     } else if (message.type === 'inference') {
       const models = showActiveModel ? (((message.inference || {}).active || []).map((item) => item.model).filter(Boolean)) : [];
-      $('activeModels').textContent = models.length ? `Active: ${models.join(', ')}` : '';
+      if (models.length) $('activeModels').textContent = `Answering: ${models.join(', ')}`;
     } else if (message.type === 'inferenceSetting') {
       showActiveModel = Boolean(message.enabled);
+      updateMenuStates();
       if (!showActiveModel) $('activeModels').textContent = '';
     } else if (message.type === 'route') {
       const selection = message.selection || {};
@@ -523,7 +675,7 @@
       }
       saveState();
       vscode.postMessage({ type: 'listConversations' });
-      setHistoryOpen(false);
+      setActionMenuOpen(false);
     } else if (message.type === 'delta') {
       appendStreamingDelta(message.text || '');
     } else if (message.type === 'deltaInterrupted') {
@@ -540,6 +692,7 @@
       const tokens = usage.total_tokens == null ? '' : ` · ${usage.total_tokens} tokens`;
       $('tokenLine').textContent = usage.total_tokens == null ? '' : `${usage.total_tokens} tokens`;
       const team = (result.agents || []).map((agent) => agent.model).filter(Boolean).join(', ');
+      if (showActiveModel) $('activeModels').textContent = result.model ? `Used: ${result.model}` : (team ? `Used: ${team}` : '');
       const selection = result.selection ? `${result.selection.source === 'intent-analysis' ? 'Auto-selected' : 'Selected'} ${result.selection.label} · ` : '';
       addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${selection}${team || 'dynamic team'}${tokens}`);
     } else if (message.type === 'error') {

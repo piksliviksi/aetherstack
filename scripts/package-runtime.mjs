@@ -107,7 +107,10 @@ for (const entry of entries) {
   const header = Buffer.alloc(512);
   const portableName = tarName(entry.name);
   header.write(portableName.name, 0, 100, "utf8");
-  writeOctal(header, 100, 8, entry.mode === "100755" ? 0o755 : 0o644);
+  // Windows checkouts commonly lose Git's executable bit. Runtime shell
+  // scripts are entrypoints on Linux/macOS, so encode their portable mode from
+  // their role instead of relying on the host checkout's file-mode support.
+  writeOctal(header, 100, 8, entry.mode === "100755" || entry.name.endsWith(".sh") ? 0o755 : 0o644);
   writeOctal(header, 108, 8, 0);
   writeOctal(header, 116, 8, 0);
   writeOctal(header, 124, 12, content.length);

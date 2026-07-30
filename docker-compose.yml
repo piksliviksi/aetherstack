@@ -11,10 +11,9 @@ services:
   # Prefer host Ollama (port 11434). Use GPU overlays when running in-container.
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:0.32.4}
-    container_name: aether-ollama
     profiles: ["with-ollama-container"]
     ports:
-      - "${AETHER_BIND_HOST:-127.0.0.1}:11434:11434"
+      - "${AETHER_BIND_HOST:-127.0.0.1}:${AETHER_OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
       - ../models:/models
@@ -23,12 +22,17 @@ services:
   open-webui:
     # Keep in sync with volume schema (:main created the DB). Use TZ to reduce client loops.
     image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui@sha256:a26effeb220e132482bf7e0560b3404843e7bc40d23051144e062960df8df6b0}
-    container_name: aether-open-webui
     expose:
       - "8080"
     environment:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - ENABLE_OLLAMA_API=false
+      # Use the embedding model AetherStack provisions in Ollama. The Open WebUI
+      # default downloads SentenceTransformers during first boot and can exceed
+      # its own health-start window on a clean volume.
+      - RAG_EMBEDDING_ENGINE=ollama
+      - RAG_EMBEDDING_MODEL=nomic-embed-text
+      - RAG_OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       # AetherHub filters this to live capability-resolved aliases and bridges authenticated host CLIs.
       - OPENAI_API_BASE_URL=http://aether-hub:8766/v1
       - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
@@ -67,7 +71,6 @@ services:
   # backend is not published directly, and this proxy is fixed to loopback.
   open-webui-proxy:
     build: ./open-webui-proxy
-    container_name: aether-open-webui-proxy
     ports:
       - "127.0.0.1:3000:3000"
     environment:
@@ -86,7 +89,6 @@ services:
 
   redis:
     image: ${REDIS_IMAGE:-redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99}
-    container_name: aether-redis
     ports:
       - "${AETHER_BIND_HOST:-127.0.0.1}:6379:6379"
     volumes:
@@ -103,7 +105,6 @@ services:
   # not published to the host — nothing outside the compose network needs it.
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
-    container_name: aether-postgres
     environment:
       - POSTGRES_USER=litellm
       - POSTGRES_PASSWORD=${LITELLM_DB_PASSWORD:-litellm-local}
@@ -120,7 +121,6 @@ services:
   # Capability matrix sync + shared agent memory (Redis-backed)
   aether-hub:
     build: ./aether-hub
-    container_name: aether-hub
     ports:
       - "${AETHER_BIND_HOST:-127.0.0.1}:8766:8766"
     environment:
@@ -128,7 +128,7 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - AETHER_HUB_HOST=0.0.0.0
       - AETHER_HUB_PORT=8766
-      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.13}
+      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.14}
       - AETHERSTACK_REVISION=${AETHERSTACK_REVISION:-}
       - AETHER_UPDATE_DIR=/host-aetherstack/updates
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
@@ -197,7 +197,6 @@ services:
   # Unified gateway for Grok / OpenAI / Anthropic / Gemini / Mistral / local Ollama
   litellm:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm@sha256:de8ec5c07c62938783b59ba4ae8b3ca144ab96afd855f5f556883920d0804449}
-    container_name: aether-litellm
     ports:
       - "${AETHER_BIND_HOST:-127.0.0.1}:4000:4000"
     volumes:
