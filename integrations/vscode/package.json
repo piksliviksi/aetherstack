@@ -4,7 +4,7 @@
   "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama). Windows, macOS, and Linux.",
   "version": "0.3.12",
   "publisher": "AetherStack",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "pricing": "Free",
   "icon": "media/icon.png",
   "galleryBanner": {

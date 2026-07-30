@@ -88,4 +88,6 @@ needed.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+Source-available under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
+Commercial use, including resale, is not permitted. Redistributions must retain
+the license and the required notice crediting the original author.

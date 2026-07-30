@@ -164,8 +164,7 @@ Delivery and the token saver can reduce unnecessary context and output without
 removing validation, security controls, accessibility, tests, or observability.
 The lean policy is an independent implementation inspired by
 [Ponytail](https://github.com/DietrichGebert/ponytail); no Ponytail source code
-is copied. Ponytail is MIT-licensed, so a future direct code reuse must retain
-its copyright and permission notice.
+is copied.
 
 Every built-in service also loads an editable behavior profile from
 `aether-hub/profiles/services/<service-id>.md`. The same profile appears on its
@@ -242,6 +241,8 @@ GPU memory. `--skip-inference` performs control-plane checks only.
 
 ## License
 
-MIT — [LICENSE](./LICENSE).
+Source-available under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
+Commercial use, including resale, is not permitted. Redistributions must retain
+the license and the required notice crediting the original author.
 
 Built on [Ollama](https://ollama.com), [Open WebUI](https://github.com/open-webui/open-webui), [LiteLLM](https://github.com/BerriAI/litellm), Redis. Not affiliated.

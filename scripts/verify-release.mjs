@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
+const expectedLicense = "PolyForm-Noncommercial-1.0.0";
+const requiredNotice = "Required Notice: Copyright (c) 2026 piksliviksi. AetherStack was originally authored by piksliviksi.";
 
 function fail(message) {
   console.error(`release verification failed: ${message}`);
@@ -36,6 +38,9 @@ if (extensionPackage) {
   if (extensionPackage.name !== "aetherstack" || extensionPackage.publisher !== "AetherStack") {
     fail("extension identity must remain AetherStack.aetherstack");
   }
+  if (extensionPackage.license !== expectedLicense) {
+    fail(`extension license must be ${expectedLicense}, got ${JSON.stringify(extensionPackage.license)}`);
+  }
 
   const requiredScripts = ["test", "verify:release", "package:vsix", "verify:vsix", "package:runtime", "verify:runtime", "release:check"];
   for (const name of requiredScripts) {
@@ -43,6 +48,15 @@ if (extensionPackage) {
       fail(`extension package is missing the ${name} script`);
     }
   }
+}
+
+const rootLicense = read("LICENSE");
+const vscodeLicense = read("integrations/vscode/LICENSE");
+if (rootLicense !== vscodeLicense) {
+  fail("root and VS Code extension license files must be byte-identical");
+}
+if (!rootLicense.startsWith("# PolyForm Noncommercial License 1.0.0\n") || !rootLicense.includes(requiredNotice)) {
+  fail("license must contain the canonical PolyForm Noncommercial title and required original-author notice");
 }
 
 const compose = read("docker-compose.yml");
@@ -74,5 +88,6 @@ if (trackedVsix.error || trackedVsix.status !== 0) {
 
 if (!process.exitCode) {
   console.log(`release identity OK: AetherStack.aetherstack ${version}`);
+  console.log(`license policy OK: ${expectedLicense}; required original-author notice present`);
   console.log("repository artifact policy OK: no tracked VSIX binaries");
 }

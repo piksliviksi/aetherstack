@@ -2,6 +2,7 @@
 
 ## 0.3.12
 
+- Replace the MIT grant with the SPDX-listed PolyForm Noncommercial 1.0.0 terms and a required notice preserving original-author credit; AetherStack is now source-available, not OSI open source.
 - Make the root `VERSION` the release source of truth and fail packaging when the extension, Compose runtime, or changelog disagrees.
 - Add a verified runtime acquisition flow so a Marketplace-only installation can obtain and validate the matching AetherStack runtime before starting services.
 - Isolate Chat context by conversation and VS Code thread, restore visible transcripts as inference context, and persist explicit preset selection truthfully.

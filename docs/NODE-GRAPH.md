@@ -7,7 +7,7 @@ Visual node graph for agent/pipeline scripting. Place **Master / Worker / Analys
 | Canvas UI | http://127.0.0.1:8766/graph |
 | Schema | `aetherstack.graph.v1` |
 | API | `/api/graphs` |
-| License | Native implementation, MIT with this repo |
+| License | Native implementation, PolyForm Noncommercial 1.0.0 with this repo |
 
 **Not in tree:** third-party node engines (e.g. ActionForge). This canvas is independent.
 

@@ -146,7 +146,7 @@ Start stack
 | Provider caps | Daily/weekly/session limits are provider-side; Aether rotates engines by policy + availability |
 | Multi-account keys | Personal + enterprise keys coexist; select via `*-personal` / `*-enterprise` aliases |
 | Private vault | No auto-merge into common memory on release |
-| Node canvas | Native MIT graph only. No third-party node engine is vendored in this repo. |
+| Node canvas | Native graph under this repo's PolyForm Noncommercial 1.0.0 license. No third-party node engine is vendored in this repo. |
 
 ---
 

@@ -20,6 +20,7 @@ const version = readFileSync(join(repoRoot, "VERSION"), "utf8").trim();
 const artifact = resolve(process.argv[2] ?? join(repoRoot, "dist", `aetherstack-runtime-${version}.tar.gz`));
 const checksumPath = `${artifact}.sha256`;
 const require = createRequire(import.meta.url);
+const requiredNotice = "Required Notice: Copyright (c) 2026 piksliviksi. AetherStack was originally authored by piksliviksi.";
 
 function fail(message) {
   throw new Error(`runtime verification failed: ${message}`);
@@ -46,7 +47,7 @@ for (const entry of entries) {
   if (normalized !== ".env.example" && /(?:^|\/)\.env(?:\.|$)/.test(normalized)) fail(`private environment file included: ${entry}`);
   if (/(?:^|\/)\.(?:git|claude|aetherstack)(?:\/|$)/.test(normalized)) fail(`private runtime state included: ${entry}`);
 }
-for (const required of ["VERSION", "docker-compose.yml", "aether-hub/server.py", "aether-hub/inference_runtime.py"]) {
+for (const required of ["LICENSE", "VERSION", "docker-compose.yml", "aether-hub/server.py", "aether-hub/inference_runtime.py"]) {
   if (!entries.includes(required)) fail(`required entry is missing: ${required}`);
 }
 
@@ -74,6 +75,10 @@ try {
   }
   if (readFileSync(join(destination, "VERSION"), "utf8").trim() !== version) {
     fail("embedded VERSION does not match the release version");
+  }
+  const packagedLicense = readFileSync(join(destination, "LICENSE"), "utf8");
+  if (!packagedLicense.startsWith("# PolyForm Noncommercial License 1.0.0\n") || !packagedLicense.includes(requiredNotice)) {
+    fail("runtime license is missing the PolyForm Noncommercial terms or required original-author notice");
   }
 } finally {
   rmSync(destination, { recursive: true, force: true });
@@ -104,5 +109,5 @@ try {
 
 console.log(`runtime artifact OK: ${basename(artifact)}`);
 console.log(`identity: AetherStack runtime ${version}`);
-console.log(`contents: ${entries.length} tracked files; source-byte parity and privacy checks passed`);
+console.log(`contents: ${entries.length} tracked files; source-byte, license, and privacy checks passed`);
 console.log("installability: exact archive checksum-verified, promoted, and reused through the shipped installer");

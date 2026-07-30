@@ -8,6 +8,8 @@ import { inflateRawSync } from "node:zlib";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
 const expectedVersion = readFileSync(join(repoRoot, "VERSION"), "utf8").trim();
+const expectedLicense = "PolyForm-Noncommercial-1.0.0";
+const requiredNotice = "Required Notice: Copyright (c) 2026 piksliviksi. AetherStack was originally authored by piksliviksi.";
 const artifact = resolve(process.argv[2] ?? join(repoRoot, "dist", `aetherstack-${expectedVersion}.vsix`));
 
 function abort(message) {
@@ -151,6 +153,13 @@ if (packageJson.name !== "aetherstack" || packageJson.publisher !== "AetherStack
 if (packageJson.version !== expectedVersion) {
   abort(`package version ${packageJson.version} does not match VERSION ${expectedVersion}`);
 }
+if (packageJson.license !== expectedLicense) {
+  abort(`package license ${JSON.stringify(packageJson.license)} does not match ${expectedLicense}`);
+}
+const packagedLicense = extract("extension/LICENSE.txt").toString("utf8");
+if (!packagedLicense.startsWith("# PolyForm Noncommercial License 1.0.0\n") || !packagedLicense.includes(requiredNotice)) {
+  abort("packaged license is missing the PolyForm Noncommercial terms or required original-author notice");
+}
 const commands = new Set((packageJson.contributes?.commands ?? []).map((entry) => entry.command));
 for (const command of [
   "aetherstack.openChat",
@@ -201,4 +210,4 @@ for (const name of entries.keys()) {
 
 console.log(`VSIX artifact OK: ${basename(artifact)}`);
 console.log(`identity: AetherStack.aetherstack ${expectedVersion}`);
-console.log(`contents: ${entries.size} entries; runtime bytes match source; private/test files absent`);
+console.log(`contents: ${entries.size} entries; runtime bytes and license match source; private/test files absent`);
