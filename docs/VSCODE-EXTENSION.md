@@ -47,8 +47,8 @@ code --install-extension AetherStack.aetherstack
 ```bash
 # Marketplace:
 code --install-extension AetherStack.aetherstack
-# or the exact VSIX downloaded from the v0.3.12 GitHub Release:
-code --install-extension aetherstack-0.3.12.vsix
+# or the exact VSIX downloaded from the v0.3.13 GitHub Release:
+code --install-extension aetherstack-0.3.13.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```
@@ -321,5 +321,5 @@ Engine:      http://127.0.0.1:8765
 |------|----------|
 | Extension source | [`integrations/vscode/`](../integrations/vscode/) |
 | Marketplace | [AetherStack.aetherstack](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack) |
-| Release artifacts | GitHub Release `v0.3.12`: verified VSIX, runtime archive, and SHA-256 files |
+| Release artifacts | GitHub Release `v0.3.13`: verified VSIX, runtime archive, and SHA-256 files |
 | Package / publish notes | [`integrations/vscode/README.md`](../integrations/vscode/README.md) |

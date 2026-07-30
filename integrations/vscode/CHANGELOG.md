@@ -1,11 +1,13 @@
 # Changelog
 
-## 0.3.12
+## 0.3.13
 
 - Make **Start all services** genuinely single-action on a Marketplace-only install: the VSIX now carries the checksum-verified matching runtime, installs it automatically, starts Docker Desktop when available, and invokes the same platform bootstrap used by source installs.
 - Prefer an existing accelerated host Ollama, fall back to the bundled CPU container when none is reachable, and provision tool-capable `qwen2.5-coder:1.5b` plus embeddings so first-run chat can actually infer.
 - Remove Chat's left history rail, move **New** and **History** beside **Refresh** and **Advanced**, and replace the small breathing bitmap with a full-chat rotating 3D ASCII AetherStack mark.
 - Disable Open WebUI's independent update polling and add browser regression coverage for reload loops, redirects, empty-document replacement, and stacked full-viewport layers.
+
+## 0.3.12
 - Replace the MIT grant with the SPDX-listed PolyForm Noncommercial 1.0.0 terms and a required notice preserving original-author credit; AetherStack is now source-available, not OSI open source.
 - Make the root `VERSION` the release source of truth and fail packaging when the extension, Compose runtime, or changelog disagrees.
 - Add a verified runtime acquisition flow so a Marketplace-only installation can install and validate the matching AetherStack runtime before starting services.

@@ -13,15 +13,15 @@ const {
 } = require("../runtime-install");
 
 test("release URLs are immutable and version-pinned", () => {
-  const urls = releaseAssetUrls("0.3.12");
-  assert.equal(urls.filename, "aetherstack-runtime-0.3.12.tar.gz");
-  assert.match(urls.archive, /releases\/download\/v0\.3\.12\/aetherstack-runtime-0\.3\.12\.tar\.gz$/);
+  const urls = releaseAssetUrls("0.3.13");
+  assert.equal(urls.filename, "aetherstack-runtime-0.3.13.tar.gz");
+  assert.match(urls.archive, /releases\/download\/v0\.3\.13\/aetherstack-runtime-0\.3\.13\.tar\.gz$/);
   assert.throws(() => releaseAssetUrls("main"), /Invalid/);
 });
 
 test("checksum parser binds the digest to the expected asset", () => {
   const digest = "a".repeat(64);
-  assert.equal(parseChecksum(`${digest}  aetherstack-runtime-0.3.12.tar.gz\n`, "aetherstack-runtime-0.3.12.tar.gz"), digest);
+  assert.equal(parseChecksum(`${digest}  aetherstack-runtime-0.3.13.tar.gz\n`, "aetherstack-runtime-0.3.13.tar.gz"), digest);
   assert.throws(() => parseChecksum(`${digest}  another.tar.gz`, "expected.tar.gz"), /does not contain/);
 });
 
@@ -38,7 +38,7 @@ test("installer verifies checksum and promotes only a complete runtime", async (
   const digest = crypto.createHash("sha256").update(archiveBody).digest("hex");
   const downloader = async (url, destination) => {
     fs.writeFileSync(destination, url.endsWith(".sha256")
-      ? `${digest}  aetherstack-runtime-0.3.12.tar.gz\n`
+      ? `${digest}  aetherstack-runtime-0.3.13.tar.gz\n`
       : archiveBody);
   };
   const runner = async (_file, args) => {
@@ -50,11 +50,11 @@ test("installer verifies checksum and promotes only a complete runtime", async (
     return { stdout: "", stderr: "" };
   };
   try {
-    const result = await installRuntime({ version: "0.3.12", storagePath: temp, downloader, runner });
+    const result = await installRuntime({ version: "0.3.13", storagePath: temp, downloader, runner });
     assert.equal(result.reused, false);
     assert.equal(result.checksum, digest);
     assert.equal(fs.existsSync(path.join(result.root, "aether-hub")), true);
-    const reused = await installRuntime({ version: "0.3.12", storagePath: temp, downloader, runner });
+    const reused = await installRuntime({ version: "0.3.13", storagePath: temp, downloader, runner });
     assert.equal(reused.reused, true);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
@@ -64,7 +64,7 @@ test("installer verifies checksum and promotes only a complete runtime", async (
 test("installer uses the checksum-verified runtime bundled inside the VSIX without a network request", async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-runtime-bundled-"));
   const bundled = path.join(temp, "bundle");
-  const archiveName = "aetherstack-runtime-0.3.12.tar.gz";
+  const archiveName = "aetherstack-runtime-0.3.13.tar.gz";
   const archiveBody = Buffer.from("bundled runtime archive");
   const digest = crypto.createHash("sha256").update(archiveBody).digest("hex");
   fs.mkdirSync(bundled, { recursive: true });
@@ -80,7 +80,7 @@ test("installer uses the checksum-verified runtime bundled inside the VSIX witho
   };
   const downloader = async () => { throw new Error("network must not be used for a bundled runtime"); };
   try {
-    const result = await installRuntime({ version: "0.3.12", storagePath: path.join(temp, "storage"), bundledPath: bundled, downloader, runner });
+    const result = await installRuntime({ version: "0.3.13", storagePath: path.join(temp, "storage"), bundledPath: bundled, downloader, runner });
     assert.equal(result.reused, false);
     assert.equal(result.checksum, digest);
     assert.equal(fs.existsSync(path.join(result.root, "aether-hub")), true);
@@ -93,16 +93,16 @@ test("installer rejects a checksum mismatch without leaving a runnable directory
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-runtime-bad-checksum-"));
   const downloader = async (url, destination) => {
     fs.writeFileSync(destination, url.endsWith(".sha256")
-      ? `${"0".repeat(64)}  aetherstack-runtime-0.3.12.tar.gz\n`
+      ? `${"0".repeat(64)}  aetherstack-runtime-0.3.13.tar.gz\n`
       : Buffer.from("tampered runtime"));
   };
   try {
     await assert.rejects(
-      () => installRuntime({ version: "0.3.12", storagePath: temp, downloader }),
+      () => installRuntime({ version: "0.3.13", storagePath: temp, downloader }),
       /checksum mismatch/i,
     );
     const runtimeBase = path.join(temp, "runtime");
-    assert.equal(fs.existsSync(path.join(runtimeBase, "0.3.12")), false);
+    assert.equal(fs.existsSync(path.join(runtimeBase, "0.3.13")), false);
     assert.deepEqual(fs.readdirSync(runtimeBase), []);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
