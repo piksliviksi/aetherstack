@@ -146,7 +146,25 @@ function isInside(parent, child) {
   return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-async function installRuntime({ version, storagePath, repository = REPOSITORY, downloader = downloadFile, runner = execFileResult }) {
+function bundledAssets(bundledPath, filename) {
+  if (!bundledPath) return null;
+  const root = path.resolve(bundledPath);
+  const archive = path.resolve(root, filename);
+  const checksum = path.resolve(root, `${filename}.sha256`);
+  if (![archive, checksum].every((candidate) => candidate === root || isInside(root, candidate))) {
+    throw new Error("Refusing an unsafe bundled runtime path");
+  }
+  if (!fs.existsSync(archive) || !fs.existsSync(checksum)) return null;
+  if (!fs.statSync(archive).isFile() || !fs.statSync(checksum).isFile()) {
+    throw new Error("Bundled AetherStack Runtime assets are not regular files");
+  }
+  if (fs.statSync(archive).size > MAX_RUNTIME_BYTES || fs.statSync(checksum).size > MAX_CHECKSUM_BYTES) {
+    throw new Error("Bundled AetherStack Runtime assets exceed their size limits");
+  }
+  return { archive, checksum };
+}
+
+async function installRuntime({ version, storagePath, bundledPath = null, repository = REPOSITORY, downloader = downloadFile, runner = execFileResult }) {
   const safeVersion = assertVersion(version);
   if (!storagePath) throw new Error("VS Code did not provide an extension storage directory");
   const runtimeBase = path.resolve(storagePath, "runtime");
@@ -167,8 +185,14 @@ async function installRuntime({ version, storagePath, repository = REPOSITORY, d
   const urls = releaseAssetUrls(safeVersion, repository);
 
   try {
-    await downloader(urls.archive, archivePath, { maxBytes: MAX_RUNTIME_BYTES });
-    await downloader(urls.checksum, checksumPath, { maxBytes: MAX_CHECKSUM_BYTES });
+    const bundled = bundledAssets(bundledPath, urls.filename);
+    if (bundled) {
+      fs.copyFileSync(bundled.archive, archivePath, fs.constants.COPYFILE_EXCL);
+      fs.copyFileSync(bundled.checksum, checksumPath, fs.constants.COPYFILE_EXCL);
+    } else {
+      await downloader(urls.archive, archivePath, { maxBytes: MAX_RUNTIME_BYTES });
+      await downloader(urls.checksum, checksumPath, { maxBytes: MAX_CHECKSUM_BYTES });
+    }
     const expected = parseChecksum(fs.readFileSync(checksumPath, "utf8"), urls.filename);
     const actual = await hashFile(archivePath);
     if (actual !== expected) throw new Error(`Runtime checksum mismatch: expected ${expected}, received ${actual}`);
@@ -201,6 +225,7 @@ module.exports = {
   MAX_RUNTIME_BYTES,
   REPOSITORY,
   assertVersion,
+  bundledAssets,
   downloadFile,
   installRuntime,
   isRuntimeRoot,

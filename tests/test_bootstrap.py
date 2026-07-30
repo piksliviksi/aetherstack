@@ -28,6 +28,7 @@ def _pull_names(plan: dict) -> list[str]:
 
 def test_bootstrap_selects_llama_on_capable_host() -> None:
     names = _pull_names(bootstrap.build_install_plan(_discover(24)))
+    assert "qwen2.5-coder:1.5b" in names
     assert "llama3.1:8b" in names
     assert "nomic-embed-text" in names
     assert "tinyllama" not in names
@@ -35,6 +36,6 @@ def test_bootstrap_selects_llama_on_capable_host() -> None:
 
 def test_bootstrap_selects_small_fallback_on_low_memory_host() -> None:
     names = _pull_names(bootstrap.build_install_plan(_discover(8)))
-    assert "tinyllama" in names
+    assert "qwen2.5-coder:1.5b" in names
     assert "nomic-embed-text" in names
     assert "llama3.1:8b" not in names

@@ -18,7 +18,7 @@ Config file: [`litellm_config.yaml`](../litellm_config.yaml).
 | Alias | Backend |
 |-------|---------|
 | `local-default` / `local-llama` / `local-llama31-8b` | Host Ollama (`llama3.1:8b` — pull required) |
-| `local-tiny` | Host Ollama (`tinyllama`; completion-only fallback, no tools) |
+| `local-tiny` | Host Ollama (`qwen2.5-coder:0.5b`; compact tool-capable fallback) |
 | `local-embed` | Host Ollama (`nomic-embed-text`) |
 | `grok` / `grok-4.5` | xAI Grok 4.5 |
 | `grok-4.3` / `grok-4` / `grok-4-fast` / `grok-code` | xAI Grok 4.x |

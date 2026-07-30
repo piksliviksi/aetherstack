@@ -69,9 +69,9 @@ Duplicates can hide the Activity Bar icon or confuse settings.
 
 ### 1. Start AetherStack from VS Code
 
-1. Make sure Docker Desktop / Docker Engine is running.
+1. Install Docker Desktop / Docker Engine. It may be stopped; AetherStack attempts to start it.
 2. Open **AetherStack → Control & Services**.
-3. Press **Start all services**. If no runtime is present, choose **Install Runtime 0.3.12**. The extension downloads the version-pinned GitHub Release archive, verifies its SHA-256 checksum, validates every archive path, and installs it under VS Code's extension storage. You can instead choose an existing checkout containing `docker-compose.yml`, `litellm_config.yaml`, and `aether-hub/`.
+3. Press **Start all services**. If no runtime is present, the extension takes the version-matched archive bundled inside the VSIX, verifies its SHA-256 checksum, validates every archive path, and installs it under VS Code extension storage without another prompt or download. It then runs the platform bootstrap, prefers accelerated host Ollama, or starts the bundled CPU fallback and provisions a tool-capable compact model when no host Ollama is reachable. **Choose Installation Folder** remains available for an existing checkout.
 4. The extension waits for all endpoints and reports either `OK` or the concrete HTTP/connection/startup error.
 
 Successful startup shows:
@@ -177,7 +177,7 @@ The value is kept in VS Code SecretStorage rather than settings JSON.
 | **Start / Stop / Restart All Services** | Control the complete local Docker Compose backend |
 | **Refresh Service State** | Re-run health and Compose state checks |
 | **Refresh Authenticated Host CLIs** | Re-probe existing Codex, Claude, and Grok CLI sessions and refresh the Hub matrix; recreate only Hub if its protected bridge configuration is stale |
-| **Install Verified Runtime** | Download, checksum, validate, and install the runtime matching the extension version |
+| **Install Verified Runtime** | Checksum, validate, and install the runtime bundled with the extension version |
 | **Show Backend Logs** | Open the last 100 Compose log lines in the AetherStack output channel |
 | **Choose Installation Folder** | Set the local AetherStack source/install path |
 | **Scan Project AI History** | Start of a session; after adding chat tools |
@@ -307,7 +307,7 @@ Reload:      Ctrl+Shift+P → Developer: Reload Window
 Open folder: File → Open Folder
 Find Chat:   Secondary Side Bar → AetherStack  OR  @aetherstack in VS Code Chat
 Find ops:    Activity Bar → AetherStack → Control & Services
-First run:   Start All Services → Install Runtime 0.3.12 (if prompted)
+First run:   Install Docker → Start All Services (runtime installation is automatic)
 Chat:        AetherStack Chat  OR  @aetherstack  OR  optional Open WebUI (:3000)
 Gateway:     http://127.0.0.1:4000/v1
 Engine:      http://127.0.0.1:8765

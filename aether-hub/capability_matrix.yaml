@@ -54,7 +54,7 @@ models:
   local-default:
     tier: local
     provider: ollama
-    backend: ollama/llama3.1:8b
+    backend: ollama/qwen2.5-coder:1.5b
     capabilities: [chat, code, reason, tools, private, cheap]
     context: 8192
     cost: 0
@@ -66,19 +66,19 @@ models:
     provider: ollama
     backend: ollama/llama3.1:8b
     capabilities: [chat, code, reason, tools, private, cheap]
-    context: 8192
+    context: 32768
     cost: 0
     latency: very_low
 
   local-tiny:
     tier: local
     provider: ollama
-    backend: ollama/tinyllama
-    capabilities: [chat, private, cheap, fast]
-    context: 2048
+    backend: ollama/qwen2.5-coder:0.5b
+    capabilities: [chat, code, tools, private, cheap, fast]
+    context: 32768
     cost: 0
     latency: very_low
-    notes: Smoke tests / constrained machines
+    notes: Tool-capable compact fallback for constrained machines
 
   local-llama31-8b:
     tier: local

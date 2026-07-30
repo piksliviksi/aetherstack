@@ -8,7 +8,7 @@ model_list:
   # Prefer models that are actually pulled. Override by pulling + editing here.
   - model_name: local-default
     litellm_params:
-      model: ollama/llama3.1:8b
+      model: ollama/qwen2.5-coder:1.5b
       api_base: os.environ/OLLAMA_BASE_URL
 
   - model_name: local-llama
@@ -18,7 +18,7 @@ model_list:
 
   - model_name: local-tiny
     litellm_params:
-      model: ollama/tinyllama
+      model: ollama/qwen2.5-coder:0.5b
       api_base: os.environ/OLLAMA_BASE_URL
 
   # Optional larger local models (pull first: ollama pull llama3.1:8b)

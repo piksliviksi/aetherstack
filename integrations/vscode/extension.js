@@ -612,19 +612,7 @@ async function resolveStackRoot(context, prompt = false) {
     extensionPath: context.extensionPath,
     cwd: process.cwd(),
   });
-  if (!root && prompt) {
-    const choice = await vscode.window.showInformationMessage(
-      `AetherStack Runtime ${extensionManifest.version} is not installed or selected.`,
-      { modal: true, detail: "Install the verified runtime release automatically, or choose an existing AetherStack checkout." },
-      `Install Runtime ${extensionManifest.version}`,
-      "Choose Existing"
-    );
-    if (choice === `Install Runtime ${extensionManifest.version}`) {
-      root = await installManagedRuntime(context);
-    } else if (choice === "Choose Existing") {
-      root = await chooseStackRoot(context);
-    }
-  }
+  if (!root && prompt) root = await installManagedRuntime(context);
   if (root) {
     await context.globalState.update("aetherstack.stackRoot", root);
     await importGatewayKey(context, root);
@@ -645,6 +633,7 @@ async function installManagedRuntime(context) {
     () => installRuntimeBundle({
       version: extensionManifest.version,
       storagePath: context.globalStorageUri.fsPath,
+      bundledPath: path.join(context.extensionPath, "bundled-runtime"),
     })
   );
   await vscode.workspace

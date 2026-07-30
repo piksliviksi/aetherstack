@@ -87,7 +87,32 @@ fi
 
 # host.docker.internal is set in compose (needed on Docker Desktop Mac/Win + some Linux)
 cyan "  Starting containers (Open WebUI, LiteLLM, Redis, Postgres, Hub)..."
-"${DC[@]}" up -d
+if ! curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; then
+  yellow "  Host Ollama is unavailable; starting the bundled CPU fallback."
+  export OLLAMA_BASE_URL="http://ollama:11434"
+  host_ollama_url="http://127.0.0.1:11434"
+  "${DC[@]}" --profile with-ollama-container up -d --build
+else
+  "${DC[@]}" up -d --build
+fi
+
+ollama_deadline=$((SECONDS + 90))
+until curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; do
+  if (( SECONDS >= ollama_deadline )); then red "  ERROR: Ollama did not become ready at $host_ollama_url"; exit 1; fi
+  sleep 2
+done
+
+env_ollama_models="$(sed -n 's/^[[:space:]]*AETHER_OLLAMA_MODELS[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r' | sed "s/^[\"']//;s/[\"']$//")"
+wanted_models="${AETHER_OLLAMA_MODELS:-${env_ollama_models:-qwen2.5-coder:1.5b,nomic-embed-text}}"
+IFS=',' read -r -a startup_models <<< "$wanted_models"
+for model in "${startup_models[@]}"; do
+  model="${model//[[:space:]]/}"
+  [[ -z "$model" ]] && continue
+  if [[ ! "$model" =~ ^[A-Za-z0-9._:/-]+$ ]]; then red "  ERROR: invalid Ollama model name: $model"; exit 1; fi
+  cyan "  Ensuring Ollama model: $model"
+  curl -fsS --max-time 900 -X POST "$host_ollama_url/api/pull" -H 'Content-Type: application/json' -d "{\"name\":\"$model\",\"stream\":false}" >/dev/null
+done
+"${DC[@]}" restart aether-hub litellm >/dev/null
 
 deadline=$((SECONDS + 120))
 pending=""

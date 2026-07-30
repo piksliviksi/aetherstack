@@ -4,7 +4,7 @@ Day-to-day extension use: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md).
 
 ## Runtime and UI boundaries
 
-The Marketplace VSIX is the control client. Release `0.3.12` can install its matching, checksum-verified runtime bundle into VS Code extension storage, or operate an existing AetherStack checkout. Docker still has to be installed and running.
+The Marketplace VSIX is the control client and carries its matching checksum-verified runtime bundle. Release `0.3.12` installs that runtime automatically into VS Code extension storage when **Start all services** is pressed, or it can operate an existing AetherStack checkout. Docker must be installed; AetherStack starts Docker Desktop when it is installed but stopped.
 
 | Surface | Location | Responsibility |
 |---|---|---|
@@ -43,7 +43,7 @@ Optional active-model telemetry merges LiteLLM and host-CLI calls. It records mo
 1. Install and start Docker Desktop or Docker Engine.
 2. Install the extension and reload VS Code.
 3. Open **AetherStack → Control & Services** in the Activity Bar.
-4. Press **Start all services**. Choose **Install Runtime 0.3.12** if prompted, or select an existing checkout.
+4. Press **Start all services**. The bundled Runtime 0.3.12 is installed automatically on first use and the platform bootstrap starts every service.
 5. Wait for explicit `OK` state at ports `3000`, `4000`, and `8766`.
 6. Open Chat from the Secondary Side Bar, an editor tab, or `@aetherstack` in VS Code Chat.
 

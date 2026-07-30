@@ -116,7 +116,7 @@ if (Test-Ollama) {
     $wantText = $env:AETHER_OLLAMA_MODELS
   } else {
     try { $ramGb = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB } catch { $ramGb = 0 }
-    $wantText = if ($ramGb -ge 10) { "llama3.1:8b,nomic-embed-text" } else { "tinyllama,nomic-embed-text" }
+    $wantText = "qwen2.5-coder:1.5b,nomic-embed-text"
   }
   $want = @($wantText -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
   try {

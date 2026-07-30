@@ -49,8 +49,13 @@ try {
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   let nextId = 1;
   const pending = new Map();
+  let trackedMainFrame = null;
+  let mainFrameNavigations = 0;
   socket.onmessage = (event) => {
     const message = JSON.parse(event.data);
+    if (message.method === "Page.frameNavigated" && message.params?.frame?.id === trackedMainFrame) {
+      mainFrameNavigations += 1;
+    }
     if (!message.id || !pending.has(message.id)) return;
     const { resolve, reject } = pending.get(message.id);
     pending.delete(message.id);
@@ -70,6 +75,7 @@ try {
   const navigate = async (url) => { await send("Page.navigate", { url }); await ready(); };
   await send("Runtime.enable");
   await send("Page.enable");
+  trackedMainFrame = (await send("Page.getFrameTree")).frameTree.frame.id;
   await ready();
   await waitFor(() => evaluate("Boolean(document.getElementById('advancedGraph') && state.selected)"));
   assert.equal(await evaluate("document.getElementById('runtime').textContent.includes('Host CLI bridge')"), true, "Host CLI bridge state is hidden");
@@ -145,6 +151,7 @@ try {
     .map(([alias]) => alias);
   assert.ok(expectedWebuiAliases.length, "capability matrix has no available chat aliases for WebUI verification");
   await navigate("http://127.0.0.1:3000/");
+  mainFrameNavigations = 0;
   const webuiModels = await waitFor(() => evaluate(`(async () => {
     const token = localStorage.getItem('token');
     if (!token) return null;
@@ -158,7 +165,22 @@ try {
     `Open WebUI did not load a live AetherStack gateway alias (expected one of: ${expectedWebuiAliases.join(", ")})`,
   );
   assert.equal(webuiModels.includes("tinyllama:latest"), false, "Open WebUI still exposes raw Ollama models");
-  console.log(JSON.stringify({ ok: true, inspector, layout, webuiModels }));
+  await new Promise((resolve) => setTimeout(resolve, 10000));
+  assert.equal(mainFrameNavigations, 0, `Open WebUI reloaded ${mainFrameNavigations} time(s) after initial render`);
+  const webuiStability = await evaluate(`(() => ({
+    readyState: document.readyState,
+    href: location.href,
+    bodyChildren: document.body.children.length,
+    fixedFullViewportLayers: [...document.querySelectorAll('body *')].filter((element) => {
+      const style = getComputedStyle(element); if (style.position !== 'fixed' || style.display === 'none' || style.visibility === 'hidden') return false;
+      const rect = element.getBoundingClientRect(); return rect.width >= innerWidth * .95 && rect.height >= innerHeight * .95;
+    }).length,
+  }))()`);
+  assert.equal(webuiStability.readyState, "complete", "Open WebUI document did not remain complete");
+  assert.equal(webuiStability.href, "http://127.0.0.1:3000/", "Open WebUI redirected away from its stable root route");
+  assert.ok(webuiStability.bodyChildren > 0, "Open WebUI body was unexpectedly replaced with an empty document");
+  assert.ok(webuiStability.fixedFullViewportLayers <= 3, `Open WebUI stacked ${webuiStability.fixedFullViewportLayers} full-viewport layers`);
+  console.log(JSON.stringify({ ok: true, inspector, layout, webuiModels, webuiStability }));
   await send("Browser.close").catch(() => {});
   socket.close();
 } catch (error) {

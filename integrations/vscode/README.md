@@ -19,7 +19,7 @@ Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
 **[How to use the VS Code extension](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
 
-1. Open the AetherStack **Control & Services** icon in the Activity Bar and press **Start all services**. On a Marketplace-only install, choose **Install Runtime 0.3.12**; the extension downloads the matching GitHub Release runtime and verifies its SHA-256 checksum and archive paths before use.
+1. Install Docker Desktop / Docker Engine, open AetherStack **Control & Services**, and press **Start all services**. The extension installs the checksum-verified runtime bundled in the VSIX automatically, starts the platform bootstrap, prefers an existing accelerated host Ollama, and falls back to its container runtime when Ollama is absent.
 2. The extension checks `:3000`, `:4000`, and `:8766`, verifies capability-matrix candidates through LiteLLM provider health, then wires only responding models into a new Continue config.
 3. Open **AetherStack → Chat** from the Secondary Side Bar, open it in an editor, or use `@aetherstack` in VS Code's built-in Chat. Leave routing on **Auto** and ask naturally; intent analysis activates Research, Planning, Design, Build, Test, Bug-fix, Security, Polish, or Writing. Use `/help`, `/presets`, `/research`, `/plan`, `/code`, `/test`, `/bugfix`, or `/preset <name>` when you want explicit control.
 4. In Hub, expand the complete **Advanced active-preset node graph** below the presets to edit the selected capability-resolved tree, or open `/graph` full-page. Use the separate **Advanced setup** button for technical configuration and the local multilingual inference-activity wording database. Open WebUI (`:3000`) only when you want that separate client.
@@ -39,7 +39,7 @@ Open a project folder, scan prior AI chat artifacts, and continue building throu
 | **AetherStack: Stop / Restart All Services** | Controls the local Compose stack from VS Code |
 | **AetherStack: Refresh Service State** | Rechecks every URL and displays a concrete error for failures |
 | **AetherStack: Refresh Authenticated Host CLIs** | Re-probes existing Codex/Claude/Grok logins and refreshes Hub without a restart when possible |
-| **AetherStack: Install Verified Runtime** | Installs the version-matched runtime release under VS Code extension storage |
+| **AetherStack: Install Verified Runtime** | Reinstalls the checksum-verified runtime bundled with this extension version under VS Code extension storage |
 | **AetherStack: Scan Project AI History** | Finds `.continue`, `.claude`, Aider history, `.waylog`, `.aetherstack` |
 | **AetherStack: Show Project Overview** | Opens `.aetherstack/project-overview.md` |
 | **AetherStack: Wire Continue.dev** | Writes `.continue/config.yaml` → LiteLLM (`localhost:4000/v1`) |

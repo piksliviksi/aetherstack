@@ -97,6 +97,40 @@ function Test-Ollama {
   }
 }
 
+function Set-DotEnvValue([string]$Name, [string]$Value) {
+  $path = Join-Path $Root ".env"
+  $lines = if (Test-Path $path) { @(Get-Content -LiteralPath $path) } else { @() }
+  $found = $false
+  $next = foreach ($line in $lines) {
+    if ($line -match "^\s*$([regex]::Escape($Name))\s*=") {
+      if (-not $found) { "$Name=$Value" }
+      $found = $true
+    } else { $line }
+  }
+  if (-not $found) { $next += "$Name=$Value" }
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllLines($path, [string[]]$next, $utf8NoBom)
+}
+
+function Wait-Ollama {
+  $deadline = (Get-Date).AddSeconds(90)
+  do {
+    if (Test-Ollama) { return }
+    Start-Sleep -Seconds 2
+  } while ((Get-Date) -lt $deadline)
+  throw "Ollama did not become ready at $script:HostOllamaUrl"
+}
+
+function Ensure-OllamaModels {
+  $wanted = if ($env:AETHER_OLLAMA_MODELS) { $env:AETHER_OLLAMA_MODELS } else { Get-DotEnvValue "AETHER_OLLAMA_MODELS" }
+  if (-not $wanted) { $wanted = "qwen2.5-coder:1.5b,nomic-embed-text" }
+  foreach ($model in @($wanted -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+    Write-Host "  Ensuring Ollama model: $model" -ForegroundColor DarkCyan
+    $body = @{ name = $model; stream = $false } | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method Post -Uri "$script:HostOllamaUrl/api/pull" -Body $body -ContentType "application/json" -TimeoutSec 900 | Out-Null
+  }
+}
+
 function Publish-SystemScan {
   $path = Join-Path $Root ".aetherstack\system-scan.json"
   if (-not (Test-Path $path)) { return }
@@ -137,12 +171,23 @@ Ensure-Docker
 Invoke-SystemScan
 
 Write-Host "  Starting containers (Open WebUI, LiteLLM, Redis, Hub)..." -ForegroundColor Cyan
-docker compose up -d
+$useContainerOllama = -not (Test-Ollama)
+if ($useContainerOllama) {
+  Write-Host "  Host Ollama is unavailable; starting the bundled CPU fallback." -ForegroundColor Yellow
+  Set-DotEnvValue "OLLAMA_BASE_URL" "http://ollama:11434"
+  $script:HostOllamaUrl = "http://127.0.0.1:11434"
+  docker compose --profile with-ollama-container up -d --build
+} else {
+  docker compose up -d --build
+}
 if ($LASTEXITCODE -ne 0) {
   Write-Host "  ERROR: docker compose failed." -ForegroundColor Red
   exit 1
 }
 
+Wait-Ollama
+Ensure-OllamaModels
+docker compose restart aether-hub litellm | Out-Null
 Wait-CoreServices
 docker compose ps
 

@@ -14,7 +14,8 @@
     body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); line-height: 1.5; }
     main { width: min(980px, 100%); margin: 0 auto; padding: 14px 16px; display: flex; flex-direction: column; min-height: 100vh; }
     header, .composer-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    header { justify-content: space-between; margin-bottom: 10px; }
+    header { position: relative; z-index: 5; justify-content: space-between; margin-bottom: 10px; }
+    .header-actions { position: relative; display: flex; gap: 6px; align-items: center; }
     .brandmark { display: flex; align-items: center; gap: 8px; }
     .ae { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-weight: 700; font-size: 11px; border-radius: 3px; }
     h1 { margin: 0; font-size: 13px; font-weight: 600; }
@@ -80,37 +81,36 @@
     .error { color: var(--vscode-errorForeground); }
     .statusline { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .idle-art { display: none; flex: 1; align-items: center; justify-content: center; }
-    .idle-art pre { margin: 0; color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.1; text-align: center; animation: idle-breathe 4s ease-in-out infinite; }
-    @keyframes idle-breathe { 0%, 100% { opacity: .18; } 50% { opacity: .4; } }
-    body.wide { display: flex; align-items: stretch; }
-    body.wide main { flex: 1 1 auto; max-width: 980px; min-width: 0; margin: 0; }
-    body.wide .history-rail { display: block; width: 220px; flex: none; border-right: 1px solid var(--vscode-panel-border); padding: 14px 10px 14px 16px; overflow-y: auto; }
-    body:not(.wide) .history-rail { display: none; }
-    body:not(.wide) .history-rail.open { display: block; position: fixed; top: 0; left: 0; bottom: 0; width: 260px; background: var(--vscode-editor-background); border-right: 1px solid var(--vscode-panel-border); z-index: 20; padding: 10px; overflow-y: auto; }
-    .history-item { padding: 5px 4px; cursor: pointer; border-radius: 2px; font-size: 12px; }
+    .idle-art { display: none; flex: 1 1 55vh; min-height: 280px; width: 100%; align-items: stretch; justify-content: stretch; overflow: hidden; }
+    .idle-art pre { width: 100%; height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: clamp(5px, .85vw, 10px); line-height: .9; letter-spacing: 0; text-align: center; opacity: .58; user-select: none; }
+    .history-menu { position: absolute; top: calc(100% + 6px); right: 0; width: min(360px, calc(100vw - 32px)); max-height: min(440px, 70vh); overflow-y: auto; padding: 8px; background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); box-shadow: 0 8px 22px rgba(0,0,0,.38); }
+    .history-menu[hidden] { display: none; }
+    .history-menu.busy { opacity: .6; }
+    .history-title { padding: 2px 4px 7px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+    .history-empty { padding: 8px 4px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+    .history-item { display: flex; justify-content: space-between; gap: 8px; padding: 6px 5px; cursor: pointer; border-radius: 2px; font-size: 12px; }
     .history-item:hover { background: var(--vscode-list-hoverBackground); }
-    .history-item .del { float: right; opacity: .5; background: transparent; border: none; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; }
+    .history-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .history-item .del { flex: none; opacity: .5; background: transparent; border: none; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; }
     .history-item .del:hover { opacity: 1; }
     .history-item:focus-visible, .history-item .del:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-    .history-rail.busy { opacity: .6; }
-    #historyToggle { display: none; }
-    body:not(.wide) #historyToggle { display: inline-block; }
+    @media (prefers-reduced-motion: reduce) { .idle-art pre { opacity: .42; } }
   </style>
 </head>
 <body>
-<button id="historyToggle" class="secondary" type="button">☰</button>
-<div class="history-rail" id="historyRail">
-  <div class="composer-actions" style="justify-content:space-between;margin-bottom:8px">
-    <strong class="muted">History</strong>
-    <button id="newConversation" class="secondary" type="button">New</button>
-  </div>
-  <div id="historyList"></div>
-</div>
 <main>
   <header>
     <div class="brandmark"><span class="ae">AE</span><h1>AetherStack</h1></div>
-    <div><button id="refresh" class="secondary">Refresh</button> <button id="advanced" class="secondary">Advanced</button></div>
+    <div class="header-actions">
+      <button id="newConversation" class="secondary" type="button">New</button>
+      <button id="historyMenuButton" class="secondary" type="button" aria-haspopup="true" aria-expanded="false">History</button>
+      <button id="refresh" class="secondary" type="button">Refresh</button>
+      <button id="advanced" class="secondary" type="button">Advanced</button>
+      <div class="history-menu" id="historyMenu" hidden>
+        <div class="history-title">Conversations</div>
+        <div id="historyList"></div>
+      </div>
+    </div>
   </header>
   <section class="toolbar">
     <label>Routing<select id="service"></select></label>
@@ -154,12 +154,8 @@
   let pendingAttachments = [];
   const restored = vscode.getState() || {};
   let activeConversationId = typeof restored.conversationId === 'string' ? restored.conversationId : null;
-  new ResizeObserver((entries) => {
-    const width = entries[0].contentRect.width;
-    document.body.classList.toggle('wide', width >= 560);
-  }).observe(document.body);
   function renderHistory(items) {
-    $('historyList').replaceChildren(...items.map((item) => {
+    const rows = items.map((item) => {
       const row = text('div', '', 'history-item');
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
@@ -177,7 +173,8 @@
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); switchTo(); }
       });
       return row;
-    }));
+    });
+    $('historyList').replaceChildren(...(rows.length ? rows : [text('div', 'No conversations yet.', 'history-empty')]));
   }
   let transcript = Array.isArray(restored.transcript) ? restored.transcript.slice(-40) : [];
   let streamingBox = null;
@@ -291,12 +288,63 @@
     pendingAttachments = prior.attachments || [];
     sendPrompt();
   }
-  function buildIdleArt() {
-    const A = ['01110', '10001', '10001', '11111', '10001', '10001', '10001'];
-    const E = ['11111', '10000', '10000', '11110', '10000', '10000', '11111'];
-    return A.map((row, i) => (row + '0' + E[i]).split('').map((bit) => (bit === '1' ? ',,' : '..')).join('')).join('\n');
+  const idleLogoRows = [
+    '01110011111', '10001010000', '10001010000', '11111011110',
+    '10001010000', '10001010000', '10001011111',
+  ];
+  const idlePoints = [];
+  for (let y = 0; y < idleLogoRows.length; y += 1) {
+    for (let x = 0; x < idleLogoRows[y].length; x += 1) {
+      if (idleLogoRows[y][x] !== '1') continue;
+      for (let sy = 0; sy < 2; sy += 1) for (let sx = 0; sx < 2; sx += 1) {
+        for (let z = -3; z <= 3; z += 1) idlePoints.push({ x: (x + sx / 2 - 5.25), y: (3.25 - y - sy / 2), z: z * .42 });
+      }
+    }
   }
-  $('idleArtPre').textContent = buildIdleArt();
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let idleFrame = 0;
+  let idleLastPaint = 0;
+  function renderIdleLogo(time = 0) {
+    idleFrame = requestAnimationFrame(renderIdleLogo);
+    if ($('idleArt').style.display === 'none' || document.hidden || time - idleLastPaint < 45) return;
+    idleLastPaint = time;
+    const width = Math.max(36, Math.min(132, Math.floor($('idleArt').clientWidth / 6.2)));
+    const height = Math.max(18, Math.min(54, Math.floor($('idleArt').clientHeight / 10)));
+    const cells = Array(width * height).fill(' ');
+    const depths = new Float32Array(width * height); depths.fill(-Infinity);
+    const motion = reducedMotion.matches ? 0.65 : time / 1000;
+    const ay = reducedMotion.matches ? -.55 : motion * .92;
+    const ax = reducedMotion.matches ? .22 : Math.sin(motion * .63) * .48;
+    const az = reducedMotion.matches ? 0 : Math.sin(motion * .37) * .18;
+    const cy = Math.cos(ay), sy = Math.sin(ay), cx = Math.cos(ax), sx = Math.sin(ax), cz = Math.cos(az), sz = Math.sin(az);
+    const scale = Math.min(width / 15, height / 9) * (reducedMotion.matches ? 1.0 : 1 + Math.sin(motion * 1.7) * .08);
+    const shades = '.:-=+*#%@';
+    for (const point of idlePoints) {
+      const x1 = point.x * cy + point.z * sy;
+      const z1 = -point.x * sy + point.z * cy;
+      const y1 = point.y * cx - z1 * sx;
+      const z2 = point.y * sx + z1 * cx;
+      const x2 = x1 * cz - y1 * sz;
+      const y2 = x1 * sz + y1 * cz;
+      const perspective = 10 / (12 - z2);
+      const col = Math.round(width / 2 + x2 * scale * perspective * 1.65);
+      const row = Math.round(height / 2 - y2 * scale * perspective);
+      if (col < 0 || col >= width || row < 0 || row >= height) continue;
+      const index = row * width + col;
+      if (z2 <= depths[index]) continue;
+      depths[index] = z2;
+      const shade = Math.max(0, Math.min(shades.length - 1, Math.round((z2 + 6) / 12 * (shades.length - 1))));
+      cells[index] = shades[shade];
+    }
+    const label = 'A E T H E R S T A C K';
+    const labelStart = Math.max(0, Math.floor((width - label.length) / 2));
+    const labelRow = Math.min(height - 1, Math.floor(height * .88));
+    for (let i = 0; i < label.length && labelStart + i < width; i += 1) cells[labelRow * width + labelStart + i] = label[i];
+    const lines = [];
+    for (let row = 0; row < height; row += 1) lines.push(cells.slice(row * width, (row + 1) * width).join('').replace(/\s+$/, ''));
+    $('idleArtPre').textContent = lines.join('\n');
+  }
+  idleFrame = requestAnimationFrame(renderIdleLogo);
   (function backfillTranscriptIds() {
     // Legacy transcripts saved before id tracking (commit 5574691) have no id field at all.
     // Mint real ids and persist them into the transcript array itself, not just the DOM.
@@ -378,13 +426,18 @@
     $('attachInput').value = '';
     renderAttachmentList();
   });
-  $('historyToggle').addEventListener('click', () => $('historyRail').classList.toggle('open'));
+  function setHistoryOpen(open) {
+    $('historyMenu').hidden = !open;
+    $('historyMenuButton').setAttribute('aria-expanded', String(open));
+    if (open) vscode.postMessage({ type: 'listConversations' });
+  }
+  $('historyMenuButton').addEventListener('click', () => setHistoryOpen($('historyMenu').hidden));
   $('newConversation').addEventListener('click', () => { if (!historyBusy) vscode.postMessage({ type: 'newConversation' }); });
   document.addEventListener('click', (event) => {
-    if ($('historyRail').classList.contains('open') && !$('historyRail').contains(event.target) && event.target !== $('historyToggle')) $('historyRail').classList.remove('open');
+    if (!$('historyMenu').hidden && !$('historyMenu').contains(event.target) && event.target !== $('historyMenuButton')) setHistoryOpen(false);
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && $('historyRail').classList.contains('open')) { event.preventDefault(); $('historyRail').classList.remove('open'); }
+    if (event.key === 'Escape' && !$('historyMenu').hidden) { event.preventDefault(); setHistoryOpen(false); $('historyMenuButton').focus(); }
   });
   vscode.postMessage({ type: 'listConversations' });
   function sendPrompt() {
@@ -419,7 +472,9 @@
     } else if (message.type === 'busy') {
       $('prompt').disabled = Boolean(message.value); $('refresh').disabled = Boolean(message.value);
       historyBusy = Boolean(message.value);
-      $('historyRail').classList.toggle('busy', historyBusy);
+      $('historyMenu').classList.toggle('busy', historyBusy);
+      $('newConversation').disabled = historyBusy;
+      $('historyMenuButton').disabled = historyBusy;
       $('status').textContent = message.value ? 'The agent team is working…' : '';
       setBusy(Boolean(message.value));
     } else if (message.type === 'inference') {
@@ -468,7 +523,7 @@
       }
       saveState();
       vscode.postMessage({ type: 'listConversations' });
-      $('historyRail').classList.remove('open');
+      setHistoryOpen(false);
     } else if (message.type === 'delta') {
       appendStreamingDelta(message.text || '');
     } else if (message.type === 'deltaInterrupted') {

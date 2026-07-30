@@ -245,23 +245,34 @@ async function startCompose(stackRoot) {
     fs.copyFileSync(exampleFile, envFile, fs.constants.COPYFILE_EXCL);
   }
 
+  const windowsScript = path.join(stackRoot, "start.ps1");
+  const unixScript = path.join(stackRoot, "start.sh");
+  const command = process.platform === "win32" && fs.existsSync(windowsScript)
+    ? { file: "powershell.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsScript, "-NoBrowser"], env: process.env }
+    : process.platform !== "win32" && fs.existsSync(unixScript)
+      ? { file: "bash", args: [unixScript], env: { ...process.env, AETHER_NO_BROWSER: "1" } }
+      : null;
   try {
-    await execFileResult("docker", ["info"], { cwd: stackRoot, timeout: 15_000 });
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      throw new Error("Docker was not found. Install Docker Desktop (or Docker Engine) and retry.");
+    if (command) {
+      return await execFileResult(command.file, command.args, {
+        cwd: stackRoot,
+        env: command.env,
+        // A first start may need to pull the compact chat and embedding models
+        // over a slow connection. The progress UI remains visible throughout.
+        timeout: 35 * 60_000,
+      });
     }
-    throw new Error("Docker is installed but its daemon is not ready. Start Docker Desktop or dockerd and retry.");
-  }
-
-  try {
+    await execFileResult("docker", ["info"], { cwd: stackRoot, timeout: 15_000 });
     return await execFileResult("docker", ["compose", "up", "-d", "--build"], {
       cwd: stackRoot,
       timeout: 5 * 60_000,
     });
   } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(`${command ? command.file : "Docker"} was not found. Install Docker Desktop (or Docker Engine) and retry.`);
+    }
     const detail = conciseError(error.result && (error.result.stderr || error.result.stdout));
-    throw new Error(`docker compose up failed${detail ? `: ${detail}` : ""}`);
+    throw new Error(`AetherStack startup failed${detail ? `: ${detail}` : ": Docker is not ready"}`);
   }
 }
 

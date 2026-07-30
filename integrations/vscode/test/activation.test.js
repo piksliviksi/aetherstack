@@ -14,6 +14,23 @@ test("chat exposes auto service selection, active graph, and model activity stat
   assert.match(html, /Ask anything, or use \/research/);
   assert.match(html, /message.type === 'route'/);
   assert.match(html, /vscode\.getState/);
+  assert.doesNotMatch(html, /history-rail|historyToggle|historyRail/);
+  assert.match(html, /class="header-actions"[\s\S]*id="newConversation"[\s\S]*id="historyMenuButton"[\s\S]*id="refresh"[\s\S]*id="advanced"/);
+  assert.match(html, /id="historyMenu" hidden/);
+  assert.match(html, /function renderIdleLogo/);
+  assert.match(html, /requestAnimationFrame\(renderIdleLogo\)/);
+  assert.match(html, /prefers-reduced-motion/);
+});
+
+test("one-button startup delegates to the platform bootstrap scripts", () => {
+  const control = fs.readFileSync(path.resolve(__dirname, "..", "stack-control.js"), "utf8");
+  assert.match(control, /start\.ps1/);
+  assert.match(control, /start\.sh/);
+  assert.match(control, /AETHER_NO_BROWSER/);
+  assert.match(control, /powershell\.exe/);
+  const extension = fs.readFileSync(path.resolve(__dirname, "..", "extension.js"), "utf8");
+  assert.match(extension, /if \(!root && prompt\) root = await installManagedRuntime\(context\)/);
+  assert.match(extension, /bundled-runtime/);
 });
 
 test("extension activates and registers lifecycle/control commands", async () => {

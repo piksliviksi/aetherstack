@@ -24,9 +24,9 @@ categories:
     description: Pull Ollama models if Ollama is reachable and model missing
     safe: true
     # Choose a usable chat model from host RAM, plus embeddings.
-    essential: []
-    fallback:
-      - tinyllama
+    essential:
+      - qwen2.5-coder:1.5b
+    fallback: []
     optional:
       - nomic-embed-text
     # Only if host reports enough free RAM (GB) via host_scan

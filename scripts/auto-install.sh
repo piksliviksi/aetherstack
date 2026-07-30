@@ -13,7 +13,7 @@ if [[ -n "${AETHER_OLLAMA_MODELS:-}" ]]; then
   OLLAMA_MODELS="$AETHER_OLLAMA_MODELS"
 else
   ram_gb="$(python3 -c 'import os; print(int(os.sysconf("SC_PAGE_SIZE")*os.sysconf("SC_PHYS_PAGES")/(1024**3)))' 2>/dev/null || echo 0)"
-  if (( ram_gb >= 10 )); then OLLAMA_MODELS="llama3.1:8b,nomic-embed-text"; else OLLAMA_MODELS="tinyllama,nomic-embed-text"; fi
+  OLLAMA_MODELS="qwen2.5-coder:1.5b,nomic-embed-text"
 fi
 YES=0
 ENABLE=0

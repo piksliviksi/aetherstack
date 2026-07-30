@@ -11,6 +11,7 @@ const expectedVersion = readFileSync(join(repoRoot, "VERSION"), "utf8").trim();
 const expectedLicense = "PolyForm-Noncommercial-1.0.0";
 const requiredNotice = "Required Notice: Copyright (c) 2026 piksliviksi. AetherStack was originally authored by piksliviksi.";
 const artifact = resolve(process.argv[2] ?? join(repoRoot, "dist", `aetherstack-${expectedVersion}.vsix`));
+const runtimeName = `aetherstack-runtime-${expectedVersion}.tar.gz`;
 
 function abort(message) {
   throw new Error(`VSIX verification failed: ${message}`);
@@ -114,6 +115,8 @@ const required = [
   "extension/readme.md",
   "extension/changelog.md",
   "extension/LICENSE.txt",
+  `extension/bundled-runtime/${runtimeName}`,
+  `extension/bundled-runtime/${runtimeName}.sha256`,
 ];
 for (const name of required) extract(name);
 
@@ -136,6 +139,12 @@ for (const relativePath of sourceParityFiles) {
   const source = readFileSync(join(repoRoot, "integrations", "vscode", relativePath));
   if (!source.equals(extract(`extension/${relativePath}`))) {
     abort(`packaged runtime file differs from the current source: ${relativePath}`);
+  }
+}
+for (const relativePath of [runtimeName, `${runtimeName}.sha256`]) {
+  const source = readFileSync(join(repoRoot, "dist", relativePath));
+  if (!source.equals(extract(`extension/bundled-runtime/${relativePath}`))) {
+    abort(`bundled runtime differs from the release artifact: ${relativePath}`);
   }
 }
 
@@ -210,4 +219,4 @@ for (const name of entries.keys()) {
 
 console.log(`VSIX artifact OK: ${basename(artifact)}`);
 console.log(`identity: AetherStack.aetherstack ${expectedVersion}`);
-console.log(`contents: ${entries.size} entries; runtime bytes and license match source; private/test files absent`);
+console.log(`contents: ${entries.size} entries; bundled runtime, extension bytes, and license match source; private/test files absent`);
