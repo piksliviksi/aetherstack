@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createCliBridge, discoverCliModels, promptFromMessages, safeCliEnvironment } = require("../cli-bridge");
+const { createCliBridge, discoverCliModels, promptFromMessages, splitMessages, safeCliEnvironment } = require("../cli-bridge");
 
 const resolver = async (command) => `C:\\tools\\${command}.exe`;
 const runner = async (_command, args) => {
@@ -24,7 +24,7 @@ test("bridge requires its bearer token and exposes OpenAI-compatible completions
     port: 0,
     resolver,
     runner,
-    executor: async (model, prompt) => `${model.alias}: ${prompt.includes("USER:\nhello") ? "ok" : "bad"}`,
+    executor: async (model, prompt) => `${model.alias}: ${prompt === "hello" ? "ok" : "bad"}`,
   });
   const state = await bridge.start();
   try {
@@ -98,10 +98,11 @@ test("a second VS Code window reads the authenticated bridge it reuses", async (
   }
 });
 
-test("prompt conversion preserves roles and enforces its bound", () => {
+test("prompt conversion drops system turns and enforces its bound", () => {
   const prompt = promptFromMessages([{ role: "system", content: "rules" }, { role: "user", content: "x".repeat(120_000) }]);
   assert.ok(prompt.length <= 100_000);
-  assert.match(prompt, /USER:/);
+  assert.doesNotMatch(prompt, /SYSTEM:/);
+  assert.doesNotMatch(prompt, /rules/);
 });
 
 test("bridge rejects non-JSON and oversized bodies without executing a CLI", async () => {
@@ -149,4 +150,95 @@ test("CLI children do not inherit bridge tokens or provider API keys", () => {
     if (oldBridge === undefined) delete process.env.AETHER_CLI_BRIDGE_TOKEN; else process.env.AETHER_CLI_BRIDGE_TOKEN = oldBridge;
     if (oldOpenAi === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldOpenAi;
   }
+});
+
+test("system turns never reach the model as SYSTEM: prompt text", () => {
+  const messages = [
+    { role: "system", content: "You are AetherStack Auto. Do not mention orchestration." },
+    { role: "user", content: "fix the bug" },
+  ];
+  const { system, conversation } = splitMessages(messages);
+  assert.equal(system, "You are AetherStack Auto. Do not mention orchestration.");
+  assert.equal(conversation.length, 1);
+  const prompt = promptFromMessages(conversation);
+  assert.doesNotMatch(prompt, /SYSTEM:/);
+  assert.doesNotMatch(prompt, /orchestration/);
+  // a lone user turn is passed through verbatim
+  assert.equal(prompt, "fix the bug");
+});
+
+test("multi-turn conversations keep role headers but still exclude system", () => {
+  const { system, conversation } = splitMessages([
+    { role: "system", content: "secret instructions" },
+    { role: "user", content: "first" },
+    { role: "assistant", content: "reply" },
+    { role: "user", content: "second" },
+  ]);
+  assert.equal(system, "secret instructions");
+  const prompt = promptFromMessages(conversation);
+  assert.doesNotMatch(prompt, /SYSTEM:/);
+  assert.doesNotMatch(prompt, /secret instructions/);
+  assert.match(prompt, /USER:\nfirst/);
+  assert.match(prompt, /ASSISTANT:\nreply/);
+});
+
+test("bridge hands the system prompt to the executor out of band", async () => {
+  let seen = null;
+  const bridge = createCliBridge({
+    token: "sys-token",
+    port: 0,
+    resolver,
+    runner,
+    executor: async (_model, prompt, options) => { seen = { prompt, system: options.system }; return "done"; },
+  });
+  const state = await bridge.start();
+  try {
+    await fetch(`http://127.0.0.1:${state.port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: "Bearer sys-token", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-cli",
+        messages: [
+          { role: "system", content: "answer directly" },
+          { role: "user", content: "hi" },
+        ],
+      }),
+    }).then((response) => response.json());
+    assert.equal(seen.prompt, "hi");
+    assert.equal(seen.system, "answer directly");
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("each host CLI declares how it accepts a system prompt", async () => {
+  const models = await discoverCliModels({ resolver, runner });
+  assert.equal(models["claude-cli"].systemPromptFlag, "--append-system-prompt");
+  assert.equal(models["claude-cli"].systemPromptPrefix, "");
+  assert.equal(models["grok-cli"].systemPromptFlag, "--rules");
+  // codex has no flag; it takes a config override: -c developer_instructions=<text>
+  assert.equal(models["codex-cli"].systemPromptFlag, "-c");
+  assert.equal(models["codex-cli"].systemPromptPrefix, "developer_instructions=");
+});
+
+test("system prompt argv is built per CLI, flag or config-override", () => {
+  const build = (model, system) => {
+    const flag = model.systemPromptFlag;
+    if (!flag || !system) return [];
+    return [flag, `${model.systemPromptPrefix || ""}${system}`];
+  };
+  assert.deepEqual(
+    build({ systemPromptFlag: "--append-system-prompt" }, "be terse"),
+    ["--append-system-prompt", "be terse"]
+  );
+  assert.deepEqual(
+    build({ systemPromptFlag: "-c", systemPromptPrefix: "developer_instructions=" }, "be terse"),
+    ["-c", "developer_instructions=be terse"]
+  );
+  assert.deepEqual(build({ systemPromptFlag: "--rules" }, ""), []);
+});
+
+test("system prompts are capped so argv stays under the OS limit", () => {
+  const { system } = splitMessages([{ role: "system", content: "x".repeat(50_000) }]);
+  assert.ok(system.length <= 8_000, `system was ${system.length} chars`);
 });

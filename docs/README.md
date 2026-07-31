@@ -9,7 +9,7 @@ This tree holds procedures, APIs, and platform facts.
 
 | Doc | Contents |
 |-----|----------|
-| [OPERATING-MODEL.md](./OPERATING-MODEL.md) | Configure once, façade, daily loop, constraints |
+| **[OPERATING-MODEL.md](./OPERATING-MODEL.md)** | **How AetherStack works: pass-through Auto mode, the shared memory pool, the two tiers, first run. Read this first.** |
 | [QUICKSTART.md](./QUICKSTART.md) | Prerequisites, start/stop, ports, IDE |
 | [TUTORIAL-WINDOWS.md](./TUTORIAL-WINDOWS.md) | Windows 11 |
 | [TUTORIAL-MACOS.md](./TUTORIAL-MACOS.md) | macOS + Metal |
@@ -27,6 +27,7 @@ This tree holds procedures, APIs, and platform facts.
 | [GATEWAY.md](./GATEWAY.md) | LiteLLM aliases, keys, 401 |
 | [MULTI-KEYS.md](./MULTI-KEYS.md) | Personal + enterprise keys per provider |
 | [BACKUP.md](./BACKUP.md) | Project/global backup to local PC, AWS, Azure |
+| [ONE-CLICK-EVIDENCE.md](./ONE-CLICK-EVIDENCE.md) | What a release must prove before it is called one-click verified |
 
 ---
 
@@ -79,10 +80,10 @@ Code: [aether-amd/](../aether-amd/), `scripts/scan-system.ps1`, `scripts/auto-in
 
 ## Reading order
 
-1. Root README  
-2. OPERATING-MODEL  
+1. Root README — what the product is  
+2. **OPERATING-MODEL — how it works: pass-through, memory pool, two tiers**  
 3. QUICKSTART + platform tutorial  
 4. VSCODE-EXTENSION (IDE operators)  
-5. Combos / pipelines / node graph  
-6. Memory + slash  
+5. AGENT-MEMORY + SLASH-COMMANDS — Tier 1 continuity  
+6. NODE-GRAPH / PIPELINES / combos — Tier 2 trees  
 7. GPU doc for installed hardware  

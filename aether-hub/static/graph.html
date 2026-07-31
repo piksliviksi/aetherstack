@@ -78,7 +78,7 @@
     }
     .port.in { left: -7px; top: 50%; transform: translateY(-50%); }
     .port.out { right: -7px; top: 50%; transform: translateY(-50%); }
-    .port.hot { background: var(--accent); box-shadow: 0 0 0 3px rgba(214,179,106,.25); }
+    .port.hot { background: var(--accent); outline: 3px solid rgba(214,179,106,.25); }
     .port.multi::after {
       content: attr(data-count); position: absolute; top: -10px; left: 10px;
       font-size: 9px; color: var(--accent); font-weight: 700; pointer-events: none;
@@ -87,32 +87,7 @@
     #toolbar button.active-toggle { color:#17140d; background: var(--accent); border-color: var(--accent); font-weight:700; }
     #toolbar label.chk { display:flex; align-items:center; gap:.3rem; color:var(--muted); font-size:12px; cursor:pointer; user-select:none; }
     #toolbar label.chk input { accent-color: var(--accent); }
-    /* Light process progress: r================> style */
-    .node .prog {
-      margin-top: .35rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 10px; letter-spacing: .02em; color: #6e716e; line-height: 1.2;
-      white-space: nowrap; overflow: hidden;
-    }
-    .node .prog.running { color: #b7b5a8; }
-    .node .prog.done { color: #7d9b82; }
-    .node .prog.error { color: #c4875a; }
-    .node .prog .p-fill { color: var(--accent); }
-    .node .prog .p-tip { color: var(--text); opacity: .85; }
     .node .hd-right { display:flex; align-items:center; gap:.35rem; }
-    .activity-dot {
-      width: 7px; height: 7px; border-radius: 50%; background: #3a3d3f;
-      display: inline-block; flex: 0 0 auto; opacity: .4;
-      box-shadow: inset 0 0 0 1px #2a2c2e;
-    }
-    .activity-dot.on {
-      background: #9a9b97; opacity: 1;
-      animation: activity-blink .85s ease-in-out infinite;
-      box-shadow: 0 0 6px rgba(170,169,163,.45);
-    }
-    @keyframes activity-blink {
-      0%, 100% { opacity: .22; transform: scale(.92); }
-      50% { opacity: 1; transform: scale(1.08); }
-    }
     .node.pass-through { min-width: 140px; }
     .node.private-node { border-left-color: #7c6f9e; }
     #inspector {
@@ -151,7 +126,6 @@
     <button type="button" id="btnFromPipe">From pipeline…</button>
     <button type="button" id="btnSave">Save</button>
     <button type="button" id="btnPlan">Plan models</button>
-    <button type="button" id="btnActivity" title="Demo progress bars and pass-through activity blinks">Demo activity</button>
     <button type="button" id="btnCenter">Center tree</button>
     <button type="button" id="btnToPipe">Export pipeline JSON</button>
     <label class="chk" title="Allow cycles, feedback edges, and wiring Output back into earlier nodes">
@@ -189,8 +163,8 @@ const TYPES = {
     description: "Local GPU-only private inference. Reads a folder of PDFs/text; vault isolation; never cloud.",
     passThrough: false,
   },
-  memory: { label: "Memory", color: "#978292", description: "Three-tier context pool: tree / project / global. Pass-through — activity blink when busy.", passThrough: true },
-  slash: { label: "Command", color: "#858784", description: "Slash hygiene commands. Pass-through — activity blink when busy.", passThrough: true },
+  memory: { label: "Memory", color: "#978292", description: "Three-tier context pool: tree / project / global. Pass-through context node.", passThrough: true },
+  slash: { label: "Command", color: "#858784", description: "Slash hygiene commands. Pass-through utility node.", passThrough: true },
   output: { label: "Output", color: "#686b69", description: "Collects results (many inputs). Pass-through sink; recursive mode can feedback earlier.", passThrough: true },
 };
 
@@ -213,11 +187,6 @@ const AGENT_NODE_TYPES = new Set(["master", "analyser", "worker", "tester"]);
 const PASS_THROUGH_TYPES = new Set(
   Object.keys(TYPES).filter(t => TYPES[t].passThrough)
 );
-const COMPUTE_TYPES = new Set(
-  Object.keys(TYPES).filter(t => !TYPES[t].passThrough)
-);
-/** Live process state per node id: { progress:0..1, status, active, label } */
-const nodeRuntime = Object.create(null);
 const DRAFT_DATA_KEYS = new Set([
   "label", "text", "role", "agent_ref", "model", "provider", "backend", "tier", "strategy",
   "needs", "available", "service_id", "maker", "max_cost", "parallel", "gate", "ack",
@@ -298,113 +267,6 @@ function defaultData(t) {
     output: { label: "Output" },
   };
   return JSON.parse(JSON.stringify(map[t] || {}));
-}
-
-/** r================> light progress glyph (width cells). */
-function formatProgressBar(progress, width = 16) {
-  const W = Math.max(8, Math.min(24, width | 0));
-  const p = Math.max(0, Math.min(1, Number(progress) || 0));
-  const n = Math.round(p * W);
-  return {
-    text: "r" + "=".repeat(n) + "-".repeat(W - n) + ">",
-    filled: n,
-    width: W,
-    pct: Math.round(p * 100),
-  };
-}
-
-function getRuntime(nodeId) {
-  return nodeRuntime[nodeId] || { progress: 0, status: "idle", active: false, label: "" };
-}
-
-function setNodeRuntime(nodeId, patch = {}) {
-  const cur = getRuntime(nodeId);
-  nodeRuntime[nodeId] = {
-    progress: patch.progress !== undefined ? patch.progress : cur.progress,
-    status: patch.status || cur.status || "idle",
-    active: patch.active !== undefined ? !!patch.active : cur.active,
-    label: patch.label !== undefined ? patch.label : cur.label,
-  };
-  paintNodeRuntime(nodeId);
-}
-
-function setManyRuntimes(map = {}) {
-  Object.entries(map).forEach(([id, patch]) => {
-    const cur = getRuntime(id);
-    nodeRuntime[id] = {
-      progress: patch.progress !== undefined ? patch.progress : cur.progress,
-      status: patch.status || cur.status || "idle",
-      active: patch.active !== undefined ? !!patch.active : cur.active,
-      label: patch.label !== undefined ? patch.label : cur.label,
-    };
-  });
-  // Prefer cheap paint over full re-render
-  Object.keys(map).forEach(paintNodeRuntime);
-}
-
-function paintNodeRuntime(nodeId) {
-  const el = document.querySelector(`.node[data-id="${String(nodeId).replace(/"/g, '\\"')}"]`);
-  if (!el) return;
-  const rt = getRuntime(nodeId);
-  const n = graph.nodes.find(x => x.id === nodeId);
-  if (!n) return;
-  const isPass = PASS_THROUGH_TYPES.has(n.type);
-  const dot = el.querySelector(".activity-dot");
-  if (dot) {
-    dot.classList.toggle("on", !!rt.active || rt.status === "running");
-    dot.title = rt.active || rt.status === "running" ? "Activity" : "Idle";
-  }
-  const prog = el.querySelector(".prog");
-  if (prog && !isPass) {
-    const bar = formatProgressBar(rt.progress);
-    const fill = "=".repeat(bar.filled);
-    const rest = "-".repeat(bar.width - bar.filled);
-    prog.className = "prog " + (rt.status || "idle");
-    prog.innerHTML = `<span class="p-tip">r</span><span class="p-fill">${fill}</span>${rest}<span class="p-tip">&gt;</span>`
-      + (rt.label ? ` <span style="opacity:.7">${esc(rt.label)}</span>` : ` <span style="opacity:.55">${bar.pct}%</span>`);
-    prog.title = `${bar.pct}% · ${rt.status || "idle"}`;
-  }
-}
-
-/** Demo / host hook: walk topo-ish order and pulse progress + pass-through blinks. */
-function simulateGraphActivity() {
-  const order = [...graph.nodes].sort((a, b) => (a.x - b.x) || (a.y - b.y));
-  if (!order.length) { toast("No nodes to run"); return; }
-  let i = 0;
-  // reset
-  order.forEach(n => setNodeRuntime(n.id, { progress: 0, status: "idle", active: false, label: "" }));
-  const step = () => {
-    if (i >= order.length) {
-      toast("Activity demo finished");
-      return;
-    }
-    const n = order[i];
-    const isPass = PASS_THROUGH_TYPES.has(n.type);
-    if (isPass) {
-      setNodeRuntime(n.id, { active: true, status: "running", progress: 0, label: "pass" });
-      setTimeout(() => {
-        setNodeRuntime(n.id, { active: false, status: "done", progress: 1, label: "" });
-        i += 1;
-        step();
-      }, 480);
-      return;
-    }
-    let p = 0;
-    setNodeRuntime(n.id, { status: "running", active: true, progress: 0, label: "work" });
-    const tick = setInterval(() => {
-      p += 0.12 + Math.random() * 0.1;
-      if (p >= 1) {
-        clearInterval(tick);
-        setNodeRuntime(n.id, { progress: 1, status: "done", active: false, label: "ok" });
-        i += 1;
-        setTimeout(step, 120);
-      } else {
-        setNodeRuntime(n.id, { progress: p, status: "running", active: true });
-      }
-    }, 90);
-  };
-  toast("Simulating node progress…");
-  step();
 }
 
 function addNode(type, x, y) {
@@ -624,11 +486,7 @@ function select(id) {
     html += `<div class="runtime"><strong>Private local GPU</strong><br/>Infers only on local models (Ollama/GPU). Corpus from folder of PDF / text files. Vault isolation on.</div>`;
   }
   if (PASS_THROUGH_TYPES.has(n.type)) {
-    html += `<div class="node-help">Pass-through node — gray activity dot blinks while traffic moves through; no process progress bar.</div>`;
-  } else if (COMPUTE_TYPES.has(n.type)) {
-    const rt = getRuntime(n.id);
-    const bar = formatProgressBar(rt.progress);
-    html += `<div class="runtime"><strong>Process progress</strong><br/><span style="font-family:ui-monospace,monospace">${esc(bar.text)}</span> · ${bar.pct}% · ${esc(rt.status || "idle")}</div>`;
+    html += `<div class="node-help">Pass-through node — carries context or side effects through the tree without agent inference.</div>`;
   }
   const fields = INSPECTOR_FIELDS[n.type] || ["label"];
   fields.forEach(k => {
@@ -963,25 +821,16 @@ function render() {
     const showIn = nodeHasInPort(n);
     const showOut = nodeHasOutPort(n);
     const isPass = PASS_THROUGH_TYPES.has(n.type);
-    const rt = getRuntime(n.id);
-    const bar = formatProgressBar(rt.progress);
-    const fill = "=".repeat(bar.filled);
-    const rest = "-".repeat(bar.width - bar.filled);
-    const progHtml = isPass ? "" : `<div class="prog ${esc(rt.status || "idle")}" title="${bar.pct}%"><span class="p-tip">r</span><span class="p-fill">${fill}</span>${rest}<span class="p-tip">&gt;</span> <span style="opacity:.55">${bar.pct}%</span></div>`;
-    const dotHtml = isPass
-      ? `<span class="activity-dot${rt.active || rt.status === "running" ? " on" : ""}" title="${rt.active ? "Activity" : "Idle"}"></span>`
-      : "";
     if (isPass) el.classList.add("pass-through");
     if (n.type === "private") el.classList.add("private-node");
     el.innerHTML = `
       <div class="hd" style="background:#17191b;border-bottom:1px solid var(--border)">
         <span>${esc(d.label || TYPES[n.type]?.label || n.type)}</span>
         <span class="hd-right">
-          ${dotHtml}
           <span style="opacity:.6;font-weight:400;font-size:10px">${esc(n.type)}</span>
         </span>
       </div>
-      <div class="bd">${esc(sub || "—")}${inCount || outCount ? `<div style="margin-top:.25rem;font-size:10px;opacity:.75">in ${inCount} · out ${outCount}</div>` : ""}${progHtml}</div>
+      <div class="bd">${esc(sub || "—")}${inCount || outCount ? `<div style="margin-top:.25rem;font-size:10px;opacity:.75">in ${inCount} · out ${outCount}</div>` : ""}</div>
       ${showIn ? `<div class="port in${inCount > 1 ? " multi" : ""}" data-port="in" data-count="${inCount > 1 ? inCount : ""}"></div>` : ""}
       ${showOut ? `<div class="port out${outCount > 1 ? " multi" : ""}" data-port="out" data-count="${outCount > 1 ? outCount : ""}"></div>` : ""}
     `;
@@ -1231,17 +1080,6 @@ document.getElementById("btnPlan").onclick = async () => {
   }).then(r => r.json());
   document.getElementById("planOut").textContent = (j.flow || "") + "\n" + JSON.stringify(j.stages_resolved || j, null, 2).slice(0, 2500);
   toast("Models resolved for nodes");
-};
-
-document.getElementById("btnActivity").onclick = () => simulateGraphActivity();
-
-// Host / extension hook for live run status
-window.aetherGraphRuntime = {
-  set: setNodeRuntime,
-  setMany: setManyRuntimes,
-  get: getRuntime,
-  simulate: simulateGraphActivity,
-  progressBar: formatProgressBar,
 };
 
 document.getElementById("btnToPipe").onclick = async () => {

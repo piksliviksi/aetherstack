@@ -27,22 +27,6 @@ Visual node graph for agent/pipeline scripting. Place **Master / Worker / Analys
 | `slash` | Hygiene | `/done`, `/clear`, `/compact` |
 | `output` | Sink | — |
 
-### Progress and activity chrome
-
-| Node kind | Chrome |
-|-----------|--------|
-| **Compute** (goal, master, worker, analyser, tester, private) | Light progress bar: `r========-------->` (fills with `=` as work advances) |
-| **Pass-through** (memory, slash, output) | Small **gray activity dot** in the header — **blinks** while traffic moves through; no progress bar |
-
-Runtime updates (live runs or **Demo activity** toolbar button):
-
-```js
-// From the canvas page or host extension
-window.aetherGraphRuntime.set(nodeId, { progress: 0.4, status: "running", active: true })
-window.aetherGraphRuntime.set(nodeId, { active: true })  // pass-through blink
-window.aetherGraphRuntime.setMany({ n1: { progress: 1, status: "done" } })
-```
-
 ### Private node (local GPU + folder corpus)
 
 Drop **Private** from the palette into the decision tree.
@@ -181,6 +165,24 @@ When master and analyser both use cloud, assign different makers when both are a
 | POST | `/api/graphs/to-pipeline` | Graph → pipeline script |
 | POST | `/api/graphs/from-pipeline` | Pipeline → graph |
 | POST | `/api/graphs/{id}/plan` | Resolve models for nodes |
+| POST | `/api/graphs/run` | **Execute the tree** — stages in order, Memory nodes read/write the shared pool |
+
+### Running a tree
+
+```bash
+curl -s -X POST http://127.0.0.1:8766/api/graphs/run \
+  -H "Content-Type: application/json" \
+  -d '{"graph_id":"my-tree","goal":"refactor the auth module","session_id":"sess-1"}'
+```
+
+Pass `graph` with a full graph body instead of `graph_id` to run an unsaved
+canvas. Each stage's output is threaded into its downstream stages. A stage that
+fails is recorded in `steps` with its error and the run continues, so one
+rate-limited model does not cost the whole tree.
+
+Because the run appends to `session_id` in the shared pool, Auto mode on that
+same session resumes from where the tree stopped — and a tree can pick up work an
+Auto session started.
 
 ---
 

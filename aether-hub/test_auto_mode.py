@@ -154,3 +154,54 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_user_priority_order_drives_the_chain(tmp_path, monkeypatch) -> None:
+    """The user's saved order wins over the built-in default."""
+    import importlib
+
+    import services
+
+    state = tmp_path / "auto_chain.json"
+    monkeypatch.setattr(services, "AUTO_CHAIN_FILE", state)
+
+    # Default until the user saves anything.
+    assert services.get_auto_order() == list(services.HOST_CLI_AUTO_ORDER)
+
+    # "codex first, then claude, then local" — codex is unavailable in the
+    # snapshot, so it is skipped without disturbing the rest of the order.
+    services.set_auto_order(["codex-cli", "claude-cli", "local-default"])
+    assert services.get_auto_order() == ["codex-cli", "claude-cli", "local-default"]
+    models = [c["model"] for c in services.list_auto_failover_chain(_snap())]
+    assert models[0] == "claude-cli", models
+    assert models.index("claude-cli") < models.index("local-default"), models
+    assert "codex-cli" not in models  # unavailable, correctly dropped
+
+    # Duplicates collapse; blanks are ignored.
+    assert services.set_auto_order(["claude-cli", "", "claude-cli"]) == ["claude-cli"]
+
+    # Empty list restores the default.
+    assert services.set_auto_order([]) == list(services.HOST_CLI_AUTO_ORDER)
+    assert services.get_auto_order() == list(services.HOST_CLI_AUTO_ORDER)
+
+
+def test_priority_order_is_reported_for_the_ui(tmp_path, monkeypatch) -> None:
+    import services
+
+    monkeypatch.setattr(services, "AUTO_CHAIN_FILE", tmp_path / "auto_chain.json")
+    services.set_auto_order(["claude-cli", "grok-cli"])
+    desc = services.describe_auto_mode(_snap())
+    assert desc["priority_order"] == ["claude-cli", "grok-cli"]
+    assert desc["priority_default"] == list(services.HOST_CLI_AUTO_ORDER)
+
+
+def test_bad_priority_order_is_rejected(tmp_path, monkeypatch) -> None:
+    import services
+
+    monkeypatch.setattr(services, "AUTO_CHAIN_FILE", tmp_path / "auto_chain.json")
+    for bad in ("not-a-list", 42, {"a": 1}):
+        try:
+            services.set_auto_order(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {bad!r}")

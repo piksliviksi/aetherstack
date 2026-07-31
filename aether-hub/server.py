@@ -49,7 +49,11 @@ from services import (  # noqa: E402
     execute_service,
     list_services,
     plan_service,
+    set_auto_order,
 )
+from first_run import reset as first_run_reset  # noqa: E402
+from first_run import run as first_run_run  # noqa: E402
+from first_run import status as first_run_status  # noqa: E402
 from activity_words import add_word, delete_word, list_words  # noqa: E402
 from update import stage_update, update_status  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
@@ -74,6 +78,7 @@ from graph import (  # noqa: E402
     plan_graph,
     save_graph,
 )
+from graph_exec import execute_graph  # noqa: E402
 from pipelines import (  # noqa: E402
     export_pipeline,
     get_pipeline,
@@ -551,6 +556,23 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/modes", "/api/agent-modes"):
             self._send(200, modes_status(get_snapshot()))
             return
+        if path == "/api/auto/chain":
+            self._send(200, describe_auto_mode(get_snapshot()))
+            return
+        if path == "/api/first-run":
+            if (qs.get("refresh") or ["0"])[0] in ("1", "true", "yes"):
+                run_discover()
+            desc = describe_auto_mode(get_snapshot())
+            self._send(
+                200,
+                first_run_status(
+                    get_discover(),
+                    get_snapshot(),
+                    auto_order=desc.get("priority_order"),
+                    saved_order=desc.get("priority_order") != desc.get("priority_default"),
+                ),
+            )
+            return
         if path in ("/api/bootstrap", "/api/auto-install"):
             if (qs.get("refresh") or ["0"])[0] in ("1", "true", "yes"):
                 run_discover()
@@ -921,6 +943,29 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, {"error": str(e)})
             return
+        if path == "/api/graphs/run":
+            graph_body = body.get("graph")
+            if not graph_body and body.get("graph_id"):
+                graph_body = load_graph(str(body["graph_id"]))
+            if not graph_body:
+                self._send(404, {"error": "graph or graph_id is required"})
+                return
+            try:
+                self._send(
+                    200,
+                    execute_graph(
+                        graph_body,
+                        get_snapshot(),
+                        body or {},
+                        memory=_memory,
+                        session_id=body.get("session_id") or body.get("session"),
+                    ),
+                )
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(502, {"error": f"graph execution failed: {str(e)[:500]}"})
+            return
         if path.startswith("/api/pipelines/") and path.endswith("/vote"):
             pid = path[len("/api/pipelines/") : -len("/vote")].strip("/")
             try:
@@ -969,6 +1014,33 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 self._send(500, {"error": str(e)})
+            return
+        if path == "/api/auto/chain":
+            try:
+                set_auto_order((body or {}).get("order") or [])
+                self._send(200, describe_auto_mode(get_snapshot()))
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path == "/api/first-run":
+            try:
+                if (body or {}).get("reset"):
+                    first_run_reset()
+                run_discover()
+                desc = describe_auto_mode(get_snapshot())
+                self._send(
+                    200,
+                    first_run_run(
+                        get_discover(),
+                        get_snapshot(),
+                        confirm=bool((body or {}).get("confirm")),
+                        only_safe=(body or {}).get("only_safe", True) is not False,
+                        auto_order=desc.get("priority_order"),
+                        saved_order=desc.get("priority_order") != desc.get("priority_default"),
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": f"first-run setup failed: {str(e)[:400]}"})
             return
         if path in ("/api/modes", "/api/agent-modes"):
             try:

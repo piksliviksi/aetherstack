@@ -32,7 +32,7 @@ VERIFY_TTL_SECONDS = 5 * 60
 _verify_cache: dict[str, tuple[float, bool]] = {}
 # Auto mode: sticky preferred model per session (host CLI → next CLI → local GPU)
 _auto_session_model: dict[str, str] = {}
-# Prefer host CLIs in the same order users meet them in native chat apps, then Ollama GPU.
+# Default host-CLI order, used until the user saves their own priority.
 HOST_CLI_AUTO_ORDER = ("grok-cli", "claude-cli", "codex-cli")
 LOCAL_CODING_AUTO_ORDER = (
     "local-default",
@@ -40,6 +40,41 @@ LOCAL_CODING_AUTO_ORDER = (
     "local-llama31-8b",
     "local-tiny",
 )
+AUTO_CHAIN_FILE = Path(
+    os.environ.get("AETHER_AUTO_CHAIN_STATE", str(ROOT / "data" / "auto_chain.json"))
+)
+
+
+def get_auto_order() -> list[str]:
+    """User-chosen Auto fallback order, or the built-in default."""
+    try:
+        if AUTO_CHAIN_FILE.is_file():
+            data = json.loads(AUTO_CHAIN_FILE.read_text(encoding="utf-8"))
+            order = [str(item).strip() for item in (data.get("order") or []) if str(item).strip()]
+            if order:
+                return order
+    except (OSError, json.JSONDecodeError):
+        pass
+    return list(HOST_CLI_AUTO_ORDER)
+
+
+def set_auto_order(order: Any) -> list[str]:
+    """Persist the fallback priority. Empty list restores the default."""
+    if not isinstance(order, (list, tuple)):
+        raise ValueError("order must be a list of model aliases")
+    cleaned: list[str] = []
+    for item in order:
+        alias = str(item or "").strip()
+        if len(alias) > 128:
+            raise ValueError(f"model alias too long: {alias[:32]}…")
+        if alias and alias not in cleaned:
+            cleaned.append(alias)
+    AUTO_CHAIN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    AUTO_CHAIN_FILE.write_text(
+        json.dumps({"order": cleaned, "updated_at": time.time()}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return cleaned or list(HOST_CLI_AUTO_ORDER)
 _FAILOVER_ERROR_RE = re.compile(
     r"rate.?limit|quota|usage.?limit|weekly|daily.?limit|session.?limit|"
     r"too many requests|\b429\b|insufficient.?quota|exceeded|out of credits|"
@@ -938,9 +973,11 @@ def list_auto_failover_chain(
     """
     Ordered models for Auto mode.
 
-    1. Authenticated host CLIs as detected (grok-cli / claude-cli / codex-cli) —
-       same surfaces as Grok/Claude/Codex chat apps via the host bridge.
-    2. Local Ollama GPU/CPU coding models when cloud/subscription tokens are gone.
+    1. The user's saved priority order (``get_auto_order``); defaults to
+       ``HOST_CLI_AUTO_ORDER`` until they save one. Aliases may name host CLIs
+       or local models, so "codex → claude → local" is expressible directly.
+    2. Any other authenticated host CLI the bridge exposed.
+    3. Local Ollama GPU/CPU coding models when no cloud headroom remains.
     """
     models = snapshot.get("models") or {}
     chain: list[dict[str, Any]] = []
@@ -970,8 +1007,8 @@ def list_auto_failover_chain(
         add(sticky, "sticky session model")
 
     if not prefer_local:
-        for alias in HOST_CLI_AUTO_ORDER:
-            add(alias, "authenticated host CLI (native chat app)")
+        for alias in get_auto_order():
+            add(alias, "authenticated host CLI (user priority order)")
         # Any other host_cli aliases the bridge exposed
         for alias, meta in models.items():
             if meta.get("executor") == "host_cli" and meta.get("available"):
@@ -1012,6 +1049,8 @@ def describe_auto_mode(
         "primary": (chain[0]["model"] if chain else None),
         "host_cli_count": sum(1 for item in chain if item.get("executor") == "host_cli"),
         "local_count": sum(1 for item in chain if item.get("tier") == "local"),
+        "priority_order": get_auto_order(),
+        "priority_default": list(HOST_CLI_AUTO_ORDER),
     }
 
 

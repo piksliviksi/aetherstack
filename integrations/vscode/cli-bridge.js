@@ -10,27 +10,46 @@ const { execFile, spawn } = require("child_process");
 const DEFAULT_PORT = 8767;
 const MAX_BODY_BYTES = 512 * 1024;
 const MAX_PROMPT_CHARS = 100_000;
-const COMMAND_TIMEOUT_MS = 180_000;
+// System prompts travel as argv, and Windows caps a command line near 32 KiB.
+const MAX_SYSTEM_CHARS = 8_000;
+// Agentic runs read files before answering, so they outlast a plain chat turn.
+const COMMAND_TIMEOUT_MS = Number(process.env.AETHER_CLI_TIMEOUT_MS) || 300_000;
 const TERMINAL_FAILURE_COOLDOWN_MS = 15 * 60_000;
 
+// systemPromptFlag / systemPromptPrefix: how each CLI accepts system
+// instructions. System messages must never be inlined into the user prompt as
+// "SYSTEM:" text — a coding agent reads that as an injected instruction block
+// and refuses to answer rather than obeying it.
+//
+// Verified against each CLI on 2026-07-31:
+//   claude  --append-system-prompt <text>      (claude --help)
+//   grok    --rules <text>                     (grok --help; appends to system prompt)
+//   codex   -c developer_instructions=<text>   (codex has no such flag; -c overrides
+//           config.toml. Key confirmed accepted via `codex exec --strict-config`,
+//           which rejects unknown fields. Runtime effect not yet exercised — the
+//           account's codex quota was exhausted at the time of writing.)
 const CLI_DEFINITIONS = {
   "codex-cli": {
     command: "codex",
     label: "Codex CLI",
     provider: "codex-cli",
     capabilities: ["chat", "code", "reason", "tools", "long_context"],
+    systemPromptFlag: "-c",
+    systemPromptPrefix: "developer_instructions=",
   },
   "claude-cli": {
     command: "claude",
     label: "Claude CLI",
     provider: "claude-cli",
     capabilities: ["chat", "code", "reason", "tools", "long_context", "vision"],
+    systemPromptFlag: "--append-system-prompt",
   },
   "grok-cli": {
     command: "grok",
     label: "Grok CLI",
     provider: "grok-cli",
     capabilities: ["chat", "code", "reason", "tools", "long_context"],
+    systemPromptFlag: "--rules",
   },
 };
 
@@ -154,6 +173,8 @@ async function detectCli(alias, definition, runner = execResult, resolver = reso
     available: true,
     availability_reason: `authenticated ${definition.label} on host`,
     executor: "host_cli",
+    systemPromptFlag: definition.systemPromptFlag || null,
+    systemPromptPrefix: definition.systemPromptPrefix || "",
     commandPath,
   };
 }
@@ -168,8 +189,32 @@ async function discoverCliModels(options = {}) {
   return Object.fromEntries(entries.filter(Boolean));
 }
 
+// Pull system turns out of the transcript so they can travel via the CLI's own
+// system-prompt flag instead of being pasted into the user prompt.
+function splitMessages(messages) {
+  const items = Array.isArray(messages) ? messages : [];
+  const isSystem = (message) => String((message || {}).role || "user") === "system";
+  return {
+    system: items.filter(isSystem)
+      .map((message) => String(message.content || "").trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(-MAX_SYSTEM_CHARS),
+    conversation: items.filter((message) => !isSystem(message)),
+  };
+}
+
 function promptFromMessages(messages) {
-  const items = (Array.isArray(messages) ? messages : []).slice(-24);
+  // Defensive: system turns are dropped here too, so no caller can put them
+  // back into the user prompt by passing an unsplit message list.
+  const items = (Array.isArray(messages) ? messages : [])
+    .filter((message) => String((message || {}).role || "user") !== "system")
+    .slice(-24);
+  // A single user turn is sent verbatim: that is what makes Auto mode a real
+  // pass-through rather than a transcript the model has to parse.
+  if (items.length === 1 && String((items[0] || {}).role || "user") === "user") {
+    return String(items[0].content || "").slice(-MAX_PROMPT_CHARS);
+  }
   const parts = [];
   let remaining = MAX_PROMPT_CHARS;
   for (let index = items.length - 1; index >= 0 && remaining > 0; index -= 1) {
@@ -231,21 +276,43 @@ function spawnWithInput(command, args, prompt, options = {}) {
   });
 }
 
+// Native system-prompt args when the CLI supports them, else nothing — the
+// caller inlines the text instead.
+// Some CLIs take `--flag <text>`, codex takes `-c key=<text>`; the prefix covers both.
+function systemArgs(model, system) {
+  const flag = model.systemPromptFlag;
+  if (!flag || !system) return [];
+  return [flag, `${model.systemPromptPrefix || ""}${system}`];
+}
+
+// Only used when a CLI has no system-prompt flag. Framed as context, never as a
+// "SYSTEM:" instruction header.
+function inlineSystem(prompt, system) {
+  return system ? `Context for this request:\n${system}\n\n---\n\n${prompt}` : prompt;
+}
+
 async function runCliModel(model, prompt, options = {}) {
   const cwd = options.cwd || process.cwd();
+  const system = String(options.system || "").trim();
+  const native = systemArgs(model, system);
+  const body = native.length ? prompt : inlineSystem(prompt, system);
   if (model.alias === "codex-cli") {
     return spawnWithInput(
       model.commandPath,
-      ["exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"],
-      prompt,
+      ["exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", ...native, "-"],
+      body,
       { cwd }
     );
   }
   if (model.alias === "claude-cli") {
+    // Tools stay enabled: with `--tools ""` the model narrates tool calls it
+    // cannot run and answers from guesswork. `--permission-mode plan` is the
+    // read-only guard (verified: it refuses writes), matching codex's
+    // `--sandbox read-only` and grok's `--permission-mode plan`.
     return spawnWithInput(
       model.commandPath,
-      ["--print", "--output-format", "text", "--permission-mode", "plan", "--no-session-persistence", "--tools", ""],
-      prompt,
+      ["--print", "--output-format", "text", "--permission-mode", "plan", "--no-session-persistence", ...native],
+      body,
       { cwd }
     );
   }
@@ -253,10 +320,10 @@ async function runCliModel(model, prompt, options = {}) {
     const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "aetherstack-grok-"));
     const promptPath = path.join(tempDir, "prompt.md");
     try {
-      await fs.promises.writeFile(promptPath, prompt, { encoding: "utf8", mode: 0o600 });
+      await fs.promises.writeFile(promptPath, body, { encoding: "utf8", mode: 0o600 });
       return await spawnWithInput(
         model.commandPath,
-        ["--prompt-file", promptPath, "--output-format", "plain", "--permission-mode", "plan", "--no-memory", "--max-turns", "1", "--disable-web-search"],
+        ["--prompt-file", promptPath, "--output-format", "plain", "--permission-mode", "plan", "--no-memory", "--max-turns", "1", "--disable-web-search", ...native],
         "",
         { cwd }
       );
@@ -360,11 +427,12 @@ function createCliBridge(options = {}) {
         const available = await models();
         const model = available[String(body.model || "")];
         if (!model) { sendJson(response, 404, { error: "host CLI model is not authenticated or installed" }); return; }
-        const prompt = promptFromMessages(body.messages);
+        const { system, conversation } = splitMessages(body.messages);
+        const prompt = promptFromMessages(conversation);
         if (!prompt.trim()) { sendJson(response, 400, { error: "messages are required" }); return; }
         let content;
         try {
-          content = await (options.executor || runCliModel)(model, prompt, { cwd });
+          content = await (options.executor || runCliModel)(model, prompt, { cwd, system });
         } catch (error) {
           if (isTerminalProviderFailure(error)) {
             quarantinedUntil.set(model.alias, Date.now() + TERMINAL_FAILURE_COOLDOWN_MS);
@@ -429,6 +497,7 @@ module.exports = {
   discoverCliModels,
   findBundledCodex,
   promptFromMessages,
+  splitMessages,
   runCliModel,
   safeCliEnvironment,
   isTerminalProviderFailure,
