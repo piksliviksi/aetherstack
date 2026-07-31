@@ -140,55 +140,38 @@
   <div id="idleArt" class="idle-art"><pre id="idleArtPre"></pre></div>
   <fieldset class="composer">
     <div class="action-menu" id="actionMenu" hidden>
-      <div class="menu-filter"><input id="menuFilter" type="search" placeholder="Filter actions and commands…" autocomplete="off" aria-label="Filter AetherStack actions"></div>
+      <div class="menu-filter"><input id="menuFilter" type="search" placeholder="Search…" autocomplete="off" aria-label="Search menu"></div>
       <div class="menu-scroll" id="menuScroll">
         <section class="menu-section" data-menu-section>
-          <div class="menu-title">Session</div>
-          <button id="newConversation" class="menu-row" type="button"><span>New conversation</span><small>Ctrl+N</small></button>
-          <button id="clearConversation" class="menu-row" type="button"><span>Clear current conversation</span></button>
+          <div class="menu-title">Chat</div>
+          <button id="newConversation" class="menu-row" type="button"><span>New chat</span><small>Ctrl+N</small></button>
         </section>
         <section class="menu-section" data-menu-section>
-          <div class="menu-title">Model and routing</div>
-          <button id="showActiveModel" class="menu-row" type="button"><span>Show answering model</span><small id="showActiveModelState">Off</small></button>
-          <button id="showThoughtProcess" class="menu-row" type="button"><span>Show thought process</span><small id="showThoughtProcessState">Off</small></button>
-          <button id="showTokens" class="menu-row" type="button"><span>Show tokens</span><small id="showTokensState">On</small></button>
-          <button id="memoryContextMenu" class="menu-row" type="button" title="Unified memory budget for Auto mode (session + vectors)"><span>Memory context</span><small id="memoryContextState">512 KiB</small></button>
-          <button id="leanModeMenu" class="menu-row" type="button"><span>Lean delivery</span><small id="leanModeState">Balanced</small></button>
-          <button id="tokenSaverMenu" class="menu-row" type="button"><span>Prefer lower token cost</span><small id="tokenSaverState">Off</small></button>
-          <button id="refresh" class="menu-row" type="button"><span>Refresh models and presets</span></button>
-        </section>
-        <section class="menu-section" data-menu-section>
-          <div class="menu-title">Runtime and access</div>
-          <button id="openControlCenter" class="menu-row" type="button"><span>Services and runtime</span></button>
-          <button id="setApiKey" class="menu-row" type="button"><span>Manage gateway credential</span><small>SecretStorage</small></button>
-          <button id="refreshHostClis" class="menu-row" type="button"><span>Refresh authenticated host CLIs</span></button>
-          <button id="configureWorkspace" class="menu-row" type="button"><span>Configure workspace model access</span></button>
-        </section>
-        <section class="menu-section" data-menu-section>
-          <div class="menu-title">Configuration</div>
-          <button id="openSettings" class="menu-row" type="button"><span>Extension settings</span></button>
-          <button id="advanced" class="menu-row" type="button"><span>Advanced Hub</span></button>
-        </section>
-        <section class="menu-section" data-menu-section>
-          <div class="menu-title">Slash commands</div>
+          <div class="menu-title">Mode</div>
           <div id="presetMenuList"></div>
         </section>
         <section class="menu-section" data-menu-section>
-          <div class="menu-title">Recent conversations</div>
+          <div class="menu-title">Setup</div>
+          <button id="openControlCenter" class="menu-row" type="button"><span>Services</span><small>Start / stop stack</small></button>
+          <button id="openSettings" class="menu-row" type="button"><span>Settings</span></button>
+          <button id="refresh" class="menu-row" type="button"><span>Refresh</span><small>Models &amp; modes</small></button>
+        </section>
+        <section class="menu-section" data-menu-section>
+          <div class="menu-title">Recent</div>
           <div id="historyList"></div>
         </section>
-        <div id="menuEmpty" class="menu-empty" hidden>No matching actions.</div>
+        <div id="menuEmpty" class="menu-empty" hidden>No matches.</div>
       </div>
     </div>
     <div id="modelPicker" class="model-picker" hidden>
-      <div class="model-picker-title">Select preset</div>
+      <div class="model-picker-title">Mode</div>
       <div id="modelPickerList" class="model-picker-list" role="listbox"></div>
-      <div class="model-picker-help">↑↓ Navigate · Enter Select · Esc Cancel</div>
+      <div class="model-picker-help">↑↓ · Enter · Esc</div>
     </div>
-    <div class="prompt-row"><textarea id="prompt" placeholder="Ask anything, or use /research, /plan, /code, /test, /bugfix, /help…"></textarea></div>
+    <div class="prompt-row"><textarea id="prompt" placeholder="Ask anything…"></textarea></div>
     <div class="composer-footer">
       <div class="composer-left">
-        <button type="button" id="actionMenuButton" class="icon-button" aria-haspopup="true" aria-expanded="false" title="Actions and slash commands">/</button>
+        <button type="button" id="actionMenuButton" class="icon-button" aria-haspopup="true" aria-expanded="false" title="Menu">/</button>
         <button type="button" id="attachBtn" class="icon-button" title="Attach image or PDF" aria-label="Attach image or PDF"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 8.5 9.8 4.2a2.1 2.1 0 0 1 3 3l-5.5 5.5a3.5 3.5 0 0 1-5-5l5.4-5.4"/></svg></button>
         <button type="button" id="modeLabel" class="icon-button" title="Switch preset">auto</button>
         <button type="button" id="cancel" class="icon-button" title="Stop generation" aria-label="Stop generation" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8"/></svg></button>
@@ -314,16 +297,30 @@
     $('modeLabel').textContent = service ? service.label || service.id : 'auto';
     renderPresetMenu();
   }
+  function selectMode(id) {
+    const next = id === 'auto' || services.some((service) => service.id === id) ? id : 'auto';
+    $('service').value = next;
+    activeServiceId = next === 'auto' ? activeServiceId : next;
+    renderTeam();
+    saveState();
+    closeActionMenu();
+    $('prompt').focus();
+  }
   function renderPresetMenu() {
+    const current = $('service').value || 'auto';
     const options = [
-      { command: '/auto ', summary: 'Analyze the request and choose a preset' },
-      { command: '/help', summary: 'Show chat commands' },
-      ...services.map((service) => ({ command: `/${service.id} `, summary: service.summary || service.label || service.id })),
+      { id: 'auto', label: 'Auto', summary: 'Host CLIs, then local' },
+      ...services.map((service) => ({
+        id: service.id,
+        label: service.label || service.id,
+        summary: service.summary || '',
+      })),
     ];
     $('presetMenuList').replaceChildren(...options.map((option) => {
       const row = text('button', '', 'menu-row'); row.type = 'button';
-      row.append(text('span', option.command.trim()), text('small', option.summary));
-      row.addEventListener('click', () => { $('prompt').value = option.command; closeActionMenu(); $('prompt').focus(); });
+      const mark = option.id === current ? '✓ ' : '';
+      row.append(text('span', mark + option.label), text('small', option.summary));
+      row.addEventListener('click', () => selectMode(option.id));
       return row;
     }));
     applyMenuFilter();
@@ -344,12 +341,6 @@
     $('menuEmpty').hidden = visibleRows !== 0;
   }
   function updateMenuStates() {
-    $('showActiveModelState').textContent = showActiveModel ? 'On' : 'Off';
-    $('showThoughtProcessState').textContent = showThoughtProcess ? 'On' : 'Off';
-    $('showTokensState').textContent = showTokens ? 'On' : 'Off';
-    if ($('memoryContextState')) $('memoryContextState').textContent = `${memoryContextKb} KiB`;
-    $('leanModeState').textContent = $('lean').value[0].toUpperCase() + $('lean').value.slice(1);
-    $('tokenSaverState').textContent = $('tokenSaver').checked ? 'On' : 'Off';
     $('tokenLine').hidden = !showTokens;
   }
   function rotateActivity() {
@@ -558,7 +549,7 @@
   messageSeq = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
   if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
   let pickerIndex = -1;
-  function pickerOptions() { return [{ id: 'auto', label: 'Auto — analyze my request' }, ...services.map((service) => ({ id: service.id, label: service.label || service.id }))]; }
+  function pickerOptions() { return [{ id: 'auto', label: 'Auto' }, ...services.map((service) => ({ id: service.id, label: service.label || service.id }))]; }
   function closeModelPicker() { $('modelPicker').hidden = true; }
   function renderModelPicker() {
     const options = pickerOptions();
@@ -601,44 +592,13 @@
   $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
   function closeActionMenu() { setActionMenuOpen(false); }
   $('refresh').addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'refresh' }); });
-  $('advanced').addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'openAdvanced' }); });
-  for (const [id, action] of [
-    ['openControlCenter', 'openControlCenter'],
-    ['openSettings', 'openSettings'],
-    ['setApiKey', 'setApiKey'],
-    ['refreshHostClis', 'refreshHostClis'],
-    ['configureWorkspace', 'configureWorkspace'],
-  ]) $('' + id).addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'action', action }); });
-  $('showActiveModel').addEventListener('click', () => {
-    showActiveModel = !showActiveModel; updateMenuStates();
-    if (!showActiveModel && !runMeta.busy) $('activeModels').textContent = '';
-    vscode.postMessage({ type: 'action', action: 'toggleActiveModel', value: showActiveModel });
+  $('openControlCenter').addEventListener('click', () => {
+    closeActionMenu();
+    vscode.postMessage({ type: 'action', action: 'openControlCenter' });
   });
-  $('showThoughtProcess').addEventListener('click', () => {
-    showThoughtProcess = !showThoughtProcess;
-    updateMenuStates();
-    vscode.postMessage({ type: 'action', action: 'toggleThoughtProcess', value: showThoughtProcess });
-  });
-  $('showTokens').addEventListener('click', () => {
-    showTokens = !showTokens;
-    updateMenuStates();
-    if (!showTokens) $('tokenLine').textContent = '';
-    vscode.postMessage({ type: 'action', action: 'toggleShowTokens', value: showTokens });
-  });
-  $('memoryContextMenu').addEventListener('click', () => {
-    const idx = MEMORY_CONTEXT_OPTIONS.indexOf(memoryContextKb);
-    memoryContextKb = MEMORY_CONTEXT_OPTIONS[(idx < 0 ? 1 : idx + 1) % MEMORY_CONTEXT_OPTIONS.length];
-    updateMenuStates();
-    vscode.postMessage({ type: 'action', action: 'setMemoryContextKb', value: memoryContextKb });
-  });
-  $('leanModeMenu').addEventListener('click', () => {
-    const modes = ['off', 'balanced', 'strict'];
-    $('lean').value = modes[(modes.indexOf($('lean').value) + 1) % modes.length];
-    updateMenuStates();
-  });
-  $('tokenSaverMenu').addEventListener('click', () => { $('tokenSaver').checked = !$('tokenSaver').checked; updateMenuStates(); });
-  $('clearConversation').addEventListener('click', () => {
-    if (!historyBusy) { closeActionMenu(); vscode.postMessage({ type: 'newConversation' }); }
+  $('openSettings').addEventListener('click', () => {
+    closeActionMenu();
+    vscode.postMessage({ type: 'action', action: 'openSettings' });
   });
   function renderAttachmentList() {
     $('attachList').textContent = pendingAttachments.length ? pendingAttachments.map((a) => a.name).join(', ') : '';
@@ -723,7 +683,7 @@
       }
       updateMenuStates();
       $('cwdLine').textContent = message.cwd || '';
-      const auto = text('option', 'Auto — host CLIs + memory → local GPU'); auto.value = 'auto';
+      const auto = text('option', 'Auto'); auto.value = 'auto';
       $('service').replaceChildren(auto, ...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
       const preferred = current || restored.serviceId || 'auto';
       $('service').value = preferred === 'auto' || services.some((service) => service.id === preferred) ? preferred : 'auto';

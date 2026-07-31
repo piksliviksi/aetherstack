@@ -30,7 +30,7 @@ def _safe_graph_id(value: Any) -> str:
     return gid
 
 # ports_in / ports_out: 0 = none, -1 = unlimited fan-in/fan-out (multi-wire)
-# pass_through: no LLM work — only routes/search/store; UI shows activity blink, not progress bar
+# pass_through: no LLM work — only routes/search/store (memory, slash, output)
 NODE_TYPES = {
     "goal": {"label": "Goal", "ports_in": -1, "ports_out": -1, "color": "#3b82f6", "pass_through": False},
     "master": {"label": "Master", "ports_in": -1, "ports_out": -1, "color": "#a78bfa", "pass_through": False},
@@ -585,7 +585,7 @@ def auto_connect(nodes: list[dict[str, Any]] | None = None, graph: dict | None =
         "analyser → worker (build after ack)",
         "worker → tester (cheap/local)",
         "tester → private (local GPU + PDF/text folder) → memory → slash → output",
-        "pass-through nodes (memory/slash/output): activity blink, no progress bar",
+        "pass-through nodes (memory/slash/output): context and side effects only",
     ]
     return {"nodes": chain if graph is None else nodes, "edges": edges, "practices": practices}
 

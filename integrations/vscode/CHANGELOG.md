@@ -2,9 +2,11 @@
 
 ## 0.3.15
 
+- Simplify Chat `/` menu to **New chat**, **Mode** picker, **Services**, **Settings**, **Refresh**, and **Recent** — display toggles and advanced setup stay in VS Code Settings / Control Center.
 - Add three-tier **Memory** nodes on the Hub graph canvas (`tree` / `project` / `global`) with search/store actions and resolved namespaces.
 - Support multi-wire fan-in/fan-out edges, recursive feedback mode, and pipeline export of `memory_ops` plus stage `inputs_from` / `outputs_to`.
-- Add **Private** local-GPU node (folder of PDF/text, vault isolation) and light node progress bars; pass-through nodes use a blinking activity dot.
+- Add **Private** local-GPU node (folder of PDF/text, vault isolation).
+- Remove node-builder progress bars, blinking activity dots, and the **Demo activity** toolbar button.
 - Stream Hub service stage status (planning, lead, workers, review, answering) so VS Code Chat shows live phase + model + elapsed time while a reply is running.
 - Short English-only inference activity phrases; always surface the answering model during a run.
 - Chat `/` menu toggles: **Show answering model**, **Show thought process**, **Show tokens** (settings `aetherstack.showActiveModel`, `showThoughtProcess`, `showTokens`).

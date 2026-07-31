@@ -1,0 +1,157 @@
+{
+  "schema": "aetherstack.graph.v1",
+  "id": "test-radio-stone",
+  "title": "Radio waves through stone \u2014 memory E2E",
+  "project_id": "lab-rf-stone",
+  "recursive": false,
+  "nodes": [
+    {
+      "id": "n_goal",
+      "type": "goal",
+      "x": 40,
+      "y": 140,
+      "data": {
+        "label": "Goal",
+        "text": "How do radio waves penetrate stone? Explain skin depth, frequency dependence, attenuation in rock/concrete, and practical implications for RF through walls or caves. Keep it accurate and concise (about 250-400 words)."
+      }
+    },
+    {
+      "id": "n_lead",
+      "type": "master",
+      "x": 260,
+      "y": 120,
+      "data": {
+        "label": "Lead RF",
+        "role": "mastermind",
+        "tier": "local",
+        "strategy": "local_first",
+        "model": "local-default",
+        "max_cost": "low"
+      }
+    },
+    {
+      "id": "n_worker",
+      "type": "worker",
+      "x": 480,
+      "y": 80,
+      "data": {
+        "label": "Physics worker",
+        "role": "builder",
+        "tier": "local",
+        "strategy": "local_first",
+        "model": "local-default",
+        "max_cost": "low",
+        "parallel": 1
+      }
+    },
+    {
+      "id": "n_review",
+      "type": "analyser",
+      "x": 480,
+      "y": 200,
+      "data": {
+        "label": "Reviewer",
+        "role": "critic",
+        "tier": "local",
+        "strategy": "local_first",
+        "model": "local-default",
+        "gate": true,
+        "max_cost": "low"
+      }
+    },
+    {
+      "id": "n_mem_search",
+      "type": "memory",
+      "x": 700,
+      "y": 60,
+      "data": {
+        "label": "Tree recall",
+        "scope": "tree",
+        "action": "search"
+      }
+    },
+    {
+      "id": "n_mem_store_tree",
+      "type": "memory",
+      "x": 700,
+      "y": 160,
+      "data": {
+        "label": "Tree store",
+        "scope": "tree",
+        "action": "store"
+      }
+    },
+    {
+      "id": "n_mem_store_proj",
+      "type": "memory",
+      "x": 700,
+      "y": 260,
+      "data": {
+        "label": "Project store",
+        "scope": "project",
+        "action": "store",
+        "project_id": "lab-rf-stone"
+      }
+    },
+    {
+      "id": "n_out",
+      "type": "output",
+      "x": 920,
+      "y": 160,
+      "data": {
+        "label": "Final answer"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "n_goal",
+      "to": "n_lead",
+      "kind": "data"
+    },
+    {
+      "id": "e2",
+      "from": "n_lead",
+      "to": "n_worker",
+      "kind": "data"
+    },
+    {
+      "id": "e3",
+      "from": "n_lead",
+      "to": "n_review",
+      "kind": "data"
+    },
+    {
+      "id": "e4",
+      "from": "n_worker",
+      "to": "n_mem_search",
+      "kind": "data"
+    },
+    {
+      "id": "e5",
+      "from": "n_review",
+      "to": "n_mem_search",
+      "kind": "data"
+    },
+    {
+      "id": "e6",
+      "from": "n_mem_search",
+      "to": "n_mem_store_tree",
+      "kind": "data"
+    },
+    {
+      "id": "e7",
+      "from": "n_mem_store_tree",
+      "to": "n_mem_store_proj",
+      "kind": "data"
+    },
+    {
+      "id": "e8",
+      "from": "n_mem_store_proj",
+      "to": "n_out",
+      "kind": "data"
+    }
+  ],
+  "updated_at": 1785508743.416558
+}

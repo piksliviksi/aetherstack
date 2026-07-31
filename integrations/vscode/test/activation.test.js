@@ -4,32 +4,29 @@ const fs = require("fs");
 const path = require("path");
 const test = require("node:test");
 
-test("chat exposes compact actions, dynamic presets, and model activity state", () => {
+test("chat exposes a minimal action menu, modes, and model activity state", () => {
   const html = fs.readFileSync(path.resolve(__dirname, "..", "chat.html"), "utf8");
   const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "package.json"), "utf8"));
-  assert.match(html, /Auto — analyze my request/);
+  assert.match(html, /id="actionMenu"/);
   assert.match(html, /Active preset node graph/);
   assert.match(html, /activeModels/);
   assert.match(html, /activityWords/);
-  assert.match(html, /openAdvanced/);
-  assert.match(html, /Ask anything, or use \/research/);
+  assert.match(html, /Ask anything…/);
   assert.match(html, /message.type === 'route'/);
   assert.match(html, /vscode\.getState/);
   assert.doesNotMatch(html, /history-rail|historyToggle|historyRail/);
   assert.doesNotMatch(html, /class="header-actions"|id="historyMenuButton"|id="historyMenu"/);
+  assert.doesNotMatch(html, /id="showActiveModel"|id="showThoughtProcess"|id="showTokens"|id="memoryContextMenu"|id="leanModeMenu"|id="tokenSaverMenu"|id="setApiKey"|id="refreshHostClis"|id="configureWorkspace"|id="advanced"|id="clearConversation"/);
   assert.equal(
     (manifest.contributes.menus["view/title"] || []).some((item) => item.when === "view == aetherstack.chatView"),
     false,
     "AetherStack still contributes buttons to the Chat view title area",
   );
-  assert.match(html, /id="actionMenu" hidden[\s\S]*id="menuFilter"[\s\S]*id="showActiveModel"[\s\S]*id="showThoughtProcess"[\s\S]*id="showTokens"[\s\S]*id="memoryContextMenu"[\s\S]*id="setApiKey"[\s\S]*id="openSettings"[\s\S]*id="presetMenuList"/);
+  assert.match(html, /id="actionMenu" hidden[\s\S]*id="menuFilter"[\s\S]*id="newConversation"[\s\S]*id="presetMenuList"[\s\S]*id="openControlCenter"[\s\S]*id="openSettings"[\s\S]*id="refresh"[\s\S]*id="historyList"/);
   assert.match(html, /id="activeModels"[\s\S]*id="send"/);
   assert.match(html, /Answering:|Used:/);
-  assert.match(html, /Show thought process/);
-  assert.match(html, /Show tokens/);
-  assert.match(html, /Memory context/);
-  assert.match(html, /toggleThoughtProcess|showThoughtProcess/);
-  assert.match(html, /setMemoryContextKb|memoryContextKb/);
+  assert.match(html, /function selectMode/);
+  assert.match(html, /Host CLIs, then local/);
   assert.match(html, /formatThoughtProcess/);
   assert.match(html, /message\.type === 'progress'/);
   assert.match(html, /Rename conversation/);

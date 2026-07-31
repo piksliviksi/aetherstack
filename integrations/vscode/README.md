@@ -77,10 +77,10 @@ VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http:/
 | `aetherstack.defaultModel` | `local-default` |
 | `aetherstack.stackPath` | Auto-detected; choose the folder containing `docker-compose.yml` if needed |
 | `aetherstack.autoWireModels` | `true` |
-| `aetherstack.showActiveModel` | `true` (live answering model in Chat, sidebar, status bar; also toggle from Chat `/` menu) |
-| `aetherstack.showThoughtProcess` | `false` (show lead/worker/review notes under answers; Chat `/` menu) |
-| `aetherstack.showTokens` | `true` (token count after each reply; Chat `/` menu) |
-| `aetherstack.memoryContextKb` | `512` (Auto unified memory budget: 256 / 512 / 1024 / 2048 KiB; Chat `/` menu) |
+| `aetherstack.showActiveModel` | `true` (live answering model in Chat and status bar) |
+| `aetherstack.showThoughtProcess` | `false` (show lead/worker/review notes under answers) |
+| `aetherstack.showTokens` | `true` (token count after each reply) |
+| `aetherstack.memoryContextKb` | `512` (Auto unified memory budget: 256 / 512 / 1024 / 2048 KiB) |
 
 Provider API keys are read by Docker Compose from the selected AetherStack runtime root `.env`. The extension also detects already authenticated Codex, Claude, and Grok host CLIs through a Docker-reachable bridge protected by a random bearer token stored in VS Code SecretStorage, so their existing login sessions work in AetherStack Chat without copying or generating provider keys. Views and commands register before CLI probes run. Refresh normally updates Hub in place; only stale bridge environment requires recreating `aether-hub`. The bridge exposes only its fixed CLI allowlist and does not enable browser CORS. Continue receives only models exposed through LiteLLM. The extension intentionally does not scan unrelated project `.env` files.
 
