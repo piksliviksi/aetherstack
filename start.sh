@@ -11,6 +11,29 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 
+# Docker's and Ollama's own progress output is only a single redrawing line when
+# attached to an interactive TTY. Piped through a log, a non-interactive shell, or
+# the VSCode extension's spawned process, each update prints as its own new line
+# instead of overwriting the last one. This filter re-parses the structured
+# progress events (Docker's --progress=plain JSON-ish lines and Ollama's NDJSON
+# pull stream both carry current/completed + total byte counts) and redraws a
+# single line, then appends the final byte count to $2 so the caller can report a
+# grand total downloaded at the end of the run.
+progress_filter() {
+  local label="$1" totals_file="${2:-}"
+  if command -v python3 >/dev/null 2>&1; then
+    # The Python source lives in its own file (scripts/progress-filter.py) rather
+    # than a heredoc here: a heredoc attached to this same `python3` invocation
+    # would become that process's stdin, swallowing the live piped progress data
+    # this function is supposed to be filtering.
+    python3 "$ROOT/scripts/progress-filter.py" "$label" "$totals_file"
+  else
+    # No python3 available — fall back to passing output through unfiltered
+    # rather than silently dropping it.
+    cat
+  fi
+}
+
 OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
 case "$OS_NAME" in
   Darwin) OS_HINT="macOS" ;;
@@ -22,6 +45,26 @@ cyan ""
 cyan "  AetherStack  ($OS_HINT)"
 cyan "  Multi-model LLM control plane"
 cyan ""
+
+# curl is a hard prerequisite for everything below (Docker install, Ollama
+# provisioning, health checks) — bootstrap it on Linux if a minimal image
+# shipped without it, same auto-install philosophy as Docker.
+if ! command -v curl >/dev/null 2>&1 && [[ "$OS_NAME" == "Linux" ]] && [[ "${AETHER_AUTO_INSTALL_DOCKER:-1}" != "0" ]] && command -v sudo >/dev/null 2>&1; then
+  yellow "  curl not found; installing..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq curl
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y -q curl
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y -q curl
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm curl
+  fi
+fi
+if ! command -v curl >/dev/null 2>&1; then
+  red "  ERROR: curl is required and could not be installed automatically."
+  exit 1
+fi
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
@@ -170,6 +213,84 @@ start_macos_host_ollama() {
   return 1
 }
 
+install_linux_docker() {
+  [[ "$OS_NAME" == "Linux" ]] || return 1
+  [[ "${AETHER_AUTO_INSTALL_DOCKER:-1}" != "0" ]] || return 1
+  command -v curl >/dev/null 2>&1 || { yellow "  Docker is absent and curl is unavailable; install Docker manually."; return 1; }
+  command -v sudo >/dev/null 2>&1 || { yellow "  Docker is absent and sudo is unavailable; install Docker manually."; return 1; }
+  local script
+  script="$(mktemp "${TMPDIR:-/tmp}/aetherstack-get-docker.XXXXXX.sh")"
+  cyan "  Docker is absent. Installing via the official convenience script (get.docker.com)..."
+  if ! curl -fsSL https://get.docker.com -o "$script"; then
+    rm -f "$script"; yellow "  Docker install script download failed."; return 1
+  fi
+  if ! sudo sh "$script"; then
+    rm -f "$script"; red "  ERROR: Docker install script failed."; return 1
+  fi
+  rm -f "$script"
+  sudo systemctl enable --now docker 2>/dev/null || true
+  command -v docker >/dev/null 2>&1 || return 1
+  if ! id -nG "$USER" 2>/dev/null | grep -qw docker; then
+    sudo usermod -aG docker "$USER" 2>/dev/null || true
+    if ! docker info >/dev/null 2>&1 && command -v sg >/dev/null 2>&1; then
+      yellow "  Applying the new docker group membership for this run (re-exec via sg)..."
+      exec sg docker -c "$(printf '%q ' "$0" "$@")"
+    fi
+    yellow "  Added $USER to the docker group — log out/in (or reboot) so future runs don't need sudo."
+  fi
+  green "  Installed Docker."
+  return 0
+}
+
+install_macos_docker() {
+  [[ "$OS_NAME" == "Darwin" ]] || return 1
+  [[ "${AETHER_AUTO_INSTALL_DOCKER:-1}" != "0" ]] || return 1
+  if command -v brew >/dev/null 2>&1; then
+    cyan "  Docker is absent. Installing Docker Desktop via Homebrew..."
+    brew install --cask docker || { yellow "  Homebrew cask install failed."; return 1; }
+  else
+    command -v curl >/dev/null 2>&1 || { yellow "  Docker is absent and curl/Homebrew are unavailable; install Docker Desktop manually."; return 1; }
+    command -v hdiutil >/dev/null 2>&1 || { yellow "  Docker is absent and hdiutil is unavailable; install Docker Desktop manually."; return 1; }
+    local arch dmg_url staging dmg mount_point
+    arch="$(uname -m)"
+    if [[ "$arch" == "arm64" ]]; then
+      dmg_url="https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+    else
+      dmg_url="https://desktop.docker.com/mac/main/amd64/Docker.dmg"
+    fi
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/aetherstack-docker.XXXXXX")"
+    dmg="$staging/Docker.dmg"
+    cyan "  Docker is absent. Downloading Docker Desktop ($arch)..."
+    if ! curl --fail --location --progress-bar --retry 3 "$dmg_url" -o "$dmg"; then
+      rm -rf "$staging"; yellow "  Docker Desktop download failed."; return 1
+    fi
+    mount_point="$staging/mnt"
+    mkdir -p "$mount_point"
+    if ! hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -quiet; then
+      rm -rf "$staging"; yellow "  Failed to mount the Docker Desktop image."; return 1
+    fi
+    if [[ ! -d "$mount_point/Docker.app" ]]; then
+      hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+      rm -rf "$staging"; yellow "  Docker Desktop image did not contain Docker.app."; return 1
+    fi
+    if command -v codesign >/dev/null 2>&1 && ! codesign --verify --deep --strict "$mount_point/Docker.app" >/dev/null 2>&1; then
+      hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+      rm -rf "$staging"; red "  ERROR: downloaded Docker.app failed the macOS code-signature check."; return 1
+    fi
+    cp -R "$mount_point/Docker.app" /Applications/Docker.app 2>/dev/null || cp -R "$mount_point/Docker.app" "$HOME/Applications/Docker.app"
+    hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+    rm -rf "$staging"
+    green "  Installed Docker Desktop."
+  fi
+  open -a Docker 2>/dev/null || true
+  yellow "  Docker Desktop is starting for the first time — it may ask you to approve a privileged network helper; approve it, then re-run ./start.sh if this run times out."
+  for _ in $(seq 1 30); do
+    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  command -v docker >/dev/null 2>&1
+}
+
 # Scan host before bring-up (Ollama / Docker / ports)
 if [[ -x "$ROOT/scripts/scan-system.sh" ]] || [[ -f "$ROOT/scripts/scan-system.sh" ]]; then
   cyan "  Scanning system…"
@@ -177,14 +298,24 @@ if [[ -x "$ROOT/scripts/scan-system.sh" ]] || [[ -f "$ROOT/scripts/scan-system.s
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-  red "  ERROR: Docker not found."
+  yellow "  Docker not found."
+  installed=0
   if [[ "$OS_NAME" == "Darwin" ]]; then
-    yellow "  macOS: install Docker Desktop — docs/TUTORIAL-MACOS.md"
-    yellow "  https://docs.docker.com/desktop/setup/install/mac-install/"
-  else
-    yellow "  Ubuntu/Linux: see docs/TUTORIAL-UBUNTU.md"
+    install_macos_docker && installed=1
+  elif [[ "$OS_NAME" == "Linux" ]]; then
+    install_linux_docker && installed=1
   fi
-  exit 1
+  if [[ "$installed" -ne 1 ]] || ! command -v docker >/dev/null 2>&1; then
+    red "  ERROR: Docker not found and automatic install did not complete."
+    if [[ "$OS_NAME" == "Darwin" ]]; then
+      yellow "  macOS: install Docker Desktop — docs/TUTORIAL-MACOS.md"
+      yellow "  https://docs.docker.com/desktop/setup/install/mac-install/"
+    else
+      yellow "  Ubuntu/Linux: see docs/TUTORIAL-UBUNTU.md"
+    fi
+    yellow "  Set AETHER_AUTO_INSTALL_DOCKER=0 to skip auto-install and only get this message."
+    exit 1
+  fi
 fi
 
 # Prefer docker compose plugin; fall back to docker-compose
@@ -228,6 +359,37 @@ if ! curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; then
   start_macos_host_ollama || true
 fi
 
+mkdir -p "$ROOT/.aetherstack"
+TOTALS_FILE="$ROOT/.aetherstack/download-totals"
+: > "$TOTALS_FILE"
+
+# Detect authenticated host CLI subscriptions (Codex CLI, Claude CLI, Grok CLI)
+# so LiteLLM/the Hub can use them. Previously this only ever happened when the
+# VSCode extension itself was open — a plain `./start.sh` run never started the
+# bridge server, so those subscriptions were silently invisible to the stack
+# even when the user was fully logged in to all three. Best-effort: skip
+# quietly if Node isn't installed rather than failing the whole stack start.
+CLI_BRIDGE_PID_FILE="$ROOT/.aetherstack/cli-bridge.pid"
+CLI_BRIDGE_LOG="$ROOT/.aetherstack/cli-bridge.log"
+if [[ -f "$CLI_BRIDGE_PID_FILE" ]]; then
+  old_bridge_pid="$(cat "$CLI_BRIDGE_PID_FILE" 2>/dev/null || true)"
+  if [[ -n "$old_bridge_pid" ]] && kill -0 "$old_bridge_pid" 2>/dev/null; then
+    kill "$old_bridge_pid" 2>/dev/null || true
+  fi
+  rm -f "$CLI_BRIDGE_PID_FILE"
+fi
+if command -v node >/dev/null 2>&1; then
+  cyan "  Detecting host CLI subscriptions (Codex, Claude Code, Grok)…"
+  export AETHER_CLI_BRIDGE_TOKEN="${AETHER_CLI_BRIDGE_TOKEN:-$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')}"
+  export AETHER_CLI_BRIDGE_URL="${AETHER_CLI_BRIDGE_URL:-http://host.docker.internal:8767}"
+  AETHER_STACK_ROOT="$ROOT" nohup node "$ROOT/scripts/cli-bridge-daemon.js" >"$CLI_BRIDGE_LOG" 2>&1 &
+  echo $! > "$CLI_BRIDGE_PID_FILE"
+  sleep 1
+  if [[ -s "$CLI_BRIDGE_LOG" ]]; then sed 's/^/  /' "$CLI_BRIDGE_LOG"; fi
+else
+  yellow "  Node.js not found — skipping host CLI subscription detection (Codex/Claude/Grok). Install Node to enable it."
+fi
+
 # host.docker.internal is set in compose (needed on Docker Desktop Mac/Win + some Linux)
 cyan "  Starting containers (Open WebUI, LiteLLM, Redis, Postgres, Hub)..."
 use_container_ollama=0
@@ -247,10 +409,13 @@ if [[ -z "$found_host_ollama" ]]; then
   export OLLAMA_BASE_URL="http://ollama:11434"
   export AETHER_OLLAMA_PORT="$fallback_port"
   host_ollama_url="http://127.0.0.1:$fallback_port"
-  "${DC[@]}" --profile with-ollama-container up -d --build
+  "${DC[@]}" --profile with-ollama-container --progress=json up -d --build 2>&1 | progress_filter "  Pulling/building images" "$TOTALS_FILE"
+  compose_status="${PIPESTATUS[0]}"
 else
-  "${DC[@]}" up -d --build
+  "${DC[@]}" --progress=json up -d --build 2>&1 | progress_filter "  Pulling/building images" "$TOTALS_FILE"
+  compose_status="${PIPESTATUS[0]}"
 fi
+if (( compose_status != 0 )); then red "  ERROR: docker compose up failed"; exit 1; fi
 
 ollama_deadline=$((SECONDS + 90))
 until curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; do
@@ -272,9 +437,15 @@ for model in "${startup_models[@]}"; do
     ollama pull "$model"
   else
     # Ollama's streaming NDJSON includes layer names, byte totals, and completed
-    # bytes. Keep it visible when only the HTTP service (not its CLI) exists.
-    curl -fS --no-buffer --max-time 900 -X POST "$host_ollama_url/api/pull" \
-      -H 'Content-Type: application/json' -d "{\"name\":\"$model\",\"stream\":true}"
+    # bytes. progress_filter redraws that stream as a single line with a running
+    # byte total instead of one new line per update (the same fix applied to the
+    # docker compose pull/build step above), and reports the final total into
+    # $TOTALS_FILE for the end-of-run summary.
+    curl -fsS --no-buffer --max-time 900 -X POST "$host_ollama_url/api/pull" \
+      -H 'Content-Type: application/json' -d "{\"name\":\"$model\",\"stream\":true}" \
+      | progress_filter "  Pulling $model" "$TOTALS_FILE"
+    pull_status="${PIPESTATUS[0]}"
+    if (( pull_status != 0 )); then red "  ERROR: failed to pull Ollama model $model"; exit 1; fi
   fi
 done
 "${DC[@]}" restart aether-hub litellm >/dev/null
@@ -287,6 +458,12 @@ while (( SECONDS < deadline )); do
   curl -sf --max-time 3 http://127.0.0.1:4000/health/liveliness >/dev/null || pending="$pending LiteLLM"
   curl -sf --max-time 3 http://127.0.0.1:8766/api/health >/dev/null || pending="$pending AetherHub"
   [[ -z "$pending" ]] && break
+  # Compose's depends_on/service_healthy sequencing can race on a first build:
+  # a dependent container (observed: open-webui-proxy, which publishes :3000)
+  # can get left in "Created" instead of started once its dependency finally
+  # passes its health check. A cheap, idempotent `up -d` reconciles anything
+  # left behind without re-pulling or rebuilding, each time through this wait.
+  "${DC[@]}" up -d >/dev/null 2>&1 || true
   sleep 2
 done
 if [[ -n "$pending" ]]; then
@@ -305,6 +482,11 @@ else
   if [[ "$OS_NAME" == "Linux" ]]; then
     yellow "  AMD Linux: ${DC[*]} -f docker-compose.yml -f docker-compose.amd.yml --profile with-ollama-container up -d"
   fi
+fi
+
+total_downloaded_bytes="$(awk '{s+=$1} END{print s+0}' "$TOTALS_FILE" 2>/dev/null || echo 0)"
+if (( total_downloaded_bytes > 0 )); then
+  cyan "  Downloaded this run: $(awk -v b="$total_downloaded_bytes" 'BEGIN{u="B KB MB GB"; split(u,a," "); i=1; while (b>=1024 && i<4){b/=1024; i++} printf "%.1f%s", b, a[i]}')"
 fi
 
 echo ""

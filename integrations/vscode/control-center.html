@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src 'nonce-{{NONCE}}';">
   <title>AetherStack Control Center</title>
   <style>
+    :root { --ae-radius: 10px; --ae-radius-sm: 6px; }
     body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 24px; }
     header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
     h1, h2 { margin: 0 0 8px; }
@@ -13,20 +14,20 @@
     h2 { font-size: 16px; }
     .muted { color: var(--vscode-descriptionForeground); }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 22px; }
-    button { border: 1px solid var(--vscode-button-border, transparent); padding: 7px 12px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; border-radius: 2px; }
+    button { border: 1px solid var(--vscode-button-border, transparent); padding: 7px 12px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; border-radius: var(--ae-radius-sm); }
     button:hover { background: var(--vscode-button-hoverBackground); }
     button:disabled { cursor: wait; opacity: 0.55; }
     button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
     button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 12px 0 24px; }
-    .card { border: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); padding: 14px; border-radius: 5px; min-width: 0; }
+    .card { border: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); padding: 14px; border-radius: var(--ae-radius); min-width: 0; }
     .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
     .ok { color: var(--vscode-testing-iconPassed); font-weight: 600; }
     .error { color: var(--vscode-testing-iconFailed); font-weight: 600; }
     .pill { padding: 2px 7px; border-radius: 10px; border: 1px solid currentColor; font-size: 11px; }
     a { color: var(--vscode-textLink-foreground); overflow-wrap: anywhere; }
     code, pre { font-family: var(--vscode-editor-font-family); }
-    pre { white-space: pre-wrap; background: var(--vscode-textCodeBlock-background); padding: 12px; overflow: auto; border-radius: 3px; }
+    pre { white-space: pre-wrap; background: var(--vscode-textCodeBlock-background); padding: 12px; overflow: auto; border-radius: var(--ae-radius-sm); }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); text-align: left; vertical-align: top; }
     label { display: flex; align-items: center; gap: 8px; cursor: pointer; }

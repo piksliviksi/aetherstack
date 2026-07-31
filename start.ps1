@@ -57,12 +57,38 @@ function Ensure-EnvFile {
   }
 }
 
+function Install-DockerDesktop {
+  if ($env:AETHER_AUTO_INSTALL_DOCKER -eq "0") { return $false }
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if (-not $winget) {
+    Write-Host "  winget is unavailable; cannot auto-install Docker Desktop." -ForegroundColor Yellow
+    return $false
+  }
+  Write-Host "  Docker is absent. Installing Docker Desktop via winget..." -ForegroundColor Cyan
+  winget install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --silent
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  winget install of Docker Desktop failed (exit $LASTEXITCODE)." -ForegroundColor Yellow
+    return $false
+  }
+  Write-Host "  Installed Docker Desktop." -ForegroundColor Green
+  return $true
+}
+
 function Ensure-Docker {
   $docker = Get-Command docker -ErrorAction SilentlyContinue
   if (-not $docker) {
-    Write-Host "  ERROR: Docker not found. Install Docker Desktop:" -ForegroundColor Red
-    Write-Host "  https://docs.docker.com/desktop/setup/install/windows-install/" -ForegroundColor Yellow
-    exit 1
+    Write-Host "  Docker not found." -ForegroundColor Yellow
+    if (-not (Install-DockerDesktop)) {
+      Write-Host "  ERROR: Docker not found and automatic install did not complete." -ForegroundColor Red
+      Write-Host "  Install Docker Desktop manually: https://docs.docker.com/desktop/setup/install/windows-install/" -ForegroundColor Yellow
+      Write-Host "  Set AETHER_AUTO_INSTALL_DOCKER=0 to skip auto-install and only get this message." -ForegroundColor Yellow
+      exit 1
+    }
+    $docker = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $docker) {
+      Write-Host "  Docker Desktop was installed but a new terminal is needed to pick up PATH; re-run .\start.ps1." -ForegroundColor Yellow
+      exit 1
+    }
   }
 
   docker info 2>$null | Out-Null
