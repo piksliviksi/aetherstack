@@ -46,6 +46,26 @@ cyan "  AetherStack  ($OS_HINT)"
 cyan "  Multi-model LLM control plane"
 cyan ""
 
+# curl is a hard prerequisite for everything below (Docker install, Ollama
+# provisioning, health checks) — bootstrap it on Linux if a minimal image
+# shipped without it, same auto-install philosophy as Docker.
+if ! command -v curl >/dev/null 2>&1 && [[ "$OS_NAME" == "Linux" ]] && [[ "${AETHER_AUTO_INSTALL_DOCKER:-1}" != "0" ]] && command -v sudo >/dev/null 2>&1; then
+  yellow "  curl not found; installing..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq curl
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y -q curl
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y -q curl
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm curl
+  fi
+fi
+if ! command -v curl >/dev/null 2>&1; then
+  red "  ERROR: curl is required and could not be installed automatically."
+  exit 1
+fi
+
 if [[ ! -f .env ]]; then
   cp .env.example .env
   yellow "  Created .env from .env.example — add API keys when ready."
@@ -193,6 +213,84 @@ start_macos_host_ollama() {
   return 1
 }
 
+install_linux_docker() {
+  [[ "$OS_NAME" == "Linux" ]] || return 1
+  [[ "${AETHER_AUTO_INSTALL_DOCKER:-1}" != "0" ]] || return 1
+  command -v curl >/dev/null 2>&1 || { yellow "  Docker is absent and curl is unavailable; install Docker manually."; return 1; }
+  command -v sudo >/dev/null 2>&1 || { yellow "  Docker is absent and sudo is unavailable; install Docker manually."; return 1; }
+  local script
+  script="$(mktemp "${TMPDIR:-/tmp}/aetherstack-get-docker.XXXXXX.sh")"
+  cyan "  Docker is absent. Installing via the official convenience script (get.docker.com)..."
+  if ! curl -fsSL https://get.docker.com -o "$script"; then
+    rm -f "$script"; yellow "  Docker install script download failed."; return 1
+  fi
+  if ! sudo sh "$script"; then
+    rm -f "$script"; red "  ERROR: Docker install script failed."; return 1
+  fi
+  rm -f "$script"
+  sudo systemctl enable --now docker 2>/dev/null || true
+  command -v docker >/dev/null 2>&1 || return 1
+  if ! id -nG "$USER" 2>/dev/null | grep -qw docker; then
+    sudo usermod -aG docker "$USER" 2>/dev/null || true
+    if ! docker info >/dev/null 2>&1 && command -v sg >/dev/null 2>&1; then
+      yellow "  Applying the new docker group membership for this run (re-exec via sg)..."
+      exec sg docker -c "$(printf '%q ' "$0" "$@")"
+    fi
+    yellow "  Added $USER to the docker group — log out/in (or reboot) so future runs don't need sudo."
+  fi
+  green "  Installed Docker."
+  return 0
+}
+
+install_macos_docker() {
+  [[ "$OS_NAME" == "Darwin" ]] || return 1
+  [[ "${AETHER_AUTO_INSTALL_DOCKER:-1}" != "0" ]] || return 1
+  if command -v brew >/dev/null 2>&1; then
+    cyan "  Docker is absent. Installing Docker Desktop via Homebrew..."
+    brew install --cask docker || { yellow "  Homebrew cask install failed."; return 1; }
+  else
+    command -v curl >/dev/null 2>&1 || { yellow "  Docker is absent and curl/Homebrew are unavailable; install Docker Desktop manually."; return 1; }
+    command -v hdiutil >/dev/null 2>&1 || { yellow "  Docker is absent and hdiutil is unavailable; install Docker Desktop manually."; return 1; }
+    local arch dmg_url staging dmg mount_point
+    arch="$(uname -m)"
+    if [[ "$arch" == "arm64" ]]; then
+      dmg_url="https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+    else
+      dmg_url="https://desktop.docker.com/mac/main/amd64/Docker.dmg"
+    fi
+    staging="$(mktemp -d "${TMPDIR:-/tmp}/aetherstack-docker.XXXXXX")"
+    dmg="$staging/Docker.dmg"
+    cyan "  Docker is absent. Downloading Docker Desktop ($arch)..."
+    if ! curl --fail --location --progress-bar --retry 3 "$dmg_url" -o "$dmg"; then
+      rm -rf "$staging"; yellow "  Docker Desktop download failed."; return 1
+    fi
+    mount_point="$staging/mnt"
+    mkdir -p "$mount_point"
+    if ! hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -quiet; then
+      rm -rf "$staging"; yellow "  Failed to mount the Docker Desktop image."; return 1
+    fi
+    if [[ ! -d "$mount_point/Docker.app" ]]; then
+      hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+      rm -rf "$staging"; yellow "  Docker Desktop image did not contain Docker.app."; return 1
+    fi
+    if command -v codesign >/dev/null 2>&1 && ! codesign --verify --deep --strict "$mount_point/Docker.app" >/dev/null 2>&1; then
+      hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+      rm -rf "$staging"; red "  ERROR: downloaded Docker.app failed the macOS code-signature check."; return 1
+    fi
+    cp -R "$mount_point/Docker.app" /Applications/Docker.app 2>/dev/null || cp -R "$mount_point/Docker.app" "$HOME/Applications/Docker.app"
+    hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+    rm -rf "$staging"
+    green "  Installed Docker Desktop."
+  fi
+  open -a Docker 2>/dev/null || true
+  yellow "  Docker Desktop is starting for the first time — it may ask you to approve a privileged network helper; approve it, then re-run ./start.sh if this run times out."
+  for _ in $(seq 1 30); do
+    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  command -v docker >/dev/null 2>&1
+}
+
 # Scan host before bring-up (Ollama / Docker / ports)
 if [[ -x "$ROOT/scripts/scan-system.sh" ]] || [[ -f "$ROOT/scripts/scan-system.sh" ]]; then
   cyan "  Scanning system…"
@@ -200,14 +298,24 @@ if [[ -x "$ROOT/scripts/scan-system.sh" ]] || [[ -f "$ROOT/scripts/scan-system.s
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-  red "  ERROR: Docker not found."
+  yellow "  Docker not found."
+  installed=0
   if [[ "$OS_NAME" == "Darwin" ]]; then
-    yellow "  macOS: install Docker Desktop — docs/TUTORIAL-MACOS.md"
-    yellow "  https://docs.docker.com/desktop/setup/install/mac-install/"
-  else
-    yellow "  Ubuntu/Linux: see docs/TUTORIAL-UBUNTU.md"
+    install_macos_docker && installed=1
+  elif [[ "$OS_NAME" == "Linux" ]]; then
+    install_linux_docker && installed=1
   fi
-  exit 1
+  if [[ "$installed" -ne 1 ]] || ! command -v docker >/dev/null 2>&1; then
+    red "  ERROR: Docker not found and automatic install did not complete."
+    if [[ "$OS_NAME" == "Darwin" ]]; then
+      yellow "  macOS: install Docker Desktop — docs/TUTORIAL-MACOS.md"
+      yellow "  https://docs.docker.com/desktop/setup/install/mac-install/"
+    else
+      yellow "  Ubuntu/Linux: see docs/TUTORIAL-UBUNTU.md"
+    fi
+    yellow "  Set AETHER_AUTO_INSTALL_DOCKER=0 to skip auto-install and only get this message."
+    exit 1
+  fi
 fi
 
 # Prefer docker compose plugin; fall back to docker-compose
