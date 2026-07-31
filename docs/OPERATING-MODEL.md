@@ -42,6 +42,7 @@ model    = <one alias>
 | VS Code + Continue (or equivalent) | Primary coding surface |
 | Open WebUI `:3000` | Browser surface on the same gateway |
 | Aether Hub `:8766` | Operator console: discover, modes, graphs, slash, memory |
+| **Auto mode** | Direct host CLI models (Grok/Claude/Codex as detected) + unified memory; on limits fail over to next model; then local Ollama GPU for coding — not multi-agent preset classify |
 
 Client-facing model id remains the gateway alias. Multi-agent and pipeline execution are controlled via Hub APIs and imported trees.
 

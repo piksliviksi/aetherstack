@@ -93,25 +93,28 @@ function createChatRequestHandler(hubChat) {
       let serviceId = parsed.serviceId;
       let selection;
       if (serviceId === "auto") {
-        stream.progress("Analyzing intent…");
-        selection = await hubChat.hubRequest("/api/services/classify", { method: "POST", body: { goal: prompt }, signal: controller.signal });
-        serviceId = String(selection.service_id || "");
-        if (!hubChat.services.some((service) => service.id === serviceId)) {
-          stream.markdown("AetherStack could not map this request to an available service preset.");
-          return;
-        }
-        selection.source = "intent-analysis";
+        stream.progress("Auto · host CLI + memory…");
+        selection = {
+          service_id: "auto",
+          label: "Auto",
+          confidence: "direct",
+          source: "auto-direct-models",
+        };
       } else if (parsed.command) {
         const service = hubChat.services.find((item) => item.id === serviceId) || {};
         selection = { service_id: serviceId, label: service.label || serviceId, confidence: "fixed", source: "slash-command" };
       }
       if (selection) {
-        const confidence = selection.confidence && selection.confidence !== "fixed" ? ` · ${selection.confidence} confidence` : "";
-        stream.markdown(`_Active preset: **${selection.label || serviceId}**${confidence}_\n\n`);
+        if (selection.service_id === "auto") {
+          stream.markdown("_Auto · host CLIs as detected + unified memory · fail over on limits → local Ollama_\n\n");
+        } else {
+          const confidence = selection.confidence && selection.confidence !== "fixed" ? ` · ${selection.confidence} confidence` : "";
+          stream.markdown(`_Active preset: **${selection.label || serviceId}**${confidence}_\n\n`);
+        }
       }
       if (token.isCancellationRequested) return;
 
-      stream.progress("I'm on it…");
+      if (serviceId !== "auto") stream.progress("I'm on it…");
       const result = await hubChat.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
         method: "POST",
         signal: controller.signal,
@@ -120,12 +123,21 @@ function createChatRequestHandler(hubChat) {
           lean_mode: "balanced",
           token_saver: false,
           history: historyFromContext(context),
+          session_id: "vscode-participant",
         },
       });
       stream.markdown(result.answer || result.output || "Completed without a text answer.");
 
-      const team = (result.agents || []).map((agent) => agent.model).filter(Boolean).join(", ");
-      if (team) stream.markdown(`\n\n---\n*Team: ${team}*`);
+      if (result.auto_mode && result.model) {
+        const failed = (result.failover_attempts || []).map((a) => a.model).filter(Boolean);
+        const note = failed.length
+          ? `*Model: **${result.model}** (after ${failed.join(" → ")} limits)*`
+          : `*Model: **${result.model}***`;
+        stream.markdown(`\n\n---\n${note}`);
+      } else {
+        const team = (result.agents || []).map((agent) => agent.model).filter(Boolean).join(", ");
+        if (team) stream.markdown(`\n\n---\n*Team: ${team}*`);
+      }
       stream.button({ command: "aetherstack.openControlCenter", title: "Advanced setup" });
     } catch (error) {
       if (error && (error.name === "AbortError" || error.code === "ABORT_ERR")) {

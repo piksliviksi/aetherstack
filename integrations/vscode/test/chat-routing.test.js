@@ -8,7 +8,7 @@ const serviceIds = [
   "coding", "testing", "bugfixing", "whitehat-pentesting", "polishing", "technical-writing",
 ];
 
-test("natural chat stays on automatic intent analysis by default", () => {
+test("natural chat stays on auto (direct models + memory) by default", () => {
   assert.deepEqual(parseChatInput("Fix the broken login", "auto", serviceIds), {
     action: "run",
     serviceId: "auto",

@@ -22,12 +22,14 @@ test("chat exposes compact actions, dynamic presets, and model activity state", 
     false,
     "AetherStack still contributes buttons to the Chat view title area",
   );
-  assert.match(html, /id="actionMenu" hidden[\s\S]*id="menuFilter"[\s\S]*id="showActiveModel"[\s\S]*id="showThoughtProcess"[\s\S]*id="showTokens"[\s\S]*id="setApiKey"[\s\S]*id="openSettings"[\s\S]*id="presetMenuList"/);
+  assert.match(html, /id="actionMenu" hidden[\s\S]*id="menuFilter"[\s\S]*id="showActiveModel"[\s\S]*id="showThoughtProcess"[\s\S]*id="showTokens"[\s\S]*id="memoryContextMenu"[\s\S]*id="setApiKey"[\s\S]*id="openSettings"[\s\S]*id="presetMenuList"/);
   assert.match(html, /id="activeModels"[\s\S]*id="send"/);
   assert.match(html, /Answering:|Used:/);
   assert.match(html, /Show thought process/);
   assert.match(html, /Show tokens/);
+  assert.match(html, /Memory context/);
   assert.match(html, /toggleThoughtProcess|showThoughtProcess/);
+  assert.match(html, /setMemoryContextKb|memoryContextKb/);
   assert.match(html, /formatThoughtProcess/);
   assert.match(html, /message\.type === 'progress'/);
   assert.match(html, /Rename conversation/);

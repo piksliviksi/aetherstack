@@ -62,6 +62,12 @@ function cfg() {
     showActiveModel: c.get("showActiveModel") !== false,
     showThoughtProcess: c.get("showThoughtProcess") === true,
     showTokens: c.get("showTokens") !== false,
+    memoryContextKb: (() => {
+      const allowed = [256, 512, 1024, 2048];
+      const raw = Number(c.get("memoryContextKb"));
+      if (allowed.includes(raw)) return raw;
+      return 512;
+    })(),
   };
 }
 
@@ -928,7 +934,12 @@ class HubChat {
           entry.updatedAt = Date.now();
           await this.context.globalState.update("aetherstack.conversations", this.conversations);
         }
-        await webview.postMessage({ type: "command", content: parsed.serviceId === "auto" ? "Automatic intent routing is active." : `Preset selected: ${parsed.serviceId}.` });
+        await webview.postMessage({
+          type: "command",
+          content: parsed.serviceId === "auto"
+            ? "Auto mode: host CLIs as detected + unified memory; fail over on limits → local Ollama."
+            : `Preset selected: ${parsed.serviceId}.`,
+        });
         return;
       }
       const prompt = String(parsed.prompt || "").trim();
@@ -940,26 +951,41 @@ class HubChat {
       let serviceId = parsed.serviceId;
       state.selectedServiceId = parsed.serviceId;
       let selection;
+      let plannedModels = [];
       if (serviceId === "auto") {
-        selection = await this.hubRequest("/api/services/classify", {
-          method: "POST",
-          body: { goal: prompt },
-          signal: controller.signal,
-        });
-        serviceId = String(selection.service_id || "");
-        if (!this.services.some((service) => service.id === serviceId)) {
-          throw new Error("AetherStack could not map this request to an available service preset.");
+        // Auto = direct host CLI models as detected + unified memory + failover (not preset classify).
+        let autoInfo = {};
+        try {
+          autoInfo = await this.hubRequest("/api/services/auto", { method: "GET", signal: controller.signal });
+        } catch {
+          autoInfo = {};
         }
-        selection.source = "intent-analysis";
+        plannedModels = (autoInfo.model_chain || []).map((item) => item.model || item).filter(Boolean);
+        selection = {
+          service_id: "auto",
+          label: "Auto",
+          confidence: "direct",
+          source: "auto-direct-models",
+          model: autoInfo.primary || plannedModels[0] || "",
+          model_chain: plannedModels,
+          memory: "unified",
+        };
+        serviceId = "auto";
       } else if (parsed.command) {
         const service = this.services.find((item) => item.id === serviceId) || {};
         selection = { service_id: serviceId, label: service.label || serviceId, confidence: "fixed", source: "slash-command" };
+        plannedModels = (service.agents || []).map((agent) => agent.model).filter(Boolean);
+      } else {
+        const service = this.services.find((item) => item.id === serviceId) || {};
+        plannedModels = (service.agents || []).map((agent) => agent.model).filter(Boolean);
       }
       if (selection) await webview.postMessage({ type: "route", selection });
       await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
       // Always surface live answering progress (phase + model) while a run is active.
       const service = this.services.find((item) => item.id === serviceId) || {};
-      const plannedModels = (service.agents || []).map((agent) => agent.model).filter(Boolean);
+      if (!plannedModels.length) {
+        plannedModels = (service.agents || []).map((agent) => agent.model).filter(Boolean);
+      }
       const publishProgress = (payload = {}) => {
         webview.postMessage({
           type: "progress",
@@ -970,8 +996,10 @@ class HubChat {
         });
       };
       publishProgress({
-        phase: selection ? "routing" : "starting",
-        label: selection ? "Routing…" : "Starting…",
+        phase: serviceId === "auto" ? "auto" : "starting",
+        label: serviceId === "auto"
+          ? (plannedModels[0] ? `Auto · ${plannedModels[0]}…` : "Auto · picking model…")
+          : "Starting…",
         model: plannedModels[0] || "",
         models: plannedModels,
       });
@@ -1000,6 +1028,8 @@ class HubChat {
         token_saver: Boolean(message.tokenSaver),
         history: state.history.slice(-8),
         attachments,
+        session_id: state.activeConversationId || "vscode-chat",
+        memory_context_kb: cfg().memoryContextKb,
       };
       let result = null;
       let streamedText = "";
@@ -1085,6 +1115,7 @@ class HubChat {
       showActiveModel: settings.showActiveModel,
       showThoughtProcess: settings.showThoughtProcess,
       showTokens: settings.showTokens,
+      memoryContextKb: settings.memoryContextKb,
       cwd: workspaceRoot() || "",
       notice,
       error,
@@ -1126,6 +1157,14 @@ class HubChat {
             await vscode.workspace.getConfiguration("aetherstack")
               .update("showTokens", Boolean(message.value), vscode.ConfigurationTarget.Global);
             await webview.postMessage({ type: "chatSetting", key: "showTokens", enabled: Boolean(message.value) });
+            return;
+          }
+          if (message.action === "setMemoryContextKb") {
+            const allowed = [256, 512, 1024, 2048];
+            const kb = allowed.includes(Number(message.value)) ? Number(message.value) : 512;
+            await vscode.workspace.getConfiguration("aetherstack")
+              .update("memoryContextKb", kb, vscode.ConfigurationTarget.Global);
+            await webview.postMessage({ type: "chatSetting", key: "memoryContextKb", value: kb });
             return;
           }
           const commands = {

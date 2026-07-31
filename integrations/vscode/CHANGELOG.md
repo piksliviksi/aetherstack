@@ -8,7 +8,9 @@
 - Stream Hub service stage status (planning, lead, workers, review, answering) so VS Code Chat shows live phase + model + elapsed time while a reply is running.
 - Short English-only inference activity phrases; always surface the answering model during a run.
 - Chat `/` menu toggles: **Show answering model**, **Show thought process**, **Show tokens** (settings `aetherstack.showActiveModel`, `showThoughtProcess`, `showTokens`).
-- Ship matching Runtime 0.3.15 with the graph/memory hub changes used by node canvas and chat progress.
+- **Auto mode** uses detected host CLI models (Grok/Claude/Codex) as-is with **unified memory**; on session/week limits fails over to the next model; when no cloud tokens remain, uses local Ollama GPU for coding (not multi-agent preset classify).
+- **Memory context** budget for Auto: 256 / **512 (default)** / 1024 / 2048 KiB — Chat `/` menu **Memory context** and setting `aetherstack.memoryContextKb`.
+- Ship matching Runtime 0.3.15 with the graph/memory hub changes and Auto failover used by chat.
 
 ## 0.3.14
 

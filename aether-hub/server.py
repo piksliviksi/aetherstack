@@ -44,6 +44,8 @@ from services import (  # noqa: E402
     build_service_graph,
     classify_service,
     default_service_id,
+    describe_auto_mode,
+    execute_auto,
     execute_service,
     list_services,
     plan_service,
@@ -567,6 +569,12 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/services", "/api/service-presets"):
             self._send(200, list_services(get_snapshot(), get_discover()))
             return
+        if path == "/api/services/auto":
+            try:
+                self._send(200, describe_auto_mode(get_snapshot()))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
         if path.startswith("/api/services/") and path.endswith("/graph"):
             service_id = path[len("/api/services/") : -len("/graph")].strip("/")
             if service_id == "active":
@@ -1029,9 +1037,39 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/services/classify":
             try:
-                self._send(200, classify_service(body.get("goal") or body.get("prompt"), get_snapshot()))
+                goal = body.get("goal") or body.get("prompt")
+                # Auto is no longer intent→preset; return direct model chain description.
+                if str(body.get("mode") or "").lower() == "auto" or str(body.get("service_id") or "") == "auto":
+                    snap = get_snapshot()
+                    desc = describe_auto_mode(snap, session_id=body.get("session_id") or body.get("session"))
+                    self._send(
+                        200,
+                        {
+                            "service_id": "auto",
+                            "label": "Auto",
+                            "confidence": "direct",
+                            "score": 100,
+                            "matched_terms": ["auto", "direct-models", "unified-memory"],
+                            "candidates": [{"service_id": "auto", "score": 100}],
+                            **{k: desc[k] for k in ("model_chain", "primary", "host_cli_count", "local_count", "memory", "mode") if k in desc},
+                        },
+                    )
+                    return
+                self._send(200, classify_service(goal, get_snapshot()))
             except ValueError as e:
                 self._send(400, {"error": str(e)})
+            return
+        if path == "/api/services/auto":
+            try:
+                self._send(
+                    200,
+                    describe_auto_mode(
+                        get_snapshot(),
+                        session_id=(body or {}).get("session_id") or (body or {}).get("session"),
+                    ),
+                )
+            except Exception as e:
+                self._send(500, {"error": str(e)})
             return
         if path == "/api/activity-words":
             try:
@@ -1048,10 +1086,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/activate"):
             service_id = path[len("/api/services/") : -len("/activate")].strip("/")
             try:
-                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
-                result = activate_service(selection["service_id"] if selection else service_id, get_snapshot(), body or {})
-                if selection:
-                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
+                if service_id == "auto":
+                    self._send(200, {"ok": True, **describe_auto_mode(get_snapshot())})
+                    return
+                result = activate_service(service_id, get_snapshot(), body or {})
                 self._send(200, result)
             except ValueError as e:
                 self._send(404, {"error": str(e)})
@@ -1061,10 +1099,29 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/plan"):
             service_id = path[len("/api/services/") : -len("/plan")].strip("/")
             try:
-                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
-                result = plan_service(selection["service_id"] if selection else service_id, get_snapshot(), body or {})
-                if selection:
-                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
+                if service_id == "auto":
+                    desc = describe_auto_mode(
+                        get_snapshot(),
+                        session_id=body.get("session_id") or body.get("session"),
+                    )
+                    self._send(
+                        200,
+                        {
+                            "service": "auto",
+                            "auto_mode": True,
+                            "model_chain": desc.get("model_chain"),
+                            "memory": "unified",
+                            "selection": {
+                                "service_id": "auto",
+                                "label": "Auto",
+                                "confidence": "direct",
+                                "source": "auto-direct-models",
+                                "model": desc.get("primary"),
+                            },
+                        },
+                    )
+                    return
+                result = plan_service(service_id, get_snapshot(), body or {})
                 self._send(200, result)
             except ValueError as e:
                 self._send(404, {"error": str(e)})
@@ -1074,17 +1131,23 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/run"):
             service_id = path[len("/api/services/") : -len("/run")].strip("/")
             try:
-                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
                 sid = body.get("session_id") or body.get("session")
+                if service_id == "auto":
+                    result = execute_auto(
+                        get_snapshot(),
+                        body or {},
+                        memory=_memory,
+                        session_id=sid,
+                    )
+                    self._send(200, result)
+                    return
                 result = execute_service(
-                    selection["service_id"] if selection else service_id,
+                    service_id,
                     get_snapshot(),
                     body or {},
                     memory=_memory,
                     session_id=sid,
                 )
-                if selection:
-                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
                 self._send(200, result)
             except ValueError as e:
                 self._send(400, {"error": str(e)})
@@ -1095,9 +1158,6 @@ class Handler(BaseHTTPRequestHandler):
             service_id = path[len("/api/services/") : -len("/run/stream")].strip("/")
             self._send_sse_start()
             try:
-                selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
-                resolved_id = selection["service_id"] if selection else service_id
-
                 def on_delta(chunk_text: str) -> None:
                     self._send_sse_event({"type": "delta", "text": chunk_text})
 
@@ -1111,17 +1171,25 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_sse_event(event)
 
                 sid = body.get("session_id") or body.get("session")
-                result = execute_service(
-                    resolved_id,
-                    get_snapshot(),
-                    body or {},
-                    on_delta=on_delta,
-                    on_status=on_status,
-                    memory=_memory,
-                    session_id=sid,
-                )
-                if selection:
-                    result["selection"] = {key: value for key, value in selection.items() if key != "service"}
+                if service_id == "auto":
+                    result = execute_auto(
+                        get_snapshot(),
+                        body or {},
+                        on_delta=on_delta,
+                        on_status=on_status,
+                        memory=_memory,
+                        session_id=sid,
+                    )
+                else:
+                    result = execute_service(
+                        service_id,
+                        get_snapshot(),
+                        body or {},
+                        on_delta=on_delta,
+                        on_status=on_status,
+                        memory=_memory,
+                        session_id=sid,
+                    )
                 self._send_sse_event({"type": "done", "result": result})
             except ValueError as e:
                 self._send_sse_event_safe({"type": "error", "error": str(e)})
@@ -1442,10 +1510,11 @@ def _paths() -> list[str]:
         "POST /api/discover          {host_scan: {...}}",
         "GET|POST /api/modes         ← inline|multi_agent, token_saver, role pins",
         "GET  /api/services          ← capability-driven task services",
-        "POST /api/services/classify ← choose a service from task language",
+        "GET|POST /api/services/auto ← direct host-CLI + memory failover chain",
+        "POST /api/services/classify ← choose a service from task language (presets)",
         "POST /api/services/{id}/activate",
         "POST /api/services/{id}/plan",
-        "POST /api/services/{id}/run",
+        "POST /api/services/{id}/run  ← use id=auto for direct models + unified memory",
         "GET  /api/services/{id|active}/graph ← editable resolved preset tree",
         "GET|POST|DELETE /api/activity-words  ← editable inference activity text",
         "GET  /api/update            ← check upstream",

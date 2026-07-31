@@ -152,6 +152,7 @@
           <button id="showActiveModel" class="menu-row" type="button"><span>Show answering model</span><small id="showActiveModelState">Off</small></button>
           <button id="showThoughtProcess" class="menu-row" type="button"><span>Show thought process</span><small id="showThoughtProcessState">Off</small></button>
           <button id="showTokens" class="menu-row" type="button"><span>Show tokens</span><small id="showTokensState">On</small></button>
+          <button id="memoryContextMenu" class="menu-row" type="button" title="Unified memory budget for Auto mode (session + vectors)"><span>Memory context</span><small id="memoryContextState">512 KiB</small></button>
           <button id="leanModeMenu" class="menu-row" type="button"><span>Lean delivery</span><small id="leanModeState">Balanced</small></button>
           <button id="tokenSaverMenu" class="menu-row" type="button"><span>Prefer lower token cost</span><small id="tokenSaverState">Off</small></button>
           <button id="refresh" class="menu-row" type="button"><span>Refresh models and presets</span></button>
@@ -216,6 +217,8 @@
   let showActiveModel = true;
   let showThoughtProcess = false;
   let showTokens = true;
+  let memoryContextKb = 512;
+  const MEMORY_CONTEXT_OPTIONS = [256, 512, 1024, 2048];
   let historyBusy = false;
   let runMeta = { busy: false, phase: '', label: '', model: '', models: [], startedAt: 0 };
   const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -344,6 +347,7 @@
     $('showActiveModelState').textContent = showActiveModel ? 'On' : 'Off';
     $('showThoughtProcessState').textContent = showThoughtProcess ? 'On' : 'Off';
     $('showTokensState').textContent = showTokens ? 'On' : 'Off';
+    if ($('memoryContextState')) $('memoryContextState').textContent = `${memoryContextKb} KiB`;
     $('leanModeState').textContent = $('lean').value[0].toUpperCase() + $('lean').value.slice(1);
     $('tokenSaverState').textContent = $('tokenSaver').checked ? 'On' : 'Off';
     $('tokenLine').hidden = !showTokens;
@@ -621,6 +625,12 @@
     if (!showTokens) $('tokenLine').textContent = '';
     vscode.postMessage({ type: 'action', action: 'toggleShowTokens', value: showTokens });
   });
+  $('memoryContextMenu').addEventListener('click', () => {
+    const idx = MEMORY_CONTEXT_OPTIONS.indexOf(memoryContextKb);
+    memoryContextKb = MEMORY_CONTEXT_OPTIONS[(idx < 0 ? 1 : idx + 1) % MEMORY_CONTEXT_OPTIONS.length];
+    updateMenuStates();
+    vscode.postMessage({ type: 'action', action: 'setMemoryContextKb', value: memoryContextKb });
+  });
   $('leanModeMenu').addEventListener('click', () => {
     const modes = ['off', 'balanced', 'strict'];
     $('lean').value = modes[(modes.indexOf($('lean').value) + 1) % modes.length];
@@ -708,9 +718,12 @@
       showActiveModel = message.showActiveModel !== false;
       showThoughtProcess = Boolean(message.showThoughtProcess);
       showTokens = message.showTokens !== false;
+      if (MEMORY_CONTEXT_OPTIONS.includes(Number(message.memoryContextKb))) {
+        memoryContextKb = Number(message.memoryContextKb);
+      }
       updateMenuStates();
       $('cwdLine').textContent = message.cwd || '';
-      const auto = text('option', 'Auto — analyze my request'); auto.value = 'auto';
+      const auto = text('option', 'Auto — host CLIs + memory → local GPU'); auto.value = 'auto';
       $('service').replaceChildren(auto, ...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
       const preferred = current || restored.serviceId || 'auto';
       $('service').value = preferred === 'auto' || services.some((service) => service.id === preferred) ? preferred : 'auto';
@@ -765,13 +778,23 @@
         showTokens = Boolean(message.enabled);
         if (!showTokens) $('tokenLine').textContent = '';
       }
+      if (message.key === 'memoryContextKb' && MEMORY_CONTEXT_OPTIONS.includes(Number(message.value))) {
+        memoryContextKb = Number(message.value);
+      }
       updateMenuStates();
     } else if (message.type === 'route') {
       const selection = message.selection || {};
       activeServiceId = selection.service_id || '';
       if (selection.source === 'slash-command') $('service').value = activeServiceId || 'auto';
       const confidence = selection.confidence && selection.confidence !== 'fixed' ? ` · ${selection.confidence} confidence` : '';
-      $('route').textContent = activeServiceId ? `Active preset: ${selection.label || activeServiceId}${confidence}` : 'Automatic intent routing is active.';
+      if (selection.service_id === 'auto' || selection.source === 'auto-direct-models') {
+        const chain = (selection.model_chain || []).slice(0, 4).join(' → ');
+        $('route').textContent = chain
+          ? `Auto · ${chain}${chain.length < (selection.model_chain || []).length ? ' → …' : ''} · memory`
+          : 'Auto · host CLIs + memory → local GPU';
+      } else {
+        $('route').textContent = activeServiceId ? `Active preset: ${selection.label || activeServiceId}${confidence}` : 'Auto · host CLIs + memory → local GPU';
+      }
       renderTeam(); saveState();
     } else if (message.type === 'command') {
       addMessage('assistant', message.content || '');

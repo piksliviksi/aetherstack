@@ -30,10 +30,64 @@ CLI_BRIDGE_URL = os.environ.get("AETHER_CLI_BRIDGE_URL", "http://host.docker.int
 CLI_BRIDGE_TOKEN = os.environ.get("AETHER_CLI_BRIDGE_TOKEN", "")
 VERIFY_TTL_SECONDS = 5 * 60
 _verify_cache: dict[str, tuple[float, bool]] = {}
+# Auto mode: sticky preferred model per session (host CLI → next CLI → local GPU)
+_auto_session_model: dict[str, str] = {}
+# Prefer host CLIs in the same order users meet them in native chat apps, then Ollama GPU.
+HOST_CLI_AUTO_ORDER = ("grok-cli", "claude-cli", "codex-cli")
+LOCAL_CODING_AUTO_ORDER = (
+    "local-default",
+    "local-llama",
+    "local-llama31-8b",
+    "local-tiny",
+)
+_FAILOVER_ERROR_RE = re.compile(
+    r"rate.?limit|quota|usage.?limit|weekly|daily.?limit|session.?limit|"
+    r"too many requests|\b429\b|insufficient.?quota|exceeded|out of credits|"
+    r"billing|subscription|limit reached|capacity|not authenticated|"
+    r"unauthorized|payment|overloaded|unavailable|timeout|timed out|"
+    r"context.?length|maximum context|token limit|exhausted|no credits|"
+    r"resource.?exhausted|throttl|temporarily unavailable|connection refused|"
+    r"host CLI bridge|not configured|failed to|ECONNREFUSED",
+    re.I,
+)
 _MATCH_STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in",
     "into", "is", "it", "of", "on", "or", "that", "the", "this", "to", "with",
 }
+
+# Unified memory context budget (KiB of text injected into Auto prompts).
+# 512 is the default: enough for multi-turn coding + recall without saturating
+# typical local Ollama windows (32k–128k tokens). Users can pick 256/512/1024/2048.
+MEMORY_CONTEXT_KB_OPTIONS = (256, 512, 1024, 2048)
+DEFAULT_MEMORY_CONTEXT_KB = 512
+
+
+def resolve_memory_context_kb(value: Any = None) -> int:
+    """Clamp to allowed memory context sizes (KiB). Default 512."""
+    raw = value
+    if raw is None or raw == "":
+        raw = os.environ.get("AETHER_MEMORY_CONTEXT_KB", DEFAULT_MEMORY_CONTEXT_KB)
+    try:
+        kb = int(raw)
+    except (TypeError, ValueError):
+        kb = DEFAULT_MEMORY_CONTEXT_KB
+    if kb in MEMORY_CONTEXT_KB_OPTIONS:
+        return kb
+    return min(MEMORY_CONTEXT_KB_OPTIONS, key=lambda option: abs(option - kb))
+
+
+def memory_context_chars(kb: Any = None) -> int:
+    """Character budget for unified memory injection (~1 char ≈ 1 byte for ASCII)."""
+    return resolve_memory_context_kb(kb) * 1024
+
+
+def _trim_to_budget(text: str, budget: int) -> str:
+    text = str(text or "")
+    if budget <= 0 or len(text) <= budget:
+        return text
+    if budget < 32:
+        return text[:budget]
+    return text[: max(0, budget - 16)].rstrip() + "\n…[truncated]"
 
 
 def load_service_catalog(path: Path | None = None) -> dict[str, Any]:
@@ -859,6 +913,355 @@ def _emit_status(
         on_status(payload)
     except Exception:
         pass
+
+
+def is_failover_error(exc: BaseException | str) -> bool:
+    """True when the failure looks like quota/limit/unavailability (try next model)."""
+    text = str(exc or "")
+    if not text:
+        return False
+    if _FAILOVER_ERROR_RE.search(text):
+        return True
+    # HTTPError often embeds status codes
+    code = getattr(exc, "code", None)
+    if code in (401, 402, 403, 408, 429, 502, 503, 504):
+        return True
+    return False
+
+
+def list_auto_failover_chain(
+    snapshot: dict[str, Any],
+    *,
+    session_id: str | None = None,
+    prefer_local: bool = False,
+) -> list[dict[str, Any]]:
+    """
+    Ordered models for Auto mode.
+
+    1. Authenticated host CLIs as detected (grok-cli / claude-cli / codex-cli) —
+       same surfaces as Grok/Claude/Codex chat apps via the host bridge.
+    2. Local Ollama GPU/CPU coding models when cloud/subscription tokens are gone.
+    """
+    models = snapshot.get("models") or {}
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(alias: str, reason: str) -> None:
+        if alias in seen:
+            return
+        meta = models.get(alias) or {}
+        if not meta.get("available"):
+            return
+        seen.add(alias)
+        chain.append(
+            {
+                "model": alias,
+                "provider": meta.get("provider"),
+                "backend": meta.get("backend"),
+                "tier": meta.get("tier"),
+                "executor": meta.get("executor") or ("host_cli" if alias.endswith("-cli") else "gateway"),
+                "reason": reason,
+                "capabilities": list(meta.get("capabilities") or []),
+            }
+        )
+
+    sticky = _auto_session_model.get(str(session_id or "").strip() or "")
+    if sticky and not prefer_local:
+        add(sticky, "sticky session model")
+
+    if not prefer_local:
+        for alias in HOST_CLI_AUTO_ORDER:
+            add(alias, "authenticated host CLI (native chat app)")
+        # Any other host_cli aliases the bridge exposed
+        for alias, meta in models.items():
+            if meta.get("executor") == "host_cli" and meta.get("available"):
+                add(str(alias), "authenticated host CLI")
+
+    for alias in LOCAL_CODING_AUTO_ORDER:
+        add(alias, "local Ollama GPU/CPU coding fallback")
+    for alias, meta in models.items():
+        if meta.get("tier") == "local" and meta.get("available"):
+            caps = set(meta.get("capabilities") or [])
+            if caps & {"code", "chat", "tools"}:
+                add(str(alias), "local Ollama available model")
+
+    return chain
+
+
+def describe_auto_mode(
+    snapshot: dict[str, Any],
+    session_id: str | None = None,
+    memory_context_kb: Any = None,
+) -> dict[str, Any]:
+    chain = list_auto_failover_chain(snapshot, session_id=session_id)
+    kb = resolve_memory_context_kb(memory_context_kb)
+    return {
+        "service_id": "auto",
+        "label": "Auto",
+        "mode": "direct_models",
+        "memory": "unified",
+        "memory_context_kb": kb,
+        "memory_context_options_kb": list(MEMORY_CONTEXT_KB_OPTIONS),
+        "memory_context_chars": memory_context_chars(kb),
+        "description": (
+            "Uses detected host CLI models (Grok/Claude/Codex) as-is with unified memory; "
+            "on session/week limits fails over to the next available model; "
+            "when no cloud tokens remain, uses local Ollama GPU for coding."
+        ),
+        "model_chain": chain,
+        "primary": (chain[0]["model"] if chain else None),
+        "host_cli_count": sum(1 for item in chain if item.get("executor") == "host_cli"),
+        "local_count": sum(1 for item in chain if item.get("tier") == "local"),
+    }
+
+
+def _auto_memory_block(
+    memory: MemoryStore | None,
+    session_id: str | None,
+    goal: str,
+    history: Any,
+    context_kb: Any = None,
+) -> str:
+    """Unified memory surface: session transcript + vector hits, trimmed to context budget."""
+    budget = memory_context_chars(context_kb)
+    # Reserve ~15% for vector recall; rest for session/history
+    session_budget = max(2048, int(budget * 0.85))
+    vector_budget = max(1024, budget - session_budget)
+    chunks: list[str] = []
+    used = 0
+
+    def take(block: str, limit: int) -> str | None:
+        nonlocal used
+        remaining = budget - used
+        if remaining <= 0:
+            return None
+        piece = _trim_to_budget(block, min(limit, remaining))
+        if not piece.strip():
+            return None
+        used += len(piece)
+        return piece
+
+    if memory is not None and session_id:
+        try:
+            # Scale message count with budget: ~1 msg per 2–4 KiB, capped
+            msg_limit = min(200, max(12, resolve_memory_context_kb(context_kb) // 4))
+            msgs = memory.get_session(session_id, limit=msg_limit)
+            lines = []
+            per_msg = max(400, session_budget // max(8, msg_limit))
+            for msg in msgs[-msg_limit:]:
+                role = str(msg.get("role") or "user")
+                content = str(msg.get("content") or "").strip()
+                if content:
+                    lines.append(f"{role}: {_trim_to_budget(content, per_msg)}")
+            if lines:
+                block = take("### Session memory\n" + "\n".join(lines), session_budget)
+                if block:
+                    chunks.append(block)
+        except Exception:
+            pass
+        for ns in ("default", "conversation-index", "project:default"):
+            if used >= budget:
+                break
+            try:
+                top_k = min(12, max(3, resolve_memory_context_kb(context_kb) // 128))
+                res = memory.search(goal[:500], namespace=ns, top_k=top_k)
+                hits = [
+                    h for h in (res.get("hits") or [])
+                    if float(h.get("score") or 0) >= 0.28 and (h.get("text") or "").strip()
+                ]
+                if hits:
+                    hit_cap = max(300, vector_budget // max(1, len(hits)))
+                    body = "\n".join(
+                        f"- {_trim_to_budget(str(h.get('text') or ''), hit_cap)}" for h in hits
+                    )
+                    block = take(f"### Stored memory ({ns})\n{body}", vector_budget)
+                    if block:
+                        chunks.append(block)
+                    break
+            except Exception:
+                continue
+    # Client-supplied history as secondary continuity
+    hist = _history_block(history)
+    if hist and not any(c.startswith("### Session memory") for c in chunks):
+        block = take("### Recent conversation\n" + hist, session_budget)
+        if block:
+            chunks.append(block)
+    return "\n\n".join(chunks).strip()
+
+
+def execute_auto(
+    snapshot: dict[str, Any],
+    event: dict[str, Any] | None = None,
+    completion: Callable[[dict[str, Any], list[dict[str, Any]] | None], dict[str, Any]] | None = None,
+    on_delta: Callable[[str], None] | None = None,
+    on_status: Callable[[dict[str, Any]], None] | None = None,
+    memory: MemoryStore | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Auto mode: direct model chat (host CLIs as detected) + unified memory + failover.
+
+    Does not run multi-agent service presets. When a model hits session/week/quota
+    limits (or is unavailable), tries the next model in the chain. When no
+    cloud/subscription models remain, uses local Ollama for coding/chat.
+    """
+    event = dict(event or {})
+    goal = str(event.get("goal") or event.get("prompt") or "").strip()
+    if not goal:
+        raise ValueError("goal is required")
+    if len(goal) > 100_000:
+        raise ValueError("goal exceeds 100000 characters")
+
+    sid = str(session_id or event.get("session_id") or event.get("session") or "").strip() or None
+    prefer_local = bool(event.get("prefer_local") or event.get("force_local"))
+    context_kb = resolve_memory_context_kb(
+        event.get("memory_context_kb")
+        if event.get("memory_context_kb") is not None
+        else event.get("context_kb")
+    )
+    chain = list_auto_failover_chain(snapshot, session_id=sid, prefer_local=prefer_local)
+    if not chain:
+        raise ValueError(
+            "no models available for Auto mode — authenticate a host CLI (Grok/Claude/Codex) "
+            "or start local Ollama with a chat/code model"
+        )
+
+    mem_block = _auto_memory_block(memory, sid, goal, event.get("history"), context_kb=context_kb)
+    system = (
+        "You are AetherStack Auto. Answer the user directly, the same way native "
+        "Grok, Claude, or Codex chat would. Shared memory may appear below — use it "
+        "when relevant. Do not mention agents, orchestration, failover, or which "
+        "model is running unless the user asks."
+    )
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    if mem_block:
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"Unified memory context ({context_kb} KiB budget, "
+                    f"{len(mem_block)} chars used):\n{mem_block}"
+                ),
+            }
+        )
+        messages.append({"role": "assistant", "content": "Understood. I'll use relevant memory when helpful."})
+    messages.append({"role": "user", "content": goal})
+
+    # Attachments (vision/PDF) on final user turn when present
+    attachments = [item for item in (event.get("attachments") or []) if isinstance(item, dict)]
+    if attachments:
+        tmp_call = {"model": chain[0]["model"], "max_tokens": 2000}
+        _augment_final_message_with_attachments(messages, attachments, snapshot, tmp_call)
+
+    completion = completion or _chat_completion
+    attempts: list[dict[str, Any]] = []
+    last_error: str | None = None
+    chain_models = [item["model"] for item in chain]
+
+    _emit_status(
+        on_status,
+        "auto_chain",
+        model=chain_models[0],
+        models=chain_models,
+        label=f"Auto · {len(chain_models)} models ready…",
+    )
+
+    for index, item in enumerate(chain):
+        model = item["model"]
+        host = item.get("executor") == "host_cli" or _is_host_cli(snapshot, model)
+        label = f"{'CLI' if host else 'Local'} · {model}"
+        _emit_status(on_status, "answering", model=model, models=chain_models, label=f"Using {model}…")
+        call = {"model": model, "max_tokens": int(event.get("max_tokens") or 2000), "role": "auto"}
+        try:
+            if on_delta is not None and not host:
+                result = _chat_completion_stream(call, messages, on_delta)
+            else:
+                result = completion(call, messages)
+                text = str(result.get("content") or "")
+                if on_delta is not None and text:
+                    on_delta(text)
+            answer = str(result.get("content") or "").strip()
+            if not answer:
+                raise RuntimeError(f"{model} returned an empty answer")
+            if sid:
+                _auto_session_model[sid] = model
+            if memory is not None and sid:
+                try:
+                    memory.append_message(sid, "user", goal, meta={"auto": True})
+                    memory.append_message(
+                        sid,
+                        "assistant",
+                        answer,
+                        meta={"auto": True, "model": model, "executor": item.get("executor")},
+                    )
+                except Exception:
+                    pass
+            return {
+                "ok": True,
+                "service_id": "auto",
+                "auto_mode": True,
+                "answer": answer,
+                "model": result.get("model") or model,
+                "executor": item.get("executor"),
+                "tier": item.get("tier"),
+                "usage": result.get("usage") or {},
+                "model_chain": chain_models,
+                "failover_attempts": attempts,
+                "attempt_index": index,
+                "memory": "unified",
+                "memory_context_kb": context_kb,
+                "memory_chars_used": len(mem_block) if mem_block else 0,
+                "selection": {
+                    "service_id": "auto",
+                    "label": "Auto",
+                    "confidence": "direct",
+                    "source": "auto-direct-models",
+                    "model": model,
+                    "model_chain": chain_models,
+                    "memory_context_kb": context_kb,
+                },
+                "agents": [
+                    {
+                        "id": "auto",
+                        "role": "auto",
+                        "label": "Auto",
+                        "model": model,
+                        "available": True,
+                        "provider": item.get("provider"),
+                        "backend": item.get("backend"),
+                        "tier": item.get("tier"),
+                    }
+                ],
+            }
+        except Exception as exc:
+            last_error = str(exc)[:500]
+            fail_kind = "limit_or_unavailable" if is_failover_error(exc) else "error"
+            attempts.append(
+                {
+                    "model": model,
+                    "executor": item.get("executor"),
+                    "error": last_error,
+                    "kind": fail_kind,
+                }
+            )
+            _emit_status(
+                on_status,
+                "failover",
+                model=model,
+                models=chain_models,
+                label=f"{model} failed · next…",
+            )
+            # Non-failover hard errors still try next model in Auto (resilience),
+            # but only when more models remain.
+            if index >= len(chain) - 1:
+                break
+            continue
+
+    raise RuntimeError(
+        "Auto mode exhausted all models "
+        f"(tried {len(attempts)}): {last_error or 'unknown error'}. "
+        "Re-authenticate a host CLI or pull a local Ollama coding model."
+    )
 
 
 def execute_service(

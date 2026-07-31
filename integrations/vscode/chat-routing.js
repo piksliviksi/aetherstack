@@ -66,8 +66,8 @@ function commandHelp(services = []) {
   const dynamic = services.map((service) => `/${service.id}`).join(", ");
   return [
     "AetherStack commands",
-    "• /auto <goal> — analyze the goal and choose the preset",
-    "• /preset <name> <goal> — use a named preset",
+    "• /auto <goal> — use detected host CLI models (Grok/Claude/Codex) as-is + unified memory; fail over on limits to the next model, then local Ollama GPU for coding",
+    "• /preset <name> <goal> — use a named multi-agent preset",
     "• /presets — list the presets available on this system",
     "• /help — show this help",
     dynamic ? `Shortcuts: ${dynamic}` : "",

@@ -187,6 +187,12 @@
           "type": "boolean",
           "default": true,
           "description": "In AetherStack Chat, show token usage after each reply (toggle from the / menu)."
+        },
+        "aetherstack.memoryContextKb": {
+          "type": "number",
+          "enum": [256, 512, 1024, 2048],
+          "default": 512,
+          "description": "Unified memory context budget for Auto mode (KiB of text injected from session + vector memory). Default 512 KiB — enough for multi-turn coding without saturating typical local Ollama windows. Cycle from the Chat / menu."
         }
       }
     },
