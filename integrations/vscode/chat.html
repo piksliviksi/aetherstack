@@ -46,6 +46,7 @@
     .icon-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     .composer {
       position: relative;
+      min-width: 0;
       border: 1px solid var(--vscode-panel-border);
       padding: 2px 10px 8px;
       margin-top: auto;
@@ -325,7 +326,7 @@
     $('leanModeState').textContent = $('lean').value[0].toUpperCase() + $('lean').value.slice(1);
     $('tokenSaverState').textContent = $('tokenSaver').checked ? 'On' : 'Off';
   }
-  function rotateActivity() { const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text); $('activityText').textContent = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : 'Combobulating the agent swarm...'; }
+  function rotateActivity() { const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text); $('activityText').textContent = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : 'Combobulating...'; }
   function saveState() { vscode.setState({ transcript: transcript.slice(-40), conversationId: activeConversationId, serviceId: $('service').value || 'auto', activeServiceId }); }
   function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('cancel').hidden = !value; $('send').disabled = Boolean(value); $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; } }
   function appendRichText(parent, value) {

@@ -1,25 +1,25 @@
 {
   "schema": "aetherstack.activity-words.v1",
   "words": [
-    {"id": "en-combobulating", "text": "Combobulating the agent swarm...", "language": "en", "tone": "playful", "enabled": true},
-    {"id": "en-fishermongering", "text": "Fishermongering for useful tokens...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "en-combobulating", "text": "Combobulating...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "en-fishermongering", "text": "Fishermongering for tokens...", "language": "en", "tone": "playful", "enabled": true},
     {"id": "en-damn-tokens", "text": "Wrangling the damn tokens...", "language": "en", "tone": "mild-vulgar", "enabled": true},
-    {"id": "en-gremlins", "text": "Negotiating with inference gremlins...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "en-gremlins", "text": "Negotiating with gremlins...", "language": "en", "tone": "playful", "enabled": true},
     {"id": "et-thoughts", "text": "Mõtteid mudimas...", "language": "et", "tone": "playful", "enabled": true},
-    {"id": "et-code", "text": "Koodi kammimas ja vigu taga ajamas...", "language": "et", "tone": "playful", "enabled": true},
+    {"id": "et-code", "text": "Koodi kammimas...", "language": "et", "tone": "playful", "enabled": true},
     {"id": "et-damn", "text": "Kuradi hästi arvutamas...", "language": "et", "tone": "mild-vulgar", "enabled": true},
     {"id": "uk-magic", "text": "Чаклуємо над токенами...", "language": "uk", "tone": "playful", "enabled": true},
     {"id": "uk-thoughts", "text": "Збираємо думки докупи...", "language": "uk", "tone": "playful", "enabled": true},
-    {"id": "uk-hot", "text": "Мізки киплять, відповідь готується...", "language": "uk", "tone": "playful", "enabled": true},
+    {"id": "uk-hot", "text": "Мізки киплять...", "language": "uk", "tone": "playful", "enabled": true},
     {"id": "uk-bliaha", "text": "Бляха, рахуємо далі...", "language": "uk", "tone": "mild-vulgar", "enabled": true},
-    {"id": "en-semicolons", "text": "Bribing the tokenizer with semicolons...", "language": "en", "tone": "playful", "enabled": true},
-    {"id": "en-tabs-spaces", "text": "Arguing with itself about tabs vs spaces...", "language": "en", "tone": "playful", "enabled": true},
-    {"id": "en-rubber-duck", "text": "Explaining the problem to a rubber duck...", "language": "en", "tone": "playful", "enabled": true},
-    {"id": "et-ajurunnak", "text": "Käivitan väikest ajurünnakut...", "language": "et", "tone": "playful", "enabled": true},
+    {"id": "en-semicolons", "text": "Bribing the tokenizer...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "en-tabs-spaces", "text": "Arguing about tabs vs spaces...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "en-rubber-duck", "text": "Explaining it to a rubber duck...", "language": "en", "tone": "playful", "enabled": true},
+    {"id": "et-ajurunnak", "text": "Väike ajurünnak käib...", "language": "et", "tone": "playful", "enabled": true},
     {"id": "et-koolon", "text": "Otsin kadunud koolonit...", "language": "et", "tone": "playful", "enabled": true},
-    {"id": "et-kohv", "text": "Joon virtuaalset kohvi ja mõtlen...", "language": "et", "tone": "playful", "enabled": true},
-    {"id": "uk-deadline", "text": "Домовляюся з нейронкою про дедлайн...", "language": "uk", "tone": "playful", "enabled": true},
-    {"id": "uk-hallucinations", "text": "Ловлю галюцинації за хвіст...", "language": "uk", "tone": "playful", "enabled": true},
-    {"id": "uk-cat", "text": "Питаю кота, чи це гарна ідея...", "language": "uk", "tone": "playful", "enabled": true}
+    {"id": "et-kohv", "text": "Joon virtuaalset kohvi...", "language": "et", "tone": "playful", "enabled": true},
+    {"id": "uk-deadline", "text": "Домовляюся про дедлайн...", "language": "uk", "tone": "playful", "enabled": true},
+    {"id": "uk-hallucinations", "text": "Ловлю галюцинації...", "language": "uk", "tone": "playful", "enabled": true},
+    {"id": "uk-cat", "text": "Питаю кота...", "language": "uk", "tone": "playful", "enabled": true}
   ]
 }
