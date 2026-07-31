@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.16
+
+- **Fix Auto mode answering the scaffolding instead of the question.** The host-CLI bridge flattened every message — system turns included — into one prompt with `SYSTEM:`/`USER:` headers and piped it to the CLI as user text, which a coding agent reads as an injected instruction block and refuses. System turns now travel via each CLI's own mechanism: `--append-system-prompt` (Claude), `--rules` (Grok), `-c developer_instructions=` (Codex). A lone user turn is sent verbatim.
+- **Claude CLI keeps its tools.** It previously ran with `--tools ""`, so it narrated tool calls it could not make and answered from guesswork; `--permission-mode plan` is the read-only guard.
+- **Choose your own fallback order** — `GET|POST /api/auto/chain`. Aliases may name host CLIs or local models, so `codex → claude → grok → local` is one ordered list. Replaces the hardcoded order.
+- **First-run setup** — `GET|POST /api/first-run` sequences scan → install → connect → order. Nothing installs without `confirm: true`.
+- **Node graphs now run** — `POST /api/graphs/run` executes the compiled stages in topological order, threads each output downstream, and runs Memory nodes against the shared pool. Previously the canvas could only draw and plan, and `memory_ops` were compiled then ignored. A failing stage is recorded and the run continues.
+- Fix an unbounded 4s retry loop in Chat when the Hub is unreachable; the timer is now cleared once no webview remains.
+- Rewrite `docs/OPERATING-MODEL.md` around the actual product model: pass-through Auto, one shared memory pool, and the two tiers.
+
 ## 0.3.15
 
 - Simplify Chat `/` menu to **New chat**, **Mode** picker, **Services**, **Settings**, **Refresh**, and **Recent** — display toggles and advanced setup stay in VS Code Settings / Control Center.
