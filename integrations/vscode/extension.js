@@ -871,6 +871,9 @@ class HubChat {
       await this.postState(`AetherStack Hub is unreachable (${error.message || error}). Retrying…`, true, webview);
       clearTimeout(this.servicesRetryTimer);
       this.servicesRetryTimer = setTimeout(() => this.loadServices(false, webview), 4000);
+      // The retry re-arms itself for as long as the Hub stays down, so it must
+      // never be the reason a process stays alive.
+      this.servicesRetryTimer.unref?.();
       return;
     }
     try {
@@ -1240,7 +1243,10 @@ class HubChat {
   resolveWebviewView(view) {
     this.view = view;
     this.configureWebview(view.webview);
-    view.onDidDispose(() => { if (this.view === view) this.view = null; }, null, this.context.subscriptions);
+    view.onDidDispose(() => {
+      if (this.view === view) this.view = null;
+      if (!this.activeWebview()) clearTimeout(this.servicesRetryTimer);
+    }, null, this.context.subscriptions);
   }
 
   async show() {
@@ -1261,7 +1267,10 @@ class HubChat {
       { enableScripts: true, retainContextWhenHidden: true }
     );
     this.configureWebview(this.panel.webview);
-    this.panel.onDidDispose(() => { this.panel = null; }, null, this.context.subscriptions);
+    this.panel.onDidDispose(() => {
+      this.panel = null;
+      if (!this.activeWebview()) clearTimeout(this.servicesRetryTimer);
+    }, null, this.context.subscriptions);
   }
 }
 

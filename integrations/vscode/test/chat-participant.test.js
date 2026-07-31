@@ -26,12 +26,11 @@ function fakeHubChat({ services = [{ id: "coding", label: "Coding", summary: "Im
 
 const token = { isCancellationRequested: false };
 
-test("routes a natural-language prompt through auto classification", async () => {
+test("a bare prompt goes straight to Auto, with no classify round-trip", async () => {
   const calls = [];
   const hubChat = fakeHubChat({
     run: async (pathname, options) => {
       calls.push(pathname);
-      if (pathname === "/api/services/classify") return { service_id: "coding", label: "Coding", confidence: "high" };
       return { answer: "Implemented the fix.", agents: [{ model: "gpt-4.1" }] };
     },
   });
@@ -39,9 +38,10 @@ test("routes a natural-language prompt through auto classification", async () =>
   const stream = fakeStream();
   await handler({ prompt: "fix the bug", command: undefined }, {}, stream, token);
 
-  assert.deepEqual(calls, ["/api/services/classify", "/api/services/coding/run"]);
+  // Auto is a direct pass-through: no preset classification step.
+  assert.deepEqual(calls, ["/api/services/auto/run"]);
   const { markdown } = stream.get();
-  assert.ok(markdown.some((m) => m.includes("Coding")), "should announce the resolved preset");
+  assert.ok(markdown.some((m) => m.includes("Auto")), "should announce Auto");
   assert.ok(markdown.some((m) => m.includes("Implemented the fix.")), "should stream the answer");
   assert.ok(markdown.some((m) => m.includes("gpt-4.1")), "should surface the resolved team");
 });
@@ -92,7 +92,6 @@ test("native Chat context is thread-local and remembers an explicit preset", asy
     ],
     run: async (pathname, options) => {
       calls.push({ pathname, body: options.body });
-      if (pathname === "/api/services/classify") return { service_id: "research", label: "Research", confidence: "high" };
       return { answer: "done" };
     },
   });
@@ -112,10 +111,11 @@ test("native Chat context is thread-local and remembers an explicit preset", asy
     { role: "assistant", content: "first answer" },
   ]);
 
+  // A fresh thread carries no preset, so it falls back to Auto rather than
+  // inheriting the other thread's "coding" selection.
   await handler({ prompt: "investigate this", command: undefined }, { history: [] }, fakeStream(), token);
-  assert.equal(calls[1].pathname, "/api/services/classify");
-  assert.equal(calls[2].pathname, "/api/services/research/run");
-  assert.deepEqual(calls[2].body.history, []);
+  assert.equal(calls[1].pathname, "/api/services/auto/run");
+  assert.deepEqual(calls[1].body.history, []);
   assert.equal(selectedServiceFromContext(codingContext, ["coding", "research"]), "coding");
   assert.deepEqual(historyFromContext({ history: [] }), []);
 });
