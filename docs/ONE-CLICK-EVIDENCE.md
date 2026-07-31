@@ -78,5 +78,5 @@ stack, returned the exact inference sentinel with 49 total tokens, reported
 1,163,080,498 model bytes in VRAM, and stopped its own Compose project. The
 final rebuilt artifacts are:
 
-- VSIX SHA-256: `2405f23edf8fbf0f117266b3c21f57ca06be765d39348a8084a5f7dc998c8ebe`
+- VSIX SHA-256: `7f3ffe8b3a25f93b5efb0f09d8041a7545d0071878c8e83cf002828ead63aa51`
 - Runtime SHA-256: `a83ac144d406d676edf93c1ccd3b92120096f83dda9c200a01fb1261398c9ee7`

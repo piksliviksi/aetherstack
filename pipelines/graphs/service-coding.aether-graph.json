@@ -1,0 +1,162 @@
+{
+  "schema": "aetherstack.graph.v1",
+  "id": "service-coding",
+  "title": "Coding service tree",
+  "nodes": [
+    {
+      "id": "service-coding-goal",
+      "type": "goal",
+      "x": 30,
+      "y": 70,
+      "data": {
+        "text": "Implement a focused feature or refactor with tests and review.",
+        "label": "Task / goal",
+        "service_id": "coding"
+      }
+    },
+    {
+      "id": "service-coding-lead",
+      "type": "master",
+      "x": 103,
+      "y": -92,
+      "data": {
+        "label": "Coding lead",
+        "role": "mastermind",
+        "model": "local-llama",
+        "provider": "ollama",
+        "backend": "ollama/llama3.1:8b",
+        "tier": "local",
+        "strategy": "best_score",
+        "needs": [
+          "code",
+          "reason",
+          "tools"
+        ],
+        "available": true,
+        "service_id": "coding",
+        "instructions_md": "# Coding behavior\n\n- Read the actual call path and local conventions before editing.\n- Make the smallest coherent change that solves the requested behavior.\n- Preserve unrelated work and avoid broad mechanical rewrites.\n- Add focused regression coverage and run the relevant integration path.\n- Finish with changed files, verification evidence, and honest gaps.\n",
+        "instructions_source": "coding.md"
+      }
+    },
+    {
+      "id": "service-coding-worker-1",
+      "type": "worker",
+      "x": 295,
+      "y": -91,
+      "data": {
+        "label": "Unresolved worker",
+        "role": "unresolved worker",
+        "model": null,
+        "provider": null,
+        "backend": null,
+        "tier": null,
+        "strategy": "best_score",
+        "needs": [],
+        "available": false,
+        "service_id": "coding",
+        "instructions_md": "# Coding behavior\n\n- Read the actual call path and local conventions before editing.\n- Make the smallest coherent change that solves the requested behavior.\n- Preserve unrelated work and avoid broad mechanical rewrites.\n- Add focused regression coverage and run the relevant integration path.\n- Finish with changed files, verification evidence, and honest gaps.\n",
+        "instructions_source": "coding.md"
+      }
+    },
+    {
+      "id": "service-coding-review",
+      "type": "analyser",
+      "x": 479,
+      "y": -156,
+      "data": {
+        "label": "Review",
+        "role": "review",
+        "model": null,
+        "provider": null,
+        "backend": null,
+        "tier": null,
+        "strategy": "best_score",
+        "needs": [],
+        "available": false,
+        "service_id": "coding",
+        "instructions_md": "# Coding behavior\n\n- Read the actual call path and local conventions before editing.\n- Make the smallest coherent change that solves the requested behavior.\n- Preserve unrelated work and avoid broad mechanical rewrites.\n- Add focused regression coverage and run the relevant integration path.\n- Finish with changed files, verification evidence, and honest gaps.\n",
+        "instructions_source": "coding.md"
+      }
+    },
+    {
+      "id": "service-coding-synthesis",
+      "type": "master",
+      "x": 658,
+      "y": 77,
+      "data": {
+        "label": "Final synthesis",
+        "role": "synthesizer",
+        "model": "codex-cli",
+        "provider": "codex-cli",
+        "backend": "host-cli/codex",
+        "tier": "subscription",
+        "strategy": "best_score",
+        "needs": [
+          "code",
+          "reason",
+          "tools"
+        ],
+        "available": true,
+        "service_id": "coding",
+        "instructions_md": "# Coding behavior\n\n- Read the actual call path and local conventions before editing.\n- Make the smallest coherent change that solves the requested behavior.\n- Preserve unrelated work and avoid broad mechanical rewrites.\n- Add focused regression coverage and run the relevant integration path.\n- Finish with changed files, verification evidence, and honest gaps.\n",
+        "instructions_source": "coding.md",
+        "capabilities": [
+          "chat",
+          "code",
+          "reason",
+          "tools",
+          "long_context"
+        ]
+      }
+    },
+    {
+      "id": "service-coding-output",
+      "type": "output",
+      "x": 844,
+      "y": -15,
+      "data": {
+        "label": "Final answer",
+        "service_id": "coding"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-service-coding-goal-service-coding-lead",
+      "from": "service-coding-goal",
+      "to": "service-coding-lead",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-coding-lead-service-coding-worker-1",
+      "from": "service-coding-lead",
+      "to": "service-coding-worker-1",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-coding-worker-1-service-coding-review",
+      "from": "service-coding-worker-1",
+      "to": "service-coding-review",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-coding-review-service-coding-synthesis",
+      "from": "service-coding-review",
+      "to": "service-coding-synthesis",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-coding-synthesis-service-coding-output",
+      "from": "service-coding-synthesis",
+      "to": "service-coding-output",
+      "kind": "data"
+    }
+  ],
+  "updated_at": 1785361342.4470444,
+  "service_id": "coding",
+  "token_saver": true,
+  "lean_mode": "balanced",
+  "resolved_models": [
+    "local-llama"
+  ]
+}
