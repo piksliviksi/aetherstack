@@ -227,6 +227,11 @@ class MemoryStore:
             return out
         return list(self._local_vectors.get(namespace, []))
 
+    def list_vectors(self, namespace: str) -> list[dict]:
+        """All vectors in a namespace, most-recent first (no query/embedding needed)."""
+        docs = self._load_vectors(namespace)
+        return sorted(docs, key=lambda d: d.get("ts") or 0, reverse=True)
+
     def stats(self, namespace: str = DEFAULT_NAMESPACE) -> dict[str, Any]:
         docs = self._load_vectors(namespace)
         return {

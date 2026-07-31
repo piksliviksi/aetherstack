@@ -341,6 +341,65 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertIn("never mention a lead", calls[-1][2][0]["content"])
         self.assertIn("no undeclared names", calls[-1][2][0]["content"])
 
+    def test_handoff_context_carries_reasoning_across_a_model_switch(self) -> None:
+        """A session-scoped, server-stored reasoning trace — not client-replayed chat
+        history — is what lets a second, different model continue a first model's work."""
+        os.environ["AETHER_HASH_EMBED"] = "1"
+        from memory import MemoryStore
+
+        mem = MemoryStore(url="redis://127.0.0.1:1/0")  # unreachable on purpose -> local fallback
+        self.assertEqual(mem.backend, "memory-fallback")
+
+        def solo_snapshot(model_id: str) -> dict:
+            return {
+                "models": {
+                    model_id: {
+                        "available": True,
+                        "availability_reason": "test",
+                        "provider": model_id,
+                        "tier": "cloud",
+                        "cost": "low",
+                        "latency": "low",
+                        "capabilities": ["chat", "code", "reason", "tools", "long_context"],
+                    }
+                }
+            }
+
+        def completion_factory(tag: str):
+            def completion(call: dict, messages: list[dict] | None = None) -> dict:
+                return {"model": call["model"], "content": f"{tag}-content", "usage": {}}
+            return completion
+
+        services.execute_service(
+            "coding",
+            solo_snapshot("model-a"),
+            {"goal": "Remember the code WATERMELON42.", "verify": False},
+            completion=completion_factory("model-a"),
+            memory=mem,
+            session_id="test-handoff-session",
+        )
+
+        captured: list[dict] = []
+
+        def completion_b(call: dict, messages: list[dict] | None = None) -> dict:
+            captured.append({"role": call.get("role", "lead"), "model": call["model"], "messages": messages})
+            return {"model": call["model"], "content": "model-b-content", "usage": {}}
+
+        services.execute_service(
+            "coding",
+            solo_snapshot("model-b"),
+            {"goal": "What did you note down?", "verify": False},
+            completion=completion_b,
+            memory=mem,
+            session_id="test-handoff-session",
+        )
+
+        lead_messages = captured[0]["messages"]
+        handoff_texts = [m["content"] for m in lead_messages if "model-a-content" in m.get("content", "")]
+        self.assertTrue(handoff_texts, "second model's prompt should carry the first model's reasoning")
+        self.assertIn("previously worked by model-a", handoff_texts[0])
+        self.assertIn("now continued by model-b", handoff_texts[0])
+
     def test_activity_word_database_is_locally_editable(self) -> None:
         old_path = activity_words.DB_PATH
         with tempfile.TemporaryDirectory() as td:

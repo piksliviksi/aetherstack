@@ -1075,7 +1075,14 @@ class Handler(BaseHTTPRequestHandler):
             service_id = path[len("/api/services/") : -len("/run")].strip("/")
             try:
                 selection = classify_service(body.get("goal") or body.get("prompt"), get_snapshot()) if service_id == "auto" else None
-                result = execute_service(selection["service_id"] if selection else service_id, get_snapshot(), body or {})
+                sid = body.get("session_id") or body.get("session")
+                result = execute_service(
+                    selection["service_id"] if selection else service_id,
+                    get_snapshot(),
+                    body or {},
+                    memory=_memory,
+                    session_id=sid,
+                )
                 if selection:
                     result["selection"] = {key: value for key, value in selection.items() if key != "service"}
                 self._send(200, result)
@@ -1094,7 +1101,15 @@ class Handler(BaseHTTPRequestHandler):
                 def on_delta(chunk_text: str) -> None:
                     self._send_sse_event({"type": "delta", "text": chunk_text})
 
-                result = execute_service(resolved_id, get_snapshot(), body or {}, on_delta=on_delta)
+                sid = body.get("session_id") or body.get("session")
+                result = execute_service(
+                    resolved_id,
+                    get_snapshot(),
+                    body or {},
+                    on_delta=on_delta,
+                    memory=_memory,
+                    session_id=sid,
+                )
                 if selection:
                     result["selection"] = {key: value for key, value in selection.items() if key != "service"}
                 self._send_sse_event({"type": "done", "result": result})

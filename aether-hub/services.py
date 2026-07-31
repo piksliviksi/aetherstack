@@ -16,9 +16,11 @@ import yaml
 
 from agents import apply_runtime_update, plan_event
 from attachments import build_image_content_part, decode_attachment, extract_pdf_text
+from cross_memory import get_xref_state, pull_context
 from inference_runtime import begin as begin_inference
 from inference_runtime import finish as finish_inference
 from matrix import _score_model
+from memory import MemoryStore
 
 ROOT = Path(__file__).resolve().parent
 CATALOG_PATH = Path(os.environ.get("AETHER_SERVICE_CATALOG", str(ROOT / "service_catalog.yaml")))
@@ -693,14 +695,102 @@ def _history_block(history: Any) -> str:
     if not isinstance(history, list):
         return ""
     lines = []
-    for item in history[-8:]:
+    for item in history[-24:]:
         if not isinstance(item, dict):
             continue
         role = str(item.get("role") or "user")[:20]
-        content = str(item.get("content") or "")[:4000]
+        content = str(item.get("content") or "")[:6000]
         if content:
             lines.append(f"{role}: {content}")
-    return "\n\n".join(lines)[-16000:]
+    return "\n\n".join(lines)[-48000:]
+
+
+def _merge_history(session_history: list[Any] | None, client_history: Any) -> list[Any]:
+    """Server-stored session transcript is authoritative (survives a model switch and a
+    reloaded webview); anything the client sent that isn't in it yet is appended after."""
+    merged = list(session_history or [])
+    seen = {(str(m.get("role")), str(m.get("content"))) for m in merged if isinstance(m, dict)}
+    for item in client_history if isinstance(client_history, list) else []:
+        if not isinstance(item, dict):
+            continue
+        key = (str(item.get("role")), str(item.get("content")))
+        if key not in seen:
+            merged.append(item)
+            seen.add(key)
+    return merged
+
+
+def _handoff_namespace(session_id: str) -> str:
+    return f"handoff-reasoning:{session_id}"
+
+
+def _load_handoff_context(memory: MemoryStore | None, session_id: str | None, current_model: str) -> str:
+    """Pull the previous turn's internal reasoning (lead plan + review notes) back in as
+    text context — the only channel that exists between two different model providers.
+    Hidden states / KV-caches are architecture-specific and never exposed by any provider's
+    API, so this is the real mechanism: written reasoning, not shared weights."""
+    if memory is None or not session_id:
+        return ""
+    try:
+        docs = memory.list_vectors(_handoff_namespace(session_id))
+    except Exception:
+        return ""
+    if not docs:
+        return ""
+    previous_model = (docs[0].get("meta") or {}).get("model")
+    trace = "\n\n---\n\n".join(str(d.get("text") or "")[:4000] for d in docs[:3] if d.get("text"))
+    if not trace:
+        return ""
+    if previous_model and previous_model != current_model:
+        return (
+            f"### Prior reasoning from this session (previously worked by {previous_model}, "
+            f"now continued by {current_model})\n"
+            "Treat this as your own prior work; continue from it, do not re-derive from scratch.\n\n"
+            f"{trace}"
+        )
+    return f"### Your prior reasoning in this session\n\n{trace}"
+
+
+def _store_handoff_context(
+    memory: MemoryStore | None,
+    session_id: str | None,
+    service_id: str,
+    model: str | None,
+    goal: str,
+    lead_content: str,
+    review_content: str | None,
+) -> None:
+    if memory is None or not session_id:
+        return
+    text = f"[goal]\n{goal[:2000]}\n\n[lead reasoning]\n{(lead_content or '')[:6000]}"
+    if review_content:
+        text += f"\n\n[review notes]\n{review_content[:3000]}"
+    try:
+        memory.upsert_vector(
+            text=text,
+            namespace=_handoff_namespace(session_id),
+            meta={"model": model, "service_id": service_id, "goal": goal[:200]},
+        )
+    except Exception:
+        pass
+
+
+def _auto_pull_xref(memory: MemoryStore | None, goal: str) -> str:
+    """Auto cross-project recall, mirroring what /api/agents/plan already does — extended
+    here so the ordinary service-run path (chat) benefits too, not just the generic
+    multi-agent event endpoint."""
+    if memory is None or not goal:
+        return ""
+    try:
+        state = get_xref_state()
+        if not (state.get("multi_project") and state.get("auto_pull", True)):
+            return ""
+        pulled = pull_context(memory, goal[:500], top_k=state.get("max_pull"))
+        if pulled.get("ok") and pulled.get("prompt_block"):
+            return pulled["prompt_block"]
+    except Exception:
+        pass
+    return ""
 
 
 def _select_vision_model(snapshot: dict[str, Any]) -> str | None:
@@ -753,8 +843,19 @@ def execute_service(
     event: dict[str, Any] | None = None,
     completion: Callable[[dict[str, Any], list[dict[str, Any]] | None], dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
+    memory: MemoryStore | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
-    """Execute a bounded lead -> workers -> review -> synthesis service run."""
+    """Execute a bounded lead -> workers -> review -> synthesis service run.
+
+    `memory`/`session_id`, when supplied, make a model switch mid-conversation carry
+    real context: the server-stored session transcript (not just what the client echoes
+    back) plus the previous turn's written reasoning (lead plan + review notes) are fed
+    to whichever model runs this turn. That written-reasoning handoff is the only channel
+    that exists between two different model providers — no provider API exposes hidden
+    states / KV-cache, and they're architecture-specific even when it's the same provider,
+    so there is no lower-level state to transfer.
+    """
     event = dict(event or {})
     goal = str(event.get("goal") or event.get("prompt") or "").strip()
     if not goal:
@@ -771,10 +872,23 @@ def execute_service(
     if not lead_call or not lead_call.get("model"):
         raise ValueError("no available lead model for this service")
 
-    history = _history_block(event.get("history"))
+    session_history = None
+    if memory is not None and session_id:
+        try:
+            session_history = memory.get_session(session_id, limit=60)
+        except Exception:
+            session_history = None
+    history = _history_block(_merge_history(session_history, event.get("history")))
+    handoff_context = _load_handoff_context(memory, session_id, lead_call.get("model"))
+    xref_block = _auto_pull_xref(memory, goal)
+
     lead_messages = copy.deepcopy(lead_call.get("messages") or [])
     if history:
         lead_messages.append({"role": "user", "content": f"Recent conversation:\n{history}"})
+    if handoff_context:
+        lead_messages.append({"role": "user", "content": handoff_context})
+    if xref_block:
+        lead_messages.append({"role": "user", "content": xref_block})
     lead = completion(lead_call, lead_messages)
 
     def run_worker(call: dict[str, Any]) -> dict[str, Any]:
@@ -854,6 +968,15 @@ def execute_service(
     ]
     if review:
         steps.append({"role": "review", **review})
+    _store_handoff_context(
+        memory,
+        session_id,
+        service_id,
+        lead_call.get("model"),
+        goal,
+        lead.get("content") or "",
+        (review or {}).get("content"),
+    )
     usage_items = [lead.get("usage") or {}, final.get("usage") or {}]
     usage_items.extend(item.get("usage") or {} for item in workers)
     if review:
