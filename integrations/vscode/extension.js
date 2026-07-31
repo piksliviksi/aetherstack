@@ -851,8 +851,19 @@ class HubChat {
   async loadServices(force = false, webview = this.activeWebview()) {
     const pathname = force ? "/api/services/refresh" : "/api/services";
     const options = force ? { method: "POST", body: {} } : {};
-    const body = await this.hubRequest(pathname, options);
-    this.services = Array.isArray(body.services) ? body.services : [];
+    try {
+      const body = await this.hubRequest(pathname, options);
+      this.services = Array.isArray(body.services) ? body.services : [];
+    } catch (error) {
+      // Leave the "Auto" option selectable (and schedule a retry) instead of letting a failed
+      // fetch permanently strand the webview with an empty <select>, which silently no-ops the
+      // prompt input (sendPrompt() bails out whenever no service is selected).
+      this.services = [];
+      await this.postState(`AetherStack Hub is unreachable (${error.message || error}). Retrying…`, true, webview);
+      clearTimeout(this.servicesRetryTimer);
+      this.servicesRetryTimer = setTimeout(() => this.loadServices(false, webview), 4000);
+      return;
+    }
     try {
       const activity = await this.hubRequest("/api/activity-words");
       this.activityWords = Array.isArray(activity.words) ? activity.words.filter((item) => item.enabled !== false) : [];
