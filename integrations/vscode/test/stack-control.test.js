@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const test = require("node:test");
 
-const { execFileResult, findStackRoot, normalizeLocalUiUrl, request, requestStream, selectAvailableModels } = require("../stack-control");
+const { execFileResult, findStackRoot, normalizeLocalUiUrl, request, requestStream, selectAvailableModels, startCompose } = require("../stack-control");
 
 test("command execution streams output without killing a cold pull at the capture limit", async () => {
   let streamedBytes = 0;
@@ -17,6 +17,31 @@ test("command execution streams output without killing a cold pull at the captur
   assert.equal(streamedBytes, 6 * 1024 * 1024);
   assert.ok(Buffer.byteLength(result.stderr) <= 4 * 1024 * 1024);
   assert.match(result.stderr, /earlier command output truncated; process continued/);
+});
+
+test("startCompose reports a clean Docker-missing message, not the raw script output", { skip: process.platform !== "win32" }, async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-nodocker-"));
+  fs.mkdirSync(path.join(temp, "aether-hub"), { recursive: true });
+  fs.writeFileSync(path.join(temp, "docker-compose.yml"), "services: {}\n");
+  fs.writeFileSync(path.join(temp, "litellm_config.yaml"), "model_list: []\n");
+  fs.writeFileSync(
+    path.join(temp, "start.ps1"),
+    [
+      'Write-Host "  AetherStack"',
+      'Write-Host "  Multi-model LLM control plane"',
+      'Write-Host "  ERROR: Docker not found. Install Docker Desktop:"',
+      'Write-Host "  https://docs.docker.com/desktop/setup/install/windows-install/"',
+      "exit 1",
+    ].join("\n"),
+  );
+  try {
+    await assert.rejects(
+      startCompose(temp),
+      (error) => error.message === "Docker was not found. Install Docker Desktop (or Docker Engine) and retry.",
+    );
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("findStackRoot walks up from a workspace nested in AetherStack", () => {

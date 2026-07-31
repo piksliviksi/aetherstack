@@ -315,7 +315,11 @@ async function startCompose(stackRoot, { onOutput = null } = {}) {
     if (error.code === "ENOENT") {
       throw new Error(`${command ? command.file : "Docker"} was not found. Install Docker Desktop (or Docker Engine) and retry.`);
     }
-    const detail = conciseError(error.result && (error.result.stderr || error.result.stdout));
+    const raw = (error.result && (error.result.stderr || error.result.stdout)) || "";
+    if (/ERROR: Docker not found/i.test(raw)) {
+      throw new Error("Docker was not found. Install Docker Desktop (or Docker Engine) and retry.");
+    }
+    const detail = conciseError(raw);
     throw new Error(`AetherStack startup failed${detail ? `: ${detail}` : ": Docker is not ready"}`);
   }
 }
