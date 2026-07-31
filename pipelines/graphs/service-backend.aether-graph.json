@@ -1,0 +1,163 @@
+{
+  "schema": "aetherstack.graph.v1",
+  "id": "service-backend",
+  "title": "Backend service tree",
+  "nodes": [
+    {
+      "id": "service-backend-goal",
+      "type": "goal",
+      "x": 30,
+      "y": 70,
+      "data": {
+        "text": "Build maintainable APIs, data flows, jobs, and operational controls.",
+        "label": "Task / goal",
+        "service_id": "backend"
+      }
+    },
+    {
+      "id": "service-backend-lead",
+      "type": "master",
+      "x": 144,
+      "y": -98,
+      "data": {
+        "label": "Backend architect",
+        "role": "mastermind",
+        "model": "local-llama",
+        "provider": "ollama",
+        "backend": "ollama/llama3.1:8b",
+        "tier": "local",
+        "strategy": "best_score",
+        "needs": [
+          "code",
+          "reason",
+          "tools"
+        ],
+        "available": true,
+        "service_id": "backend",
+        "instructions_md": "# Backend behavior\n\n- Define inputs, outputs, authorization, validation, and failure contracts first.\n- Preserve data integrity across concurrency, retries, and migrations.\n- Add useful observability without logging secrets or sensitive payloads.\n- Keep changes bounded and compatible unless migration is explicit.\n- Finish with contract tests, operational checks, and rollback notes.\n",
+        "instructions_source": "backend.md"
+      }
+    },
+    {
+      "id": "service-backend-worker-1",
+      "type": "worker",
+      "x": 342,
+      "y": 11,
+      "data": {
+        "label": "API builder",
+        "role": "worker",
+        "model": "local-tiny",
+        "provider": "ollama",
+        "backend": "ollama/qwen2.5-coder:0.5b",
+        "tier": "local",
+        "strategy": "best_score",
+        "needs": [
+          "code",
+          "tools"
+        ],
+        "available": true,
+        "service_id": "backend",
+        "instructions_md": "# Backend behavior\n\n- Define inputs, outputs, authorization, validation, and failure contracts first.\n- Preserve data integrity across concurrency, retries, and migrations.\n- Add useful observability without logging secrets or sensitive payloads.\n- Keep changes bounded and compatible unless migration is explicit.\n- Finish with contract tests, operational checks, and rollback notes.\n",
+        "instructions_source": "backend.md"
+      }
+    },
+    {
+      "id": "service-backend-review",
+      "type": "analyser",
+      "x": 543,
+      "y": 59,
+      "data": {
+        "label": "Evidence critic",
+        "role": "supervisor",
+        "model": "local-llama",
+        "provider": "ollama",
+        "backend": "ollama/llama3.1:8b",
+        "tier": "local",
+        "strategy": "best_score",
+        "needs": [
+          "reason",
+          "chat"
+        ],
+        "available": true,
+        "service_id": "research",
+        "instructions_md": "# Backend behavior\n\n- Define inputs, outputs, authorization, validation, and failure contracts first.\n- Preserve data integrity across concurrency, retries, and migrations.\n- Add useful observability without logging secrets or sensitive payloads.\n- Keep changes bounded and compatible unless migration is explicit.\n- Finish with contract tests, operational checks, and rollback notes.\n",
+        "instructions_source": "backend.md",
+        "agent_ref": "research:reviewer"
+      }
+    },
+    {
+      "id": "service-backend-synthesis",
+      "type": "master",
+      "x": 760,
+      "y": 70,
+      "data": {
+        "label": "Final synthesis",
+        "role": "synthesizer",
+        "model": "local-llama",
+        "provider": "ollama",
+        "backend": "ollama/llama3.1:8b",
+        "tier": "local",
+        "strategy": "best_score",
+        "needs": [
+          "code",
+          "reason",
+          "tools"
+        ],
+        "available": true,
+        "service_id": "backend",
+        "instructions_md": "# Backend behavior\n\n- Define inputs, outputs, authorization, validation, and failure contracts first.\n- Preserve data integrity across concurrency, retries, and migrations.\n- Add useful observability without logging secrets or sensitive payloads.\n- Keep changes bounded and compatible unless migration is explicit.\n- Finish with contract tests, operational checks, and rollback notes.\n",
+        "instructions_source": "backend.md"
+      }
+    },
+    {
+      "id": "service-backend-output",
+      "type": "output",
+      "x": 930,
+      "y": 70,
+      "data": {
+        "label": "Final answer",
+        "service_id": "backend"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-service-backend-goal-service-backend-lead",
+      "from": "service-backend-goal",
+      "to": "service-backend-lead",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-backend-lead-service-backend-worker-1",
+      "from": "service-backend-lead",
+      "to": "service-backend-worker-1",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-backend-worker-1-service-backend-review",
+      "from": "service-backend-worker-1",
+      "to": "service-backend-review",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-backend-review-service-backend-synthesis",
+      "from": "service-backend-review",
+      "to": "service-backend-synthesis",
+      "kind": "data"
+    },
+    {
+      "id": "e-service-backend-synthesis-service-backend-output",
+      "from": "service-backend-synthesis",
+      "to": "service-backend-output",
+      "kind": "data"
+    }
+  ],
+  "updated_at": 1785506508.5130076,
+  "service_id": "backend",
+  "token_saver": true,
+  "lean_mode": "balanced",
+  "resolved_models": [
+    "local-llama",
+    "local-tiny"
+  ]
+}

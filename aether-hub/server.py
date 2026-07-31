@@ -1101,12 +1101,22 @@ class Handler(BaseHTTPRequestHandler):
                 def on_delta(chunk_text: str) -> None:
                     self._send_sse_event({"type": "delta", "text": chunk_text})
 
+                def on_status(payload: dict) -> None:
+                    # phase/model only — no prompt content
+                    event = {"type": "status"}
+                    if isinstance(payload, dict):
+                        for key in ("phase", "model", "models", "label"):
+                            if payload.get(key) is not None:
+                                event[key] = payload[key]
+                    self._send_sse_event(event)
+
                 sid = body.get("session_id") or body.get("session")
                 result = execute_service(
                     resolved_id,
                     get_snapshot(),
                     body or {},
                     on_delta=on_delta,
+                    on_status=on_status,
                     memory=_memory,
                     session_id=sid,
                 )

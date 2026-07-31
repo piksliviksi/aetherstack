@@ -111,7 +111,7 @@ function createChatRequestHandler(hubChat) {
       }
       if (token.isCancellationRequested) return;
 
-      stream.progress("The agent team is working…");
+      stream.progress("I'm on it…");
       const result = await hubChat.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
         method: "POST",
         signal: controller.signal,

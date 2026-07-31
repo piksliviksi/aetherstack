@@ -178,7 +178,7 @@ default TinyLlama backend, are marked correctly and receive no unsupported tool
 payload.
 
 When active-model display is enabled, VS Code Chat shows the aliases currently
-inferring alongside rotating English, Estonian, and Ukrainian activity text.
+inferring alongside short English activity lines (e.g. "I'm on it…", "We're thinking…").
 The tracked defaults live in `aether-hub/activity_words.json`; the running
 container seeds a persistent `.aetherstack/activity_words.json`, which can be
 added to or deleted from Advanced Hub.

@@ -837,12 +837,37 @@ def _augment_final_message_with_attachments(
     final_messages[-1]["content"] = text
 
 
+def _emit_status(
+    on_status: Callable[[dict[str, Any]], None] | None,
+    phase: str,
+    *,
+    model: str | None = None,
+    models: list[str] | None = None,
+    label: str | None = None,
+) -> None:
+    """Best-effort progress for UIs (VS Code chat, SSE). Never raise into the run."""
+    if on_status is None:
+        return
+    payload: dict[str, Any] = {"phase": phase}
+    if model:
+        payload["model"] = model
+    if models:
+        payload["models"] = [m for m in models if m]
+    if label:
+        payload["label"] = label
+    try:
+        on_status(payload)
+    except Exception:
+        pass
+
+
 def execute_service(
     service_id: str,
     snapshot: dict[str, Any],
     event: dict[str, Any] | None = None,
     completion: Callable[[dict[str, Any], list[dict[str, Any]] | None], dict[str, Any]] | None = None,
     on_delta: Callable[[str], None] | None = None,
+    on_status: Callable[[dict[str, Any]], None] | None = None,
     memory: MemoryStore | None = None,
     session_id: str | None = None,
 ) -> dict[str, Any]:
@@ -855,6 +880,9 @@ def execute_service(
     that exists between two different model providers — no provider API exposes hidden
     states / KV-cache, and they're architecture-specific even when it's the same provider,
     so there is no lower-level state to transfer.
+
+    `on_status` reports short phase/model updates so clients can show progress before
+    the final answer tokens stream (lead/workers/review can take a long time).
     """
     event = dict(event or {})
     goal = str(event.get("goal") or event.get("prompt") or "").strip()
@@ -863,6 +891,7 @@ def execute_service(
     if len(goal) > 100_000:
         raise ValueError("goal exceeds 100000 characters")
     completion = completion or _chat_completion
+    _emit_status(on_status, "planning", label="Planning…")
     plan = plan_service(service_id, snapshot, event)
     activation = _activate_resolved_service(plan["service"], event)
     calls = plan.get("litellm_calls") or []
@@ -871,6 +900,18 @@ def execute_service(
     worker_calls = [call for call in calls if call.get("role") == "worker"][:6]
     if not lead_call or not lead_call.get("model"):
         raise ValueError("no available lead model for this service")
+
+    planned_models = []
+    for call in [lead_call, *worker_calls, supervisor_call]:
+        if call and call.get("model") and call.get("model") not in planned_models:
+            planned_models.append(call.get("model"))
+    _emit_status(
+        on_status,
+        "planned",
+        model=lead_call.get("model"),
+        models=planned_models,
+        label="Team ready…",
+    )
 
     session_history = None
     if memory is not None and session_id:
@@ -889,7 +930,9 @@ def execute_service(
         lead_messages.append({"role": "user", "content": handoff_context})
     if xref_block:
         lead_messages.append({"role": "user", "content": xref_block})
+    _emit_status(on_status, "lead", model=lead_call.get("model"), label="Lead…")
     lead = completion(lead_call, lead_messages)
+    _emit_status(on_status, "lead_done", model=lead.get("model") or lead_call.get("model"), label="Lead done…")
 
     def run_worker(call: dict[str, Any]) -> dict[str, Any]:
         messages = copy.deepcopy(call.get("messages") or [])
@@ -908,8 +951,23 @@ def execute_service(
 
     workers = []
     if worker_calls:
+        worker_models = [c.get("model") for c in worker_calls if c.get("model")]
+        _emit_status(
+            on_status,
+            "workers",
+            model=worker_models[0] if worker_models else None,
+            models=worker_models,
+            label="Team…",
+        )
         with ThreadPoolExecutor(max_workers=len(worker_calls)) as pool:
             workers = list(pool.map(run_worker, worker_calls))
+        _emit_status(
+            on_status,
+            "workers_done",
+            model=worker_models[0] if worker_models else None,
+            models=worker_models,
+            label="Team done…",
+        )
     worker_text = "\n\n".join(
         f"[{item.get('task_id') or 'worker'} / {item.get('model')}]\n{item.get('content') or item.get('error') or ''}"
         for item in workers
@@ -917,6 +975,7 @@ def execute_service(
 
     review = None
     if supervisor_call and supervisor_call.get("model"):
+        _emit_status(on_status, "review", model=supervisor_call.get("model"), label="Review…")
         review_messages = copy.deepcopy(supervisor_call.get("messages") or [])
         review_messages.append(
             {
@@ -928,6 +987,12 @@ def execute_service(
             review = completion(supervisor_call, review_messages)
         except Exception as exc:
             review = {"model": supervisor_call.get("model"), "content": "", "error": str(exc)[:500], "usage": {}}
+        _emit_status(
+            on_status,
+            "review_done",
+            model=(review or {}).get("model") or supervisor_call.get("model"),
+            label="Review done…",
+        )
 
     final_call = dict(lead_call)
     final_call["max_tokens"] = lead_call.get("max_tokens") or 2000
@@ -956,6 +1021,7 @@ def execute_service(
     ]
     attachments = [item for item in (event.get("attachments") or []) if isinstance(item, dict)]
     _augment_final_message_with_attachments(final_messages, attachments, snapshot, final_call)
+    _emit_status(on_status, "answering", model=final_call.get("model"), label="Answering…")
     if on_delta is not None and not _is_host_cli(snapshot, final_call.get("model")):
         final = _chat_completion_stream(final_call, final_messages, on_delta)
     else:

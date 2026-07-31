@@ -29,6 +29,7 @@ COMMON_NAMESPACES = frozenset(
         "xref",
         "xref-index",
         "agent-events",
+        "global",  # pan-project Memory-node pool
     }
 )
 
@@ -37,6 +38,8 @@ COMMON_NS_PREFIXES = (
     "session:",  # common session vector mirrors
     "xref:",
     "archive:",  # common archives; private uses private:archive:
+    "tree:",  # decision-tree Memory-node pool (common unless remapped private)
+    "project:",  # project-level Memory-node pool
 )
 
 PRIVATE_PREFIX = os.environ.get("AETHER_PRIVATE_PREFIX", "aether:private")

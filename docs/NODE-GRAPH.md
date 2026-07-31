@@ -22,26 +22,111 @@ Visual node graph for agent/pipeline scripting. Place **Master / Worker / Analys
 | `worker` | Implementation | same + parallel |
 | `analyser` | Critic / QA gate | same + `gate` |
 | `tester` | Tests | prefer cheap/local |
-| `memory` | Save/search context | namespace |
+| `private` | **Local GPU private** branch | `input_folder`, `input_globs` (PDF/text), forced `tier: local`, vault on |
+| `memory` | Three-tier context pool | `scope` (tree · project · global), `action` (search · store), optional `project_id` / `namespace` |
 | `slash` | Hygiene | `/done`, `/clear`, `/compact` |
 | `output` | Sink | — |
 
+### Progress and activity chrome
+
+| Node kind | Chrome |
+|-----------|--------|
+| **Compute** (goal, master, worker, analyser, tester, private) | Light progress bar: `r========-------->` (fills with `=` as work advances) |
+| **Pass-through** (memory, slash, output) | Small **gray activity dot** in the header — **blinks** while traffic moves through; no progress bar |
+
+Runtime updates (live runs or **Demo activity** toolbar button):
+
+```js
+// From the canvas page or host extension
+window.aetherGraphRuntime.set(nodeId, { progress: 0.4, status: "running", active: true })
+window.aetherGraphRuntime.set(nodeId, { active: true })  // pass-through blink
+window.aetherGraphRuntime.setMany({ n1: { progress: 1, status: "done" } })
+```
+
+### Private node (local GPU + folder corpus)
+
+Drop **Private** from the palette into the decision tree.
+
+| Setting | Meaning |
+|---------|---------|
+| `input_folder` | Host/mount path with source documents |
+| `input_globs` | Default `*.pdf, *.txt, *.md, …` |
+| `gpu_only` | Prefer GPU-resident local models |
+| `private_vault` | Keep session/vector writes in private vault namespaces |
+| `model` | Local alias (default `local-default`) — **not** cloud makers |
+
+Pipeline export sets `role: private_local`, `select.tier: local`, `private: true`, and attaches folder + globs. See [PRIVATE-MODE.md](./PRIVATE-MODE.md) for vault rules.
+
+### Memory node tiers
+
+| `scope` | Namespace | Visibility |
+|---------|-----------|------------|
+| `tree` (default) | `tree:{graph_id}` | Other nodes in **this** decision-tree / canvas sequence |
+| `project` | `project:{project_id}` | Other node graphs in the same project |
+| `global` | `global` | Pan-project pool — research that spans projects |
+
+`action: search` loads from the tier; `action: store` records sequence output into it. Full detail: [AGENT-MEMORY.md](./AGENT-MEMORY.md#memory-layers-node-view).
+
 ---
 
-## Edges
+## Edges (multi-wire)
 
 | Method | How |
 |--------|-----|
-| Manual | Drag output port → input port |
-| Auto | `POST /api/graphs/auto-connect` or UI **Auto layout** |
+| Manual | Drag **out** port → **in** port on another node |
+| Fan-out | One node → many targets (several out wires) |
+| Fan-in | Many sources → one node (several in wires) |
+| Auto | `POST /api/graphs/auto-connect` or UI **Auto-connect** |
+| Delete | Click edge (highlight) then **Delete** / Backspace |
 
-Auto-connect order:
+Every node type allows **unlimited** fan-in and fan-out (`ports_in` / `ports_out` = many).  
+Canvas spreads multiple wires along the port side so branches stay readable. Node cards show `in N · out M`.
+
+| Edge `kind` | Meaning | Stroke |
+|-------------|---------|--------|
+| `data` | Forward flow (default) | Solid grey |
+| `feedback` | Recursive / back-edge (loop) | Dashed amber + ↻ |
+
+Duplicate same-direction pairs (`A→B` twice) are rejected; different pairs always stack.
+
+### Recursive mode
+
+Toolbar: **Recursive mode** + **iters** (`max_iterations`, default 3).
+
+| Off (default) | On |
+|---------------|-----|
+| Cycles blocked | Cycles allowed as `feedback` edges |
+| Output has no out port | Output can wire **back** into earlier nodes (e.g. master, worker, goal) |
+| Goal has no in port | Goal may receive feedback to re-enter the tree |
+
+Examples:
+
+```text
+# Fan-out / fan-in (always)
+master ──► worker-1 ──► analyser
+       └─► worker-2 ─┘
+
+# Recursive feedback (recursive mode on)
+goal → master → worker → output
+              ▲            │
+              └──── feedback ──┘
+```
+
+Pipeline export:
+
+- Stages ordered by **data** edges only (Kahn multi-parent topo)
+- `feedback_edges[]` listed separately with `recursive` + `max_iterations`
+- Each stage carries `inputs_from[]` / `outputs_to[]` for multi-wire topology
+
+Auto-connect order (linear baseline; multi-wire and loops are manual):
 
 1. `goal` → `master`  
 2. `master` → `analyser`  
 3. `analyser` → `worker`  
 4. `worker` → `tester`  
-5. `tester` → `slash` (`/done all` + `/compact`) → `output`  
+5. `tester` → `private` (optional local GPU + PDF/text folder)  
+6. `private` / `tester` → `memory` (tree / project / global)  
+7. `memory` → `slash` (`/done all` + `/compact`) → `output`  
 
 When master and analyser both use cloud, assign different makers when both are available.
 
@@ -53,22 +138,26 @@ When master and analyser both use cloud, assign different makers when both are a
 {
   "schema": "aetherstack.graph.v1",
   "id": "my-graph",
+  "recursive": false,
+  "max_iterations": 3,
   "nodes": [
     {"id": "n1", "type": "goal", "x": 40, "y": 120, "data": {"text": "Add OAuth"}},
     {"id": "n2", "type": "master", "x": 220, "y": 100, "data": {"role": "mastermind", "maker": "anthropic", "model": "claude-sonnet-4", "max_cost": "high"}},
     {"id": "n3", "type": "analyser", "x": 420, "y": 100, "data": {"role": "critic", "maker": "openai", "gate": true}},
     {"id": "n4", "type": "worker", "x": 620, "y": 80, "data": {"role": "builder", "strategy": "cheapest", "tier": "local", "parallel": 2}},
     {"id": "n5", "type": "tester", "x": 820, "y": 100, "data": {"role": "tester", "strategy": "cheapest"}},
-    {"id": "n6", "type": "slash", "x": 1000, "y": 100, "data": {"commands": ["/done all", "/compact"]}},
-    {"id": "n7", "type": "output", "x": 1180, "y": 120, "data": {}}
+    {"id": "n5b", "type": "memory", "x": 920, "y": 100, "data": {"scope": "tree", "action": "store"}},
+    {"id": "n6", "type": "slash", "x": 1080, "y": 100, "data": {"commands": ["/done all", "/compact"]}},
+    {"id": "n7", "type": "output", "x": 1260, "y": 120, "data": {}}
   ],
   "edges": [
     {"id": "e1", "from": "n1", "to": "n2"},
     {"id": "e2", "from": "n2", "to": "n3"},
     {"id": "e3", "from": "n3", "to": "n4"},
     {"id": "e4", "from": "n4", "to": "n5"},
-    {"id": "e5", "from": "n5", "to": "n6"},
-    {"id": "e6", "from": "n6", "to": "n7"}
+    {"id": "e5", "from": "n5", "to": "n5b"},
+    {"id": "e6", "from": "n5b", "to": "n6"},
+    {"id": "e7", "from": "n6", "to": "n7"}
   ]
 }
 ```
@@ -97,6 +186,7 @@ When master and analyser both use cloud, assign different makers when both are a
 
 ## Related
 
+- [AGENT-MEMORY.md](./AGENT-MEMORY.md) — Memory-node tiers (tree / project / global)  
 - [PIPELINES.md](./PIPELINES.md)  
 - [combos/README.md](../combos/README.md)  
 - [SLASH-COMMANDS.md](./SLASH-COMMANDS.md)  

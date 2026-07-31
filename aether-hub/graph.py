@@ -29,22 +29,41 @@ def _safe_graph_id(value: Any) -> str:
         raise ValueError("graph id must be 1-128 letters, numbers, '-' or '_'")
     return gid
 
+# ports_in / ports_out: 0 = none, -1 = unlimited fan-in/fan-out (multi-wire)
+# pass_through: no LLM work — only routes/search/store; UI shows activity blink, not progress bar
 NODE_TYPES = {
-    "goal": {"label": "Goal", "ports_in": 0, "ports_out": 1, "color": "#3b82f6"},
-    "master": {"label": "Master", "ports_in": 1, "ports_out": 1, "color": "#a78bfa"},
-    "worker": {"label": "Worker", "ports_in": 1, "ports_out": 1, "color": "#34d399"},
-    "analyser": {"label": "Analyser", "ports_in": 1, "ports_out": 1, "color": "#fbbf24"},
-    "tester": {"label": "Tester", "ports_in": 1, "ports_out": 1, "color": "#22d3ee"},
-    "memory": {"label": "Memory", "ports_in": 1, "ports_out": 1, "color": "#fb7185"},
-    "slash": {"label": "Slash", "ports_in": 1, "ports_out": 1, "color": "#94a3b8"},
-    "output": {"label": "Output", "ports_in": 1, "ports_out": 0, "color": "#64748b"},
+    "goal": {"label": "Goal", "ports_in": -1, "ports_out": -1, "color": "#3b82f6", "pass_through": False},
+    "master": {"label": "Master", "ports_in": -1, "ports_out": -1, "color": "#a78bfa", "pass_through": False},
+    "worker": {"label": "Worker", "ports_in": -1, "ports_out": -1, "color": "#34d399", "pass_through": False},
+    "analyser": {"label": "Analyser", "ports_in": -1, "ports_out": -1, "color": "#fbbf24", "pass_through": False},
+    "tester": {"label": "Tester", "ports_in": -1, "ports_out": -1, "color": "#22d3ee", "pass_through": False},
+    "memory": {"label": "Memory", "ports_in": -1, "ports_out": -1, "color": "#fb7185", "pass_through": True},
+    # Private: local-GPU-only inference over a folder of PDF/text; vault-isolated
+    "private": {
+        "label": "Private",
+        "ports_in": -1,
+        "ports_out": -1,
+        "color": "#7c6f9e",
+        "pass_through": False,
+    },
+    "slash": {"label": "Slash", "ports_in": -1, "ports_out": -1, "color": "#94a3b8", "pass_through": True},
+    # Output accepts many results; out port used for recursive feedback into earlier nodes
+    "output": {"label": "Output", "ports_in": -1, "ports_out": -1, "color": "#64748b", "pass_through": True},
 }
+
+EDGE_KINDS = ("data", "feedback")
+DEFAULT_MAX_ITERATIONS = 3
+PASS_THROUGH_TYPES = frozenset(
+    t for t, meta in NODE_TYPES.items() if meta.get("pass_through")
+)
+DEFAULT_PRIVATE_GLOBS = ("*.pdf", "*.txt", "*.md", "*.markdown", "*.text")
 
 ROLE_MAP = {
     "master": "mastermind",
     "worker": "builder",
     "analyser": "critic",
     "tester": "tester",
+    "private": "private_local",
 }
 
 _DEFAULT_DATA = {
@@ -88,10 +107,105 @@ _DEFAULT_DATA = {
         "max_cost": "low",
         "strategy": "cheapest",
     },
-    "memory": {"namespace": "default", "action": "search"},
+    "memory": {
+        # Three tiers: tree (this decision graph), project (all trees in project), global (pan-project)
+        "scope": "tree",
+        "action": "search",  # search | store
+        "project_id": None,  # used when scope=project (else graph.project_id / service_id)
+        "namespace": None,  # resolved at plan/export; optional override
+    },
+    "private": {
+        "label": "Private local",
+        "role": "private_local",
+        # Forced local GPU inference — never cloud
+        "tier": "local",
+        "strategy": "local_first",
+        "max_cost": "low",
+        "model": "local-default",
+        "provider": "ollama",
+        "backend": "local",
+        "gpu_only": True,
+        "private_vault": True,
+        # Corpus: folder of PDFs / text files on the host (or mounted path)
+        "input_folder": "",
+        "input_globs": list(DEFAULT_PRIVATE_GLOBS),
+        "instructions_md": (
+            "Work only on documents from the configured input folder. "
+            "Do not send content to cloud providers. Prefer local GPU models."
+        ),
+    },
     "slash": {"commands": ["/done all", "/compact"]},
     "output": {},
 }
+
+# Memory node scopes (tiers). Distinct from agent run-location `tier` (local/cloud/host_cli).
+MEMORY_SCOPES = ("tree", "project", "global")
+MEMORY_ACTIONS = ("search", "store")
+
+
+def resolve_memory_namespace(
+    *,
+    scope: str | None = None,
+    graph_id: str | None = None,
+    project_id: str | None = None,
+    namespace: str | None = None,
+) -> str:
+    """
+    Map a Memory node scope to a vector namespace.
+
+    Tiers:
+      tree    → tree:{graph_id}     — this decision-tree only; other nodes in the same canvas share it
+      project → project:{project_id} — all node graphs under the same project
+      global  → global              — pan-project pool (cross-project research)
+    """
+    if namespace and str(namespace).strip():
+        return str(namespace).strip()
+    sc = (scope or "tree").strip().lower()
+    if sc not in MEMORY_SCOPES:
+        sc = "tree"
+    if sc == "global":
+        return "global"
+    if sc == "project":
+        pid = (project_id or "default").strip() or "default"
+        # keep ids path-safe-ish
+        pid = re.sub(r"[^A-Za-z0-9._:-]+", "-", pid)[:128]
+        return f"project:{pid}"
+    # tree
+    gid = (graph_id or "canvas").strip() or "canvas"
+    gid = re.sub(r"[^A-Za-z0-9._:-]+", "-", gid)[:128]
+    return f"tree:{gid}"
+
+
+def memory_op_from_node(node: dict[str, Any], graph: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build a resolved memory op descriptor from a memory node."""
+    d = node.get("data") or {}
+    g = graph or {}
+    scope = (d.get("scope") or "tree").strip().lower()
+    if scope not in MEMORY_SCOPES:
+        scope = "tree"
+    action = (d.get("action") or "search").strip().lower()
+    if action not in MEMORY_ACTIONS:
+        action = "search"
+    project_id = (
+        d.get("project_id")
+        or g.get("project_id")
+        or g.get("service_id")
+        or d.get("service_id")
+    )
+    ns = resolve_memory_namespace(
+        scope=scope,
+        graph_id=g.get("id") or node.get("graph_id"),
+        project_id=str(project_id) if project_id else None,
+        namespace=d.get("namespace"),
+    )
+    return {
+        "node_id": node.get("id"),
+        "label": d.get("label") or "Memory",
+        "scope": scope,
+        "action": action,
+        "namespace": ns,
+        "project_id": project_id,
+    }
 
 
 def node_types() -> dict[str, Any]:
@@ -123,7 +237,145 @@ def empty_graph(gid: str | None = None) -> dict[str, Any]:
         "title": "Untitled graph",
         "nodes": [],
         "edges": [],
+        # recursive: allow feedback edges (cycles), output → earlier nodes, multi-pass
+        "recursive": False,
+        "max_iterations": DEFAULT_MAX_ITERATIONS,
         "updated_at": time.time(),
+    }
+
+
+def _edge_kind(edge: dict[str, Any]) -> str:
+    kind = str(edge.get("kind") or "data").strip().lower()
+    return kind if kind in EDGE_KINDS else "data"
+
+
+def adjacency(
+    graph: dict[str, Any],
+    *,
+    kinds: tuple[str, ...] | None = None,
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Build outgoing/incoming adjacency. kinds=None uses all edges; else filter by kind."""
+    nodes = {n["id"] for n in graph.get("nodes") or [] if n.get("id")}
+    outgoing: dict[str, list[str]] = {nid: [] for nid in nodes}
+    incoming: dict[str, list[str]] = {nid: [] for nid in nodes}
+    for e in graph.get("edges") or []:
+        a, b = e.get("from"), e.get("to")
+        if a not in nodes or b not in nodes:
+            continue
+        if kinds is not None and _edge_kind(e) not in kinds:
+            continue
+        if b not in outgoing[a]:
+            outgoing[a].append(b)
+        if a not in incoming[b]:
+            incoming[b].append(a)
+    return outgoing, incoming
+
+
+def path_exists(outgoing: dict[str, list[str]], src: str, dst: str) -> bool:
+    """True if dst is reachable from src following outgoing edges."""
+    if src == dst:
+        return True
+    seen: set[str] = set()
+    stack = [src]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        for nxt in outgoing.get(cur) or []:
+            if nxt == dst:
+                return True
+            if nxt not in seen:
+                stack.append(nxt)
+    return False
+
+
+def edge_would_cycle(graph: dict[str, Any], frm: str, to: str) -> bool:
+    """True if adding frm→to creates a cycle (to can already reach frm)."""
+    if frm == to:
+        return True
+    outgoing, _ = adjacency(graph, kinds=("data", "feedback"))
+    return path_exists(outgoing, to, frm)
+
+
+def classify_edges(graph: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Return edges with kind set: feedback when explicitly marked, or when the edge
+    closes a cycle under recursive graphs. Non-recursive graphs keep kind as stored.
+    """
+    recursive = bool(graph.get("recursive"))
+    nodes = {n["id"] for n in graph.get("nodes") or [] if n.get("id")}
+    raw = [e for e in (graph.get("edges") or []) if e.get("from") in nodes and e.get("to") in nodes]
+    # First pass: honour explicit feedback; build forward-only graph for detection
+    forward: list[dict[str, Any]] = []
+    out_edges: list[dict[str, Any]] = []
+    for e in raw:
+        kind = _edge_kind(e)
+        if kind == "feedback":
+            out_edges.append({**e, "kind": "feedback"})
+            continue
+        forward.append(e)
+    # Temporary graph of only candidate data edges
+    probe = {"nodes": graph.get("nodes") or [], "edges": []}
+    for e in forward:
+        frm, to = e.get("from"), e.get("to")
+        if recursive and edge_would_cycle(probe, frm, to):
+            out_edges.append({**e, "kind": "feedback"})
+        else:
+            probe["edges"].append({**e, "kind": "data"})
+            out_edges.append({**e, "kind": "data"})
+    return out_edges
+
+
+def topo_order(graph: dict[str, Any]) -> dict[str, Any]:
+    """
+    Topological order using forward (data) edges only.
+    Feedback edges are listed separately and do not block ordering.
+    Fan-in/fan-out are fully supported (multiple parents/children).
+    """
+    nodes = {n["id"]: n for n in graph.get("nodes") or [] if n.get("id")}
+    classified = classify_edges(graph)
+    data_edges = [e for e in classified if e["kind"] == "data"]
+    feedback_edges = [e for e in classified if e["kind"] == "feedback"]
+
+    g_forward = {"nodes": list(nodes.values()), "edges": data_edges}
+    outgoing, incoming = adjacency(g_forward, kinds=("data",))
+
+    # Kahn: multi-parent aware
+    indeg = {nid: len(incoming.get(nid) or []) for nid in nodes}
+    # Prefer goal nodes first among zero-indegree
+    zeros = sorted(
+        [nid for nid, d in indeg.items() if d == 0],
+        key=lambda nid: (0 if (nodes[nid].get("type") == "goal") else 1, nid),
+    )
+    ordered: list[str] = []
+    while zeros:
+        nid = zeros.pop(0)
+        ordered.append(nid)
+        for nxt in outgoing.get(nid) or []:
+            indeg[nxt] = indeg.get(nxt, 0) - 1
+            if indeg[nxt] == 0:
+                zeros.append(nxt)
+                zeros.sort(
+                    key=lambda x: (0 if (nodes[x].get("type") == "goal") else 1, x)
+                )
+
+    leftover = [nid for nid, d in indeg.items() if d > 0]
+    # If cycles remain among data edges, append leftovers (stable) and flag
+    if leftover:
+        for nid in sorted(leftover):
+            if nid not in ordered:
+                ordered.append(nid)
+
+    return {
+        "order": ordered,
+        "data_edges": data_edges,
+        "feedback_edges": feedback_edges,
+        "incoming": {k: list(v) for k, v in incoming.items()},
+        "outgoing": {k: list(v) for k, v in outgoing.items()},
+        "has_data_cycle": bool(leftover),
+        "recursive": bool(graph.get("recursive")),
+        "max_iterations": int(graph.get("max_iterations") or DEFAULT_MAX_ITERATIONS),
     }
 
 
@@ -255,9 +507,17 @@ def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, 
     nodes = [goal, lead_node, *worker_nodes, reviewer_node, synthesis_node, output]
     edges = []
 
-    def connect(source: dict[str, Any], target: dict[str, Any]) -> None:
-        edges.append({"id": f"e-{source['id']}-{target['id']}", "from": source["id"], "to": target["id"], "kind": "data"})
+    def connect(source: dict[str, Any], target: dict[str, Any], kind: str = "data") -> None:
+        edges.append(
+            {
+                "id": f"e-{source['id']}-{target['id']}",
+                "from": source["id"],
+                "to": target["id"],
+                "kind": kind if kind in EDGE_KINDS else "data",
+            }
+        )
 
+    # Fan-out: lead → each worker; fan-in: each worker → reviewer
     connect(goal, lead_node)
     for worker in worker_nodes:
         connect(lead_node, worker)
@@ -279,12 +539,15 @@ def auto_connect(nodes: list[dict[str, Any]] | None = None, graph: dict | None =
     if graph:
         nodes = list(graph.get("nodes") or [])
     nodes = list(nodes or [])
-    order = ["goal", "master", "analyser", "worker", "tester", "memory", "slash", "output"]
+    order = ["goal", "master", "analyser", "worker", "tester", "private", "memory", "slash", "output"]
     buckets: dict[str, list] = {t: [] for t in order}
     for n in nodes:
         t = n.get("type")
         if t in buckets:
             buckets[t].append(n)
+        elif t:
+            # unknown types appended after workers
+            buckets.setdefault("worker", []).append(n)
     for t in buckets:
         buckets[t].sort(key=lambda n: (n.get("y", 0), n.get("x", 0)))
 
@@ -321,46 +584,29 @@ def auto_connect(nodes: list[dict[str, Any]] | None = None, graph: dict | None =
         "master → analyser (critique / ack gate; prefer different maker)",
         "analyser → worker (build after ack)",
         "worker → tester (cheap/local)",
-        "tester → slash (/done + /compact) → output",
+        "tester → private (local GPU + PDF/text folder) → memory → slash → output",
+        "pass-through nodes (memory/slash/output): activity blink, no progress bar",
     ]
     return {"nodes": chain if graph is None else nodes, "edges": edges, "practices": practices}
 
 
 def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
-    """Convert node graph to aetherstack.pipeline.v1 linear stages (topo order)."""
-    nodes = {n["id"]: n for n in graph.get("nodes") or []}
-    edges = graph.get("edges") or []
-    # topo from goal
-    incoming: dict[str, list[str]] = {nid: [] for nid in nodes}
-    outgoing: dict[str, list[str]] = {nid: [] for nid in nodes}
-    for e in edges:
-        if e.get("from") in nodes and e.get("to") in nodes:
-            outgoing[e["from"]].append(e["to"])
-            incoming[e["to"]].append(e["from"])
-
-    starts = [nid for nid, inc in incoming.items() if not inc]
-    if not starts:
-        starts = list(nodes.keys())[:1]
-    ordered: list[str] = []
-    seen: set[str] = set()
-    stack = list(starts)
-    while stack:
-        nid = stack.pop(0)
-        if nid in seen:
-            continue
-        seen.add(nid)
-        ordered.append(nid)
-        for nxt in outgoing.get(nid, []):
-            if all(p in seen for p in incoming.get(nxt, [])):
-                stack.append(nxt)
-            elif nxt not in stack:
-                stack.append(nxt)
+    """Convert node graph to aetherstack.pipeline.v1 stages (multi-parent topo; feedback separate)."""
+    nodes = {n["id"]: n for n in graph.get("nodes") or [] if n.get("id")}
+    layout = topo_order(graph)
+    ordered = layout["order"]
+    incoming = layout["incoming"]
+    outgoing = layout["outgoing"]
+    feedback_edges = layout["feedback_edges"]
 
     stages = []
+    memory_ops: list[dict[str, Any]] = []
     slash_cmds = ["/done all", "/compact"]
     goal_text = ""
     for nid in ordered:
-        n = nodes[nid]
+        n = nodes.get(nid)
+        if not n:
+            continue
         t = n.get("type")
         d = n.get("data") or {}
         if t == "goal":
@@ -369,9 +615,47 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
         if t == "slash":
             slash_cmds = d.get("commands") or slash_cmds
             continue
-        if t in ("output", "memory"):
+        if t == "memory":
+            memory_ops.append(memory_op_from_node(n, graph))
+            continue
+        if t == "output":
             continue
         role = d.get("role") or ROLE_MAP.get(t, t)
+        if t == "private":
+            globs = d.get("input_globs") or list(DEFAULT_PRIVATE_GLOBS)
+            if isinstance(globs, str):
+                globs = [g.strip() for g in globs.split(",") if g.strip()]
+            stage = {
+                "id": n.get("id"),
+                "label": d.get("label") or NODE_TYPES["private"]["label"],
+                "role": "private_local",
+                "purpose": d.get("purpose")
+                or "Local GPU private inference over PDF/text folder corpus",
+                "select": {
+                    "tier": "local",
+                    "strategy": d.get("strategy") or "local_first",
+                    "max_cost": d.get("max_cost") or "low",
+                    "model": d.get("model") or "local-default",
+                },
+                "prefer_models": [d.get("model") or "local-default"],
+                "prefer_makers": [],
+                "needs": d.get("needs") or ["local", "gpu", "chat", "private"],
+                "private": True,
+                "gpu_only": True if d.get("gpu_only", True) else False,
+                "private_vault": True if d.get("private_vault", True) else False,
+                "input_folder": str(d.get("input_folder") or "")[:2000],
+                "input_globs": list(globs)[:32],
+                "ack": False,
+                "gate": bool(d.get("gate")),
+                "parallel": 1,
+                "behavior_markdown": str(d.get("instructions_md") or "")[:100_000],
+                "behavior_source": str(d.get("instructions_source") or "")[:500],
+                "pass_through": False,
+                "inputs_from": list(incoming.get(nid) or []),
+                "outputs_to": list(outgoing.get(nid) or []),
+            }
+            stages.append(stage)
+            continue
         stage = {
             "id": n.get("id"),
             "label": NODE_TYPES.get(t, {}).get("label", t),
@@ -397,21 +681,35 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
             "parallel": int(d.get("parallel") or 1),
             "behavior_markdown": str(d.get("instructions_md") or "")[:100_000],
             "behavior_source": str(d.get("instructions_source") or "")[:500],
+            "pass_through": bool(NODE_TYPES.get(t, {}).get("pass_through")),
+            # Multi-wire topology (fan-in / fan-out)
+            "inputs_from": list(incoming.get(nid) or []),
+            "outputs_to": list(outgoing.get(nid) or []),
         }
         # clean empty select keys
         stage["select"] = {k: v for k, v in stage["select"].items() if v not in (None, "")}
         stages.append(stage)
+
+    tags = ["from-graph", "visual"]
+    if graph.get("recursive") or feedback_edges:
+        tags.append("recursive")
 
     return {
         "schema": "aetherstack.pipeline.v1",
         "id": graph.get("id") or f"from-graph-{uuid.uuid4().hex[:6]}",
         "title": graph.get("title") or "From node graph",
         "description": f"Converted from graph; goal={goal_text[:120]}",
-        "tags": ["from-graph", "visual"],
+        "tags": tags,
         "hw_weight": graph.get("hw_weight") or "medium",
         "token_saver": bool(graph.get("token_saver", False)),
         "mode": "multi_agent",
         "stages": stages,
+        "memory_ops": memory_ops,
+        "edges": layout["data_edges"],
+        "feedback_edges": feedback_edges,
+        "recursive": bool(graph.get("recursive")),
+        "max_iterations": int(graph.get("max_iterations") or DEFAULT_MAX_ITERATIONS),
+        "has_data_cycle": layout["has_data_cycle"],
         "on_complete": {"slash": slash_cmds, "archive": True},
         "goal_default": goal_text,
     }
@@ -532,6 +830,10 @@ def plan_graph(graph: dict[str, Any], snapshot: dict[str, Any], goal: str = "") 
         "graph_id": graph.get("id"),
         "pipeline": pipe,
         "stages_resolved": stages_out,
+        "memory_ops": pipe.get("memory_ops") or [],
+        "recursive": pipe.get("recursive"),
+        "max_iterations": pipe.get("max_iterations"),
+        "feedback_edges": pipe.get("feedback_edges") or [],
         "flow": " → ".join(
             f"{s.get('label') or s.get('stage_id')}({s.get('model')})" for s in stages_out
         ),

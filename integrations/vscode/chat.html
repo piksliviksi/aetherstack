@@ -73,6 +73,17 @@
     #inference.busy::before { content: '·'; animation: pulse 1s ease-in-out infinite; }
     #activityText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #activeModels { max-width: min(38vw, 360px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    #activeModels.live { color: var(--vscode-foreground); font-weight: 600; }
+    .thought-process {
+      margin-top: 8px; padding: 8px 9px; border-left: 2px solid var(--vscode-panel-border);
+      background: var(--vscode-editor-inactiveSelectionBackground, transparent);
+      color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 1.4; white-space: pre-wrap;
+    }
+    .thought-process summary { cursor: pointer; font-weight: 600; color: var(--vscode-foreground); margin-bottom: 4px; }
+    .thought-step { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--vscode-panel-border); }
+    .thought-step:first-of-type { border-top: 0; padding-top: 0; }
+    .thought-step strong { color: var(--vscode-foreground); }
+    #tokenLine[hidden] { display: none !important; }
     button, button.secondary { color: var(--vscode-foreground); background: transparent; border: 1px solid var(--vscode-panel-border); border-radius: var(--ae-radius-sm); padding: 5px 10px; cursor: pointer; }
     button:disabled { opacity: .55; cursor: wait; }
     #status { min-height: 18px; }
@@ -139,6 +150,8 @@
         <section class="menu-section" data-menu-section>
           <div class="menu-title">Model and routing</div>
           <button id="showActiveModel" class="menu-row" type="button"><span>Show answering model</span><small id="showActiveModelState">Off</small></button>
+          <button id="showThoughtProcess" class="menu-row" type="button"><span>Show thought process</span><small id="showThoughtProcessState">Off</small></button>
+          <button id="showTokens" class="menu-row" type="button"><span>Show tokens</span><small id="showTokensState">On</small></button>
           <button id="leanModeMenu" class="menu-row" type="button"><span>Lean delivery</span><small id="leanModeState">Balanced</small></button>
           <button id="tokenSaverMenu" class="menu-row" type="button"><span>Prefer lower token cost</span><small id="tokenSaverState">Off</small></button>
           <button id="refresh" class="menu-row" type="button"><span>Refresh models and presets</span></button>
@@ -199,8 +212,12 @@
   let activityWords = [];
   let activeServiceId = '';
   let activityTimer = null;
-  let showActiveModel = false;
+  let elapsedTimer = null;
+  let showActiveModel = true;
+  let showThoughtProcess = false;
+  let showTokens = true;
   let historyBusy = false;
+  let runMeta = { busy: false, phase: '', label: '', model: '', models: [], startedAt: 0 };
   const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
   let pendingAttachments = [];
   const restored = vscode.getState() || {};
@@ -325,12 +342,71 @@
   }
   function updateMenuStates() {
     $('showActiveModelState').textContent = showActiveModel ? 'On' : 'Off';
+    $('showThoughtProcessState').textContent = showThoughtProcess ? 'On' : 'Off';
+    $('showTokensState').textContent = showTokens ? 'On' : 'Off';
     $('leanModeState').textContent = $('lean').value[0].toUpperCase() + $('lean').value.slice(1);
     $('tokenSaverState').textContent = $('tokenSaver').checked ? 'On' : 'Off';
+    $('tokenLine').hidden = !showTokens;
   }
-  function rotateActivity() { const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text); $('activityText').textContent = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : 'Combobulating...'; }
+  function rotateActivity() {
+    const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text);
+    const phrase = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : "I'm on it…";
+    const model = runMeta.model || (runMeta.models || [])[0] || '';
+    $('activityText').textContent = model ? `${phrase} · ${model}` : phrase;
+  }
+  function paintRunChrome() {
+    if (!runMeta.busy) return;
+    const secs = Math.max(0, Math.floor((Date.now() - (runMeta.startedAt || Date.now())) / 1000));
+    const model = runMeta.model || (runMeta.models || []).filter(Boolean).join(', ');
+    const phase = runMeta.label || runMeta.phase || "I'm on it…";
+    $('status').textContent = model ? `${phase} · ${model} · ${secs}s` : `${phase} · ${secs}s`;
+    $('status').className = 'muted';
+    if (model) {
+      $('activeModels').textContent = `Answering: ${model}`;
+      $('activeModels').classList.add('live');
+    } else if (showActiveModel) {
+      $('activeModels').textContent = 'Answering…';
+      $('activeModels').classList.add('live');
+    }
+  }
   function saveState() { vscode.setState({ transcript: transcript.slice(-40), conversationId: activeConversationId, serviceId: $('service').value || 'auto', activeServiceId }); }
-  function setBusy(value) { clearInterval(activityTimer); activityTimer = null; $('cancel').hidden = !value; $('send').disabled = Boolean(value); $('inference').classList.toggle('busy', Boolean(value)); if (value) { rotateActivity(); activityTimer = setInterval(rotateActivity, 1900); } else { $('activityText').textContent = ''; } }
+  function setBusy(value) {
+    clearInterval(activityTimer); activityTimer = null;
+    clearInterval(elapsedTimer); elapsedTimer = null;
+    $('cancel').hidden = !value;
+    $('send').disabled = Boolean(value);
+    $('inference').classList.toggle('busy', Boolean(value));
+    runMeta.busy = Boolean(value);
+    if (value) {
+      runMeta.startedAt = Date.now();
+      if (!runMeta.label) runMeta.label = "I'm on it…";
+      rotateActivity();
+      paintRunChrome();
+      activityTimer = setInterval(rotateActivity, 1900);
+      elapsedTimer = setInterval(paintRunChrome, 500);
+    } else {
+      $('activityText').textContent = '';
+      runMeta = { busy: false, phase: '', label: '', model: '', models: [], startedAt: 0 };
+      $('activeModels').classList.remove('live');
+      if (!showActiveModel) $('activeModels').textContent = '';
+    }
+  }
+  function formatThoughtProcess(result) {
+    const steps = Array.isArray(result.steps) ? result.steps : [];
+    if (!steps.length) return '';
+    const blocks = steps.map((step) => {
+      const role = step.role || step.task_id || 'step';
+      const model = step.model ? ` · ${step.model}` : '';
+      const body = String(step.content || step.error || '').trim().slice(0, 1200);
+      if (!body) return '';
+      return `<div class="thought-step"><strong>${escHtml(role)}${escHtml(model)}</strong>\n${escHtml(body)}</div>`;
+    }).filter(Boolean);
+    if (!blocks.length) return '';
+    return `<details class="thought-process" open><summary>Thought process</summary>${blocks.join('')}</details>`;
+  }
+  function escHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
   function appendRichText(parent, value) {
     parent.insertAdjacentHTML('beforeend', renderMarkdown(String(value || '')));
     parent.querySelectorAll('pre[data-lang]').forEach((pre) => {
@@ -343,7 +419,7 @@
     });
   }
   let messageSeq = 0;
-  function addMessage(role, value, detail, persist = true, explicitId, messageAttachments = []) {
+  function addMessage(role, value, detail, persist = true, explicitId, messageAttachments = [], thoughtHtml = '') {
     $('idleArt').style.display = 'none';
     $('messages').style.flex = '1';
     const id = explicitId != null ? explicitId : (messageSeq += 1);
@@ -352,6 +428,11 @@
     box.dataset.msgId = String(id);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
     appendRichText(box, value);
+    if (thoughtHtml) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = thoughtHtml;
+      box.append(wrap.firstElementChild || wrap);
+    }
     if (detail) box.append(text('div', detail, 'muted'));
     const actions = text('div', '', 'msg-actions');
     const copyBtn = iconButton('copy', 'Copy message', () => navigator.clipboard.writeText(String(value || '')).catch(() => {}));
@@ -526,8 +607,19 @@
   ]) $('' + id).addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'action', action }); });
   $('showActiveModel').addEventListener('click', () => {
     showActiveModel = !showActiveModel; updateMenuStates();
-    if (!showActiveModel) $('activeModels').textContent = '';
+    if (!showActiveModel && !runMeta.busy) $('activeModels').textContent = '';
     vscode.postMessage({ type: 'action', action: 'toggleActiveModel', value: showActiveModel });
+  });
+  $('showThoughtProcess').addEventListener('click', () => {
+    showThoughtProcess = !showThoughtProcess;
+    updateMenuStates();
+    vscode.postMessage({ type: 'action', action: 'toggleThoughtProcess', value: showThoughtProcess });
+  });
+  $('showTokens').addEventListener('click', () => {
+    showTokens = !showTokens;
+    updateMenuStates();
+    if (!showTokens) $('tokenLine').textContent = '';
+    vscode.postMessage({ type: 'action', action: 'toggleShowTokens', value: showTokens });
   });
   $('leanModeMenu').addEventListener('click', () => {
     const modes = ['off', 'balanced', 'strict'];
@@ -613,7 +705,9 @@
       const current = $('service').value;
       services = Array.isArray(message.services) ? message.services : [];
       activityWords = Array.isArray(message.activityWords) ? message.activityWords : [];
-      showActiveModel = Boolean(message.showActiveModel);
+      showActiveModel = message.showActiveModel !== false;
+      showThoughtProcess = Boolean(message.showThoughtProcess);
+      showTokens = message.showTokens !== false;
       updateMenuStates();
       $('cwdLine').textContent = message.cwd || '';
       const auto = text('option', 'Auto — analyze my request'); auto.value = 'auto';
@@ -629,15 +723,49 @@
       historyBusy = Boolean(message.value);
       $('actionMenu').classList.toggle('busy', historyBusy);
       $('newConversation').disabled = historyBusy;
-      $('status').textContent = message.value ? 'The agent team is working…' : '';
+      if (message.value) {
+        runMeta.label = runMeta.label || "I'm on it…";
+        $('status').textContent = "I'm on it…";
+      } else {
+        $('status').textContent = '';
+      }
       setBusy(Boolean(message.value));
+    } else if (message.type === 'progress') {
+      runMeta.phase = message.phase || runMeta.phase;
+      runMeta.label = message.label || runMeta.label || message.phase || "I'm on it…";
+      if (message.model) runMeta.model = message.model;
+      if (Array.isArray(message.models) && message.models.length) runMeta.models = message.models;
+      if (runMeta.busy) paintRunChrome();
+      else {
+        // Keep status readable even if progress arrives slightly before busy.
+        const model = runMeta.model || (runMeta.models || [])[0] || '';
+        $('status').textContent = model ? `${runMeta.label} · ${model}` : runMeta.label;
+        if (model) { $('activeModels').textContent = `Answering: ${model}`; $('activeModels').classList.add('live'); }
+      }
     } else if (message.type === 'inference') {
-      const models = showActiveModel ? (((message.inference || {}).active || []).map((item) => item.model).filter(Boolean)) : [];
-      if (models.length) $('activeModels').textContent = `Answering: ${models.join(', ')}`;
+      // Always show live answering model while a run is in progress.
+      const models = (((message.inference || {}).active || []).map((item) => item.model).filter(Boolean));
+      if (models.length) {
+        runMeta.model = models[0];
+        runMeta.models = models;
+        $('activeModels').textContent = `Answering: ${models.join(', ')}`;
+        $('activeModels').classList.add('live');
+        if (runMeta.busy) paintRunChrome();
+      } else if (!runMeta.busy && !showActiveModel) {
+        $('activeModels').textContent = '';
+        $('activeModels').classList.remove('live');
+      }
     } else if (message.type === 'inferenceSetting') {
       showActiveModel = Boolean(message.enabled);
       updateMenuStates();
-      if (!showActiveModel) $('activeModels').textContent = '';
+      if (!showActiveModel && !runMeta.busy) { $('activeModels').textContent = ''; $('activeModels').classList.remove('live'); }
+    } else if (message.type === 'chatSetting') {
+      if (message.key === 'showThoughtProcess') showThoughtProcess = Boolean(message.enabled);
+      if (message.key === 'showTokens') {
+        showTokens = Boolean(message.enabled);
+        if (!showTokens) $('tokenLine').textContent = '';
+      }
+      updateMenuStates();
     } else if (message.type === 'route') {
       const selection = message.selection || {};
       activeServiceId = selection.service_id || '';
@@ -692,12 +820,23 @@
       activeServiceId = result.service_id || (result.selection && result.selection.service_id) || activeServiceId;
       renderTeam();
       const usage = result.usage || result.token_usage || {};
-      const tokens = usage.total_tokens == null ? '' : ` · ${usage.total_tokens} tokens`;
-      $('tokenLine').textContent = usage.total_tokens == null ? '' : `${usage.total_tokens} tokens`;
+      const tokenCount = usage.total_tokens;
+      const tokens = showTokens && tokenCount != null ? ` · ${tokenCount} tokens` : '';
+      $('tokenLine').textContent = showTokens && tokenCount != null ? `${tokenCount} tokens` : '';
+      $('tokenLine').hidden = !showTokens;
       const team = (result.agents || []).map((agent) => agent.model).filter(Boolean).join(', ');
-      if (showActiveModel) $('activeModels').textContent = result.model ? `Used: ${result.model}` : (team ? `Used: ${team}` : '');
+      const usedModel = result.model || team;
+      if (showActiveModel || usedModel) {
+        $('activeModels').textContent = usedModel ? `Used: ${usedModel}` : '';
+        $('activeModels').classList.remove('live');
+      } else {
+        $('activeModels').textContent = '';
+        $('activeModels').classList.remove('live');
+      }
       const selection = result.selection ? `${result.selection.source === 'intent-analysis' ? 'Auto-selected' : 'Selected'} ${result.selection.label} · ` : '';
-      addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', `${selection}${team || 'dynamic team'}${tokens}`);
+      const detail = `${selection}${team || 'dynamic team'}${tokens}`;
+      const thoughtHtml = showThoughtProcess ? formatThoughtProcess(result) : '';
+      addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', detail, true, undefined, [], thoughtHtml);
     } else if (message.type === 'error') {
       finishStreamingMessage();
       setBusy(false);

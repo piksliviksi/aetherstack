@@ -175,8 +175,18 @@
         },
         "aetherstack.showActiveModel": {
           "type": "boolean",
+          "default": true,
+          "description": "Show the model currently answering in AetherStack Chat and the status bar. While a reply is running, the active model is always shown."
+        },
+        "aetherstack.showThoughtProcess": {
+          "type": "boolean",
           "default": false,
-          "description": "Show the model currently handling inference in the AetherStack view and status bar. Only model aliases and timing are observed."
+          "description": "In AetherStack Chat, show lead/worker/review step notes under each answer (toggle from the / menu)."
+        },
+        "aetherstack.showTokens": {
+          "type": "boolean",
+          "default": true,
+          "description": "In AetherStack Chat, show token usage after each reply (toggle from the / menu)."
         }
       }
     },

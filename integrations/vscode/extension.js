@@ -58,7 +58,10 @@ function cfg() {
     defaultModel: c.get("defaultModel") || "local-default",
     stackPath: c.get("stackPath") || "",
     autoWireModels: c.get("autoWireModels") !== false,
-    showActiveModel: c.get("showActiveModel") === true,
+    // Default on: chat always needs live model feedback while answering.
+    showActiveModel: c.get("showActiveModel") !== false,
+    showThoughtProcess: c.get("showThoughtProcess") === true,
+    showTokens: c.get("showTokens") !== false,
   };
 }
 
@@ -954,19 +957,43 @@ class HubChat {
       }
       if (selection) await webview.postMessage({ type: "route", selection });
       await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
+      // Always surface live answering progress (phase + model) while a run is active.
+      const service = this.services.find((item) => item.id === serviceId) || {};
+      const plannedModels = (service.agents || []).map((agent) => agent.model).filter(Boolean);
+      const publishProgress = (payload = {}) => {
+        webview.postMessage({
+          type: "progress",
+          phase: payload.phase || "",
+          label: payload.label || "",
+          model: payload.model || "",
+          models: payload.models || plannedModels,
+        });
+      };
+      publishProgress({
+        phase: selection ? "routing" : "starting",
+        label: selection ? "Routing…" : "Starting…",
+        model: plannedModels[0] || "",
+        models: plannedModels,
+      });
       const publishInference = async () => {
-        if (!cfg().showActiveModel) return;
         try {
           const inference = await fetchInferenceStatus();
           await webview.postMessage({ type: "inference", inference });
+          const active = ((inference || {}).active || []).map((item) => item.model).filter(Boolean);
+          if (active.length) {
+            publishProgress({
+              phase: "running",
+              label: "Answering…",
+              model: active[0],
+              models: active,
+            });
+          }
         } catch {
-          /* The normal service result will still report the models used. */
+          /* Progress still comes from SSE status events and the final result. */
         }
       };
-      if (cfg().showActiveModel) {
-        inferenceTimer = setInterval(publishInference, 1200);
-        await publishInference();
-      }
+      inferenceTimer = setInterval(publishInference, 900);
+      await publishInference();
       const requestBody = {
         goal: prompt,
         lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
@@ -981,7 +1008,22 @@ class HubChat {
           `http://127.0.0.1:8766/api/services/${encodeURIComponent(serviceId)}/run/stream`,
           { method: "POST", body: requestBody, signal: controller.signal },
           (event) => {
-            if (event.type === "delta") {
+            if (event.type === "status") {
+              publishProgress({
+                phase: event.phase || "running",
+                label: event.label || "",
+                model: event.model || "",
+                models: event.models || plannedModels,
+              });
+            } else if (event.type === "delta") {
+              if (!streamedText) {
+                publishProgress({
+                  phase: "streaming",
+                  label: "Writing…",
+                  model: event.model || plannedModels[0] || "",
+                  models: plannedModels,
+                });
+              }
               streamedText += event.text || "";
               webview.postMessage({ type: "delta", text: event.text || "" });
             } else if (event.type === "done") {
@@ -1004,6 +1046,12 @@ class HubChat {
         if (streamedText) {
           await webview.postMessage({ type: "deltaInterrupted" });
         }
+        publishProgress({
+          phase: "waiting",
+          label: "Still working…",
+          model: plannedModels[0] || "",
+          models: plannedModels,
+        });
         result = await this.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
           method: "POST",
           body: requestBody,
@@ -1029,11 +1077,14 @@ class HubChat {
 
   async postState(notice = "", error = false, webview = this.activeWebview()) {
     if (!webview) return;
+    const settings = cfg();
     await webview.postMessage({
       type: "state",
       services: this.services,
       activityWords: this.activityWords,
-      showActiveModel: cfg().showActiveModel,
+      showActiveModel: settings.showActiveModel,
+      showThoughtProcess: settings.showThoughtProcess,
+      showTokens: settings.showTokens,
       cwd: workspaceRoot() || "",
       notice,
       error,
@@ -1063,6 +1114,18 @@ class HubChat {
             await vscode.workspace.getConfiguration("aetherstack")
               .update("showActiveModel", Boolean(message.value), vscode.ConfigurationTarget.Global);
             await webview.postMessage({ type: "inferenceSetting", enabled: Boolean(message.value) });
+            return;
+          }
+          if (message.action === "toggleThoughtProcess") {
+            await vscode.workspace.getConfiguration("aetherstack")
+              .update("showThoughtProcess", Boolean(message.value), vscode.ConfigurationTarget.Global);
+            await webview.postMessage({ type: "chatSetting", key: "showThoughtProcess", enabled: Boolean(message.value) });
+            return;
+          }
+          if (message.action === "toggleShowTokens") {
+            await vscode.workspace.getConfiguration("aetherstack")
+              .update("showTokens", Boolean(message.value), vscode.ConfigurationTarget.Global);
+            await webview.postMessage({ type: "chatSetting", key: "showTokens", enabled: Boolean(message.value) });
             return;
           }
           const commands = {
