@@ -102,6 +102,21 @@ function Test-Ollama {
   }
 }
 
+function Find-HostOllama {
+  # The configured/default port can be squatted by an unrelated process (seen
+  # in practice with svchost on Ollama's default 11434); probe common alternate
+  # ports for a real host Ollama before concluding none is reachable and
+  # falling back to the bundled container.
+  if (Test-Ollama) { return $script:HostOllamaUrl }
+  foreach ($port in 11434, 11435, 11436, 11437, 11438, 11439, 11440) {
+    try {
+      $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/tags" -UseBasicParsing -TimeoutSec 2
+      if ($r.StatusCode -eq 200) { return "http://127.0.0.1:$port" }
+    } catch {}
+  }
+  return $null
+}
+
 function Set-DotEnvValue([string]$Name, [string]$Value) {
   $path = Join-Path $Root ".env"
   $lines = if (Test-Path $path) { @(Get-Content -LiteralPath $path) } else { @() }
@@ -214,7 +229,13 @@ Ensure-Docker
 Invoke-SystemScan
 
 Write-Host "  Starting containers (Open WebUI, LiteLLM, Redis, Hub)..." -ForegroundColor Cyan
-$useContainerOllama = -not (Test-Ollama)
+$foundHostOllama = Find-HostOllama
+if ($foundHostOllama -and $foundHostOllama -ne $script:HostOllamaUrl) {
+  Write-Host "  Host Ollama found at $foundHostOllama (configured port unreachable)." -ForegroundColor Yellow
+  Set-DotEnvValue "OLLAMA_BASE_URL" ($foundHostOllama -replace "127\.0\.0\.1", "host.docker.internal")
+  $script:HostOllamaUrl = $foundHostOllama
+}
+$useContainerOllama = -not $foundHostOllama
 if ($useContainerOllama) {
   Write-Host "  Host Ollama is unavailable; starting the bundled CPU fallback." -ForegroundColor Yellow
   $fallbackPort = Select-FallbackOllamaPort

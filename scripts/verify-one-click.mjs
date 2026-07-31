@@ -133,6 +133,15 @@ const extensions = path.join(testRoot, "extensions");
 const workspace = path.join(testRoot, "empty-workspace");
 const resultPath = path.join(testRoot, "evidence.json");
 mkdirSync(workspace, { recursive: true });
+// Isolated runs must not let VS Code's own auto-updater fire mid-test: it can
+// leave an orphaned CodeSetup process that holds the vscode-updating mutex
+// for the next run and locks files under testRoot during cleanup.
+mkdirSync(path.join(userData, "User"), { recursive: true });
+writeFileSync(
+  path.join(userData, "User", "settings.json"),
+  `${JSON.stringify({ "update.mode": "none" }, null, 2)}\n`,
+  "utf8",
+);
 const composeProject = process.env.COMPOSE_PROJECT_NAME || `aetherstacke2e${Date.now()}`;
 const baseEnv = cleanElectronEnvironment({
   COMPOSE_PROJECT_NAME: composeProject,
@@ -222,6 +231,8 @@ try {
     });
     if (cleanup.status !== 0) process.stderr.write(`[one-click] cleanup warning: ${cleanup.stderr || cleanup.stdout}\n`);
   }
-  if (!options.keep) rmSync(testRoot, { recursive: true, force: true });
+  // A just-exited VS Code child process (GPU/crashpad) can hold a file handle
+  // in testRoot for a moment after the parent exits; retry through the race.
+  if (!options.keep) rmSync(testRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
   else console.log(`[one-click] preserved test state at ${testRoot}`);
 }

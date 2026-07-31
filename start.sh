@@ -78,6 +78,24 @@ select_fallback_port() {
   return 1
 }
 
+find_host_ollama() {
+  # The configured/default port can be squatted by an unrelated process;
+  # probe common alternate ports for a real host Ollama before concluding
+  # none is reachable and falling back to the bundled container.
+  if curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; then
+    printf '%s\n' "$host_ollama_url"
+    return 0
+  fi
+  local port
+  for port in 11434 11435 11436 11437 11438 11439 11440; do
+    if curl -sf --max-time 2 "http://127.0.0.1:$port/api/tags" >/dev/null 2>&1; then
+      printf 'http://127.0.0.1:%s\n' "$port"
+      return 0
+    fi
+  done
+  return 1
+}
+
 start_macos_host_ollama() {
   [[ "$OS_NAME" == "Darwin" ]] || return 1
   [[ "${AETHER_AUTO_INSTALL_OLLAMA:-1}" != "0" ]] || return 1
@@ -213,7 +231,13 @@ fi
 # host.docker.internal is set in compose (needed on Docker Desktop Mac/Win + some Linux)
 cyan "  Starting containers (Open WebUI, LiteLLM, Redis, Postgres, Hub)..."
 use_container_ollama=0
-if ! curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; then
+found_host_ollama="$(find_host_ollama || true)"
+if [[ -n "$found_host_ollama" && "$found_host_ollama" != "$host_ollama_url" ]]; then
+  yellow "  Host Ollama found at $found_host_ollama (configured port unreachable)."
+  set_env_value "OLLAMA_BASE_URL" "${found_host_ollama//127.0.0.1/host.docker.internal}"
+  host_ollama_url="$found_host_ollama"
+fi
+if [[ -z "$found_host_ollama" ]]; then
   use_container_ollama=1
   yellow "  Host Ollama is unavailable; starting the bundled CPU fallback."
   fallback_port="$(select_fallback_port)" || { red "  ERROR: no free loopback port for bundled Ollama (tried 11434 and 11436-11444)."; exit 1; }
