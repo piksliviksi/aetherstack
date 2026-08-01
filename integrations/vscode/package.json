@@ -2,7 +2,7 @@
   "name": "aetherstack",
   "displayName": "AetherStack",
   "description": "Project AI history overview and multi-model coding via AetherStack (LiteLLM, Open WebUI, Ollama). Windows, macOS, and Linux.",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "publisher": "AetherStack",
   "license": "PolyForm-Noncommercial-1.0.0",
   "pricing": "Free",
@@ -57,7 +57,7 @@
       },
       {
         "command": "aetherstack.openHub",
-        "title": "AetherStack: Open Hub UI",
+        "title": "AetherStack: Open Hub UI (advanced, browser)",
         "icon": "$(server-environment)"
       },
       {
@@ -123,7 +123,7 @@
       },
       {
         "command": "aetherstack.openChatUI",
-        "title": "AetherStack: Open Chat UI (Open WebUI)"
+        "title": "AetherStack: Open Chat UI (Open WebUI, optional browser client)"
       },
       {
         "command": "aetherstack.openModels",

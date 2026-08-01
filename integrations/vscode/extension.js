@@ -10,8 +10,10 @@ const { createChatRequestHandler } = require("./chat-participant");
 const { capConversations, titleFromTranscript } = require("./conversations");
 const { installRuntime: installRuntimeBundle } = require("./runtime-install");
 const extensionManifest = require("./package.json");
+const DOCKER_SETUP_URL = "https://docs.docker.com/get-started/get-docker/";
 const {
   SERVICES,
+  checkDocker,
   checkServices,
   composeDetails,
   composeLogs,
@@ -44,6 +46,10 @@ const SCAN_GLOBS = [
   "**/*chat*export*.json",
   "**/*chat-session*.json",
 ];
+
+function stripAnsi(text) {
+  return String(text || "").replace(/\x1b\[[0-9;]*m/g, "");
+}
 
 function workspaceRoot() {
   const f = vscode.workspace.workspaceFolders;
@@ -409,6 +415,7 @@ class OverviewProvider {
     this.runtime = { checking: true, up: false, services: SERVICES.map((service) => ({ ...service, ok: false, error: "checking" })) };
     this.availableModels = [];
     this.inference = null;
+    this.readiness = { docker: { installed: true, running: true }, runtimeUp: false, aiReady: false, modelCount: 0 };
   }
   refresh(overview) {
     if (overview !== undefined) this.overview = overview;
@@ -776,6 +783,7 @@ class HubChat {
     this.conversations = this.context.globalState.get("aetherstack.conversations", []);
     this.surfaceStates = new WeakMap();
     this.activeRuns = new WeakMap();
+    this.readiness = { docker: { installed: true, running: true }, runtimeUp: false, aiReady: false, modelCount: 0 };
   }
 
   async hubRequest(pathname, options = {}) {
@@ -1122,6 +1130,10 @@ class HubChat {
       cwd: workspaceRoot() || "",
       notice,
       error,
+      readiness: this.readiness,
+      showTip:
+        Boolean(this.readiness?.docker?.running && this.readiness?.runtimeUp && this.readiness?.aiReady) &&
+        !this.context.globalState.get("aetherstack.firstReadyTipDismissed", false),
     });
   }
 
@@ -1137,9 +1149,22 @@ class HubChat {
       try {
         if (message.type === "ready") {
           await this.hydrateSurface(webview, message);
+          // Populate readiness (Docker / runtime / AI) before the state push
+          // below, so a cold/broken stack renders the empty-state banner with
+          // real detail on first paint instead of the stale constructor default.
+          // checkReadiness is injected from activate() (refreshRuntime lives in
+          // that closure, not on this module-level class).
+          await this.checkReadiness?.().catch(() => {});
           await this.loadServices(false, webview);
         }
-        else if (message.type === "refresh") await this.loadServices(true, webview);
+        else if (message.type === "refresh") {
+          await this.checkReadiness?.().catch(() => {});
+          await this.loadServices(true, webview);
+        }
+        else if (message.type === "startAll") await vscode.commands.executeCommand("aetherstack.startAll");
+        else if (message.type === "installDocker") await vscode.env.openExternal(vscode.Uri.parse(DOCKER_SETUP_URL));
+        else if (message.type === "openLogs") await vscode.commands.executeCommand("aetherstack.showLogs");
+        else if (message.type === "dismissTip") await this.context.globalState.update("aetherstack.firstReadyTipDismissed", true);
         else if (message.type === "run") await this.run(message, webview);
         else if (message.type === "cancel") this.activeRuns.get(webview)?.abort();
         else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
@@ -1311,6 +1336,11 @@ async function activate(context) {
   let technicalError = "";
   let stackActionInProgress = null;
   const hubChat = new HubChat(context);
+  // Hoisted `function refreshRuntime` is defined further down in this same
+  // activate() closure; injecting it here (rather than importing it into the
+  // module-level HubChat class) keeps Docker/runtime/AI readiness checks as
+  // the single source of truth already used by the status bar and Control Center.
+  hubChat.checkReadiness = () => refreshRuntime(false, true);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("aetherstack.chatView", hubChat, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -1398,7 +1428,17 @@ async function activate(context) {
       } else if (!cfg().showActiveModel) {
         inference = null;
       }
+      // Docker status only matters for the reader when the stack isn't up —
+      // when it is, Docker is obviously fine, so skip the extra subprocess
+      // spawn on every routine refresh.
+      provider.readiness = {
+        docker: runtime.up ? { installed: true, running: true } : await checkDocker().catch(() => ({ installed: false, running: false })),
+        runtimeUp: runtime.up,
+        modelCount: Array.isArray(models) ? models.length : 0,
+      };
+      provider.readiness.aiReady = provider.readiness.modelCount > 0;
       provider.updateRuntime(runtime, models, inference);
+      hubChat.readiness = provider.readiness;
       updateStatusBar();
 
       if (includeTechnical) {
@@ -1468,6 +1508,16 @@ async function activate(context) {
         output.show(true);
       }
       const actionVerb = { start: "starting", stop: "stopping", restart: "restarting" }[action];
+      // A visible checklist (not just a scrolling log tail) so a first-run cold
+      // start — which can take many minutes pulling images and models — reads
+      // as "in progress, here's where" instead of "looks hung."
+      const stages = action === "start" ? ["Docker", "Compose / images", "Services healthy", "Ready"] : null;
+      let stageIndex = 0;
+      function checklistLine(detail) {
+        if (!stages) return detail || "";
+        const marks = stages.map((label, i) => `${i < stageIndex ? "✓" : i === stageIndex ? "●" : "○"} ${label}`).join("  ");
+        return detail ? `${marks} — ${detail}` : marks;
+      }
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -1476,38 +1526,41 @@ async function activate(context) {
         },
         async (progress) => {
           if (action === "start") {
+            progress.report({ message: checklistLine() });
+            stageIndex = 1;
             let lastProgressAt = 0;
             const result = await startCompose(stackRoot, {
               onOutput: (chunk) => {
-                output.append(chunk);
+                output.append(stripAnsi(chunk));
                 const now = Date.now();
                 if (now - lastProgressAt < 750) return;
                 const line = chunk
                   .split(/[\r\n]+/)
-                  .map((part) => part.replace(/\x1b\[[0-9;]*m/g, "").trim())
+                  .map((part) => stripAnsi(part).trim())
                   .filter(Boolean)
                   .at(-1);
                 if (!line) return;
                 lastProgressAt = now;
-                progress.report({ message: line.length > 140 ? `${line.slice(0, 137)}…` : line });
+                progress.report({ message: checklistLine(line.length > 140 ? `${line.slice(0, 137)}…` : line) });
               },
             });
             if (!result.streamed) {
-              output.append(result.stdout);
-              output.append(result.stderr);
+              output.append(stripAnsi(result.stdout));
+              output.append(stripAnsi(result.stderr));
             }
+            stageIndex = 2;
           } else if (action === "stop") {
             const result = await stopCompose(stackRoot);
-            output.append(result.stdout);
-            output.append(result.stderr);
+            output.append(stripAnsi(result.stdout));
+            output.append(stripAnsi(result.stderr));
           } else if (action === "restart") {
             const result = await restartCompose(stackRoot);
-            output.append(result.stdout);
-            output.append(result.stderr);
+            output.append(stripAnsi(result.stdout));
+            output.append(stripAnsi(result.stderr));
           }
 
           if (action !== "stop") {
-            progress.report({ message: "Waiting for 3000, 4000, and 8766…" });
+            progress.report({ message: checklistLine("Waiting for 3000, 4000, and 8766…") });
             const status = await waitForServices({
               onCheck: (current) => {
                 provider.updateRuntime(current, provider.availableModels, provider.inference);
@@ -1521,6 +1574,8 @@ async function activate(context) {
                 .join("; ");
               throw new Error(`services did not become healthy: ${failures}`);
             }
+            stageIndex = 4;
+            progress.report({ message: checklistLine() });
             // startCompose may have created .env from .env.example on first run.
             // Import and sync only after that file is guaranteed to exist.
             try {
@@ -1680,8 +1735,8 @@ async function activate(context) {
       try {
         const result = await composeLogs(stackRoot, 100);
         output.appendLine(`\n[${new Date().toISOString()}] Last 100 Compose log lines`);
-        output.append(result.stdout);
-        output.append(result.stderr);
+        output.append(stripAnsi(result.stdout));
+        output.append(stripAnsi(result.stderr));
         output.show(true);
       } catch (error) {
         vscode.window.showErrorMessage(`Cannot read AetherStack logs: ${error.message}`);
@@ -1691,7 +1746,7 @@ async function activate(context) {
 
   const monitor = setInterval(async () => {
     try {
-      await refreshRuntime(false);
+      await refreshRuntime(false, true);
       await controlCenter.render();
     } catch (error) {
       output.appendLine(`[monitor] ${error.message}`);

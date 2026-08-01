@@ -62,6 +62,29 @@
       user-select: none;
     }
     .node.selected { border-color: var(--accent); outline: 1px solid var(--accent); outline-offset: 1px; }
+    .node.status-running { border-left-color: #d6b36a; }
+    .node.status-done { border-left-color: #4caf6a; }
+    .node.status-error { border-left-color: #e05a5a; }
+    .node .status-dot {
+      display: none; width: 7px; height: 7px; border-radius: 50%; background: #d6b36a; flex: none;
+    }
+    .node.status-running .status-dot { display: inline-block; animation: node-pulse 1s ease-in-out infinite; }
+    .node.status-done .status-dot { display: inline-block; background: #4caf6a; animation: none; }
+    .node.status-error .status-dot { display: inline-block; background: #e05a5a; animation: none; }
+    @keyframes node-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+    #helpModal { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 4vh 2vw; }
+    #helpModal[hidden] { display: none; }
+    #helpCard { background: var(--panel); border: 1px solid var(--border-strong); max-width: 720px; width: 100%; max-height: 90vh; display: flex; flex-direction: column; }
+    #helpHead { display: flex; justify-content: space-between; align-items: center; padding: .7rem 1rem; border-bottom: 1px solid var(--border); background: #0d0f10; }
+    #helpHead strong { color: var(--accent); }
+    #helpHead button { background: transparent; border: 1px solid var(--border); color: var(--text); cursor: pointer; padding: .2rem .55rem; }
+    #helpBody { padding: .9rem 1.1rem 1.3rem; overflow-y: auto; font-size: 13px; line-height: 1.5; color: var(--text); }
+    #helpBody h4 { color: var(--accent); margin: 1.1rem 0 .35rem; font-size: 13px; }
+    #helpBody h4:first-child { margin-top: 0; }
+    #helpBody p, #helpBody ul, #helpBody ol { margin: .35rem 0; color: #d8d7d2; }
+    #helpBody ul, #helpBody ol { padding-left: 1.2rem; }
+    #helpBody li { margin: .25rem 0; }
+    #helpBody code { background: var(--panel-raised); border: 1px solid var(--border); padding: 0 .3rem; font-size: 12px; }
     .node .hd {
       padding: .35rem .5rem; border-radius: 0; font-weight: 600; cursor: move;
       display: flex; justify-content: space-between; gap: .4rem;
@@ -133,6 +156,7 @@
     </label>
     <input id="maxIter" type="number" min="1" max="50" value="3" title="Max loop iterations when recursive" style="width:3.2rem" />
     <span class="muted" style="font-size:11px">iters</span>
+    <button type="button" id="btnHelp" title="How this editor works">Help</button>
     <span class="grow"></span>
     <span class="muted">Multi-wire · ports fan-in/out · recursive feedback · click edge to select · Del removes</span>
   </div>
@@ -147,6 +171,66 @@
       <div id="insp">Select a node</div>
       <h3 style="margin-top:1rem">Plan</h3>
       <pre id="planOut" style="white-space:pre-wrap;color:var(--muted);font-size:10px"></pre>
+    </div>
+  </div>
+  <div id="helpModal" hidden>
+    <div id="helpCard">
+      <div id="helpHead">
+        <strong>Node graph editor — how it works</strong>
+        <button type="button" id="btnHelpClose" aria-label="Close">✕</button>
+      </div>
+      <div id="helpBody">
+        <h4>What you're looking at</h4>
+        <p>Each chat preset (Coding, Research, Planning, …) is really a small agent
+        tree: a lead plans the work, workers execute pieces of it in parallel, a
+        reviewer checks the result, and a synthesis step writes the final answer.
+        This canvas is that tree made visible and editable — the same tree the
+        chat window runs when you use that preset.</p>
+
+        <h4>Node types &amp; wiring</h4>
+        <ul>
+          <li><strong>Goal</strong> — the incoming request.</li>
+          <li><strong>Memory</strong> — the same three-tier pool as the freeform canvas
+          (tree / project / global). <code>search</code> pulls context into the lead
+          before it runs; <code>store</code> writes the final answer back into that
+          tier. Delete this node and save to opt the preset out entirely.</li>
+          <li><strong>Model route</strong> — one candidate in the lead's real fallback
+          chain: primary model, second choice, third, down to a guaranteed local-GPU
+          fallback. This is the actual order auto-resolution tries models in — reorder
+          by dragging port-to-port, or delete/add one, then Save.</li>
+          <li><strong>Lead</strong> — plans the approach and delegates.</li>
+          <li><strong>Worker</strong> — executes one focused piece of the task, in parallel with other workers.</li>
+          <li><strong>Reviewer</strong> — checks worker output before synthesis.</li>
+          <li><strong>Synthesis</strong> — a second lead pass that writes the user-facing answer.</li>
+          <li><strong>Output</strong> — the final answer, streamed to the chat window.</li>
+        </ul>
+        <p>Multi-wire fan-in/fan-out is supported: drag from a node's right-side port
+        to another node's left-side port. Recursive mode allows feedback edges back
+        into earlier nodes for iterative loops.</p>
+
+        <h4>Loading &amp; saving a preset</h4>
+        <ol>
+          <li>Pick a preset from the dropdown (or leave it on "Active preset" — the
+          one the chat window is currently using) and click <em>Load preset tree</em>.</li>
+          <li>Edit any node: pin an exact model, change required capabilities,
+          cap cost, force a run location, or adjust the memory/route nodes.</li>
+          <li>Click <em>Save</em>. This writes your edits straight back into
+          <code>service_catalog.yaml</code> — the same file the chat window's
+          preset shortlist reads. There's no separate copy; editing the graph
+          <em>is</em> editing the preset.</li>
+        </ol>
+        <p><em>Best-practice template</em> loads a clean starting layout, useful for a
+        new preset rather than editing a live one. <em>From pipeline…</em> and
+        <em>Export pipeline JSON</em> convert to/from the separate
+        <code>aetherstack.pipeline.v1</code> "scripts" format.</p>
+
+        <h4>Watching it run</h4>
+        <p>When a real chat request runs against a preset — from this tab, the VS
+        Code chat window, or anywhere else — the matching nodes light up gold while
+        active and green once done, so you can see the actual lead → memory →
+        workers → review → answer sequence happen instead of trusting it silently
+        did the right thing.</p>
+      </div>
     </div>
   </div>
   <div id="toast"></div>
@@ -164,6 +248,7 @@ const TYPES = {
     passThrough: false,
   },
   memory: { label: "Memory", color: "#978292", description: "Three-tier context pool: tree / project / global. Pass-through context node.", passThrough: true },
+  route: { label: "Model route", color: "#e0a458", description: "One candidate in the lead's real fallback chain — first available, in wiring order, wins. Reorder or rewire these and save to change auto-selection.", passThrough: false },
   slash: { label: "Command", color: "#858784", description: "Slash hygiene commands. Pass-through utility node.", passThrough: true },
   output: { label: "Output", color: "#686b69", description: "Collects results (many inputs). Pass-through sink; recursive mode can feedback earlier.", passThrough: true },
 };
@@ -179,6 +264,8 @@ let graph = {
 };
 let selected = null;
 let selectedEdge = null;
+const nodeStatus = {}; // nodeId -> "running" | "done" | "error", survives re-render
+let activeRunId = null;
 let drag = null;
 let link = null; // {from, x, y}
 let pan = null;
@@ -192,7 +279,7 @@ const DRAFT_DATA_KEYS = new Set([
   "needs", "available", "service_id", "maker", "max_cost", "parallel", "gate", "ack",
   "purpose", "commands", "namespace", "action", "scope", "project_id",
   "input_folder", "input_globs", "gpu_only", "private_vault",
-  "instructions_md", "instructions_source",
+  "instructions_md", "instructions_source", "edited_fields",
 ]);
 const MEMORY_SCOPES = {
   tree: "Tree — this decision graph only; shared by nodes in this canvas",
@@ -263,6 +350,7 @@ function defaultData(t) {
       instructions_md: "Work only on documents from the configured input folder. Do not send content to cloud providers. Prefer local GPU models.",
     },
     memory: { label: "Memory", scope: "tree", action: "search", project_id: null, namespace: null },
+    route: { label: "Route", model: null, tier: null },
     slash: { label: "Command", commands: ["/done all", "/compact"] },
     output: { label: "Output" },
   };
@@ -435,6 +523,7 @@ const INSPECTOR_FIELDS = {
   tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "instructions_md"],
   private: ["label", "model", "input_folder", "input_globs", "gpu_only", "private_vault", "instructions_md"],
   memory: ["label", "scope", "action", "project_id", "namespace"],
+  route: ["label", "model", "tier"],
   slash: ["label", "commands"],
   output: ["label"],
 };
@@ -494,7 +583,7 @@ function select(id) {
     const label = FIELD_LABELS[k] || k;
     if (typeof v === "boolean" || k === "gate" || k === "ack" || k === "gpu_only" || k === "private_vault") {
       html += `<label>${esc(label)}<br/><input type="checkbox" data-k="${esc(k)}" ${v?"checked":""}/></label>`;
-    } else if (k === "model" && (isAgentNode || isPrivate)) {
+    } else if (k === "model" && (isAgentNode || isPrivate || n.type === "route")) {
       html += `<label>${esc(label)}<br/><select data-k="model">${modelOptions(v)}</select></label>`;
       if (isPrivate) html += `<div class="node-help">Prefer a local GPU-backed alias (e.g. local-default).</div>`;
     } else if (k === "role" && isAgentNode) {
@@ -512,7 +601,7 @@ function select(id) {
     } else if (k === "max_cost") {
       html += `<label>${esc(label)}<br/><select data-k="max_cost">${option("", "No node override", v)}${fixedOptions(["low", "medium", "high", "very_high"], v)}</select></label>`;
     } else if (k === "tier" && n.type !== "memory") {
-      html += `<label>${esc(label)}<br/><select data-k="tier">${option("", "Any available location", v)}${fixedOptions(["local", "cloud", "host_cli"], v)}</select></label>`;
+      html += `<label>${esc(label)}<br/><select data-k="tier">${option("", "Any available location", v)}${fixedOptions(["local", "cloud", "subscription"], (v === "host_cli" || v === "hostcli" || v === "cli") ? "subscription" : v)}</select></label>`;
     } else if (k === "scope" && n.type === "memory") {
       const scopeOpts = Object.keys(MEMORY_SCOPES).map(s => option(s, s, v || "tree")).join("");
       html += `<label>${esc(label)}<br/><select data-k="scope">${scopeOpts}</select></label>`;
@@ -548,8 +637,9 @@ function select(id) {
       agent_ref: agent.ref, label: agent.label, role: agent.role, model: agent.model,
       provider: agent.provider, backend: agent.backend, tier: agent.tier,
       strategy: agent.strategy, needs: [...(agent.needs || [])], available: true,
-      service_id: agent.service_id,
+      service_id: agent.service_id, model_explicit: true,
     });
+    n.data.edited_fields = ["model", "needs", "strategy", "tier"];
     saveGraphLayout();
     select(n.id);
   });
@@ -573,6 +663,7 @@ function select(id) {
   insp.querySelectorAll("[data-k]").forEach(control => {
     control.addEventListener("change", () => {
       const k = control.dataset.k;
+      n.data.edited_fields = [...new Set([...(n.data.edited_fields || []), k])];
       if (control.type === "checkbox") n.data[k] = control.checked;
       else if (control.dataset.list === "true") n.data[k] = control.value.split(",").map(s => s.trim()).filter(Boolean);
       else {
@@ -580,6 +671,17 @@ function select(id) {
         n.data[k] = (control.value !== "" && !Number.isNaN(num) && String(num) === control.value) ? num : control.value || null;
         if (k === "model" || k === "role") delete n.data.agent_ref;
         if (k === "model") {
+          // Only a real user edit reaches this handler (never the initial
+          // render), so this is the one place safe to mark "the user actually
+          // chose this" — role_patch() only pins on save when this is set, so
+          // saving an unrelated edit (routes, memory, layout) can't silently
+          // freeze a node that was just showing its live-resolved model.
+          if (AGENT_NODE_TYPES.has(n.type)) n.data.model_explicit = true;
+          // A route node the editor rendered as a live auto-ranking preview
+          // (synthetic) becomes a real, savable chain entry once the user
+          // actually sets its model — same "only explicit edits round-trip"
+          // rule as model_explicit above.
+          if (n.type === "route") n.data.synthetic = false;
           const model = liveChoices.models.find(item => item.alias === control.value);
           if (model) Object.assign(n.data, {
             provider: model.provider, backend: model.backend, tier: model.tier,
@@ -823,9 +925,14 @@ function render() {
     const isPass = PASS_THROUGH_TYPES.has(n.type);
     if (isPass) el.classList.add("pass-through");
     if (n.type === "private") el.classList.add("private-node");
+    const st = nodeStatus[n.id];
+    el.classList.remove("status-running", "status-done", "status-error");
+    if (st) el.classList.add(`status-${st}`);
     el.innerHTML = `
       <div class="hd" style="background:#17191b;border-bottom:1px solid var(--border)">
-        <span>${esc(d.label || TYPES[n.type]?.label || n.type)}</span>
+        <span style="display:flex;align-items:center;gap:.35rem">
+          <span class="status-dot"></span>${esc(d.label || TYPES[n.type]?.label || n.type)}
+        </span>
         <span class="hd-right">
           <span style="opacity:.6;font-weight:400;font-size:10px">${esc(n.type)}</span>
         </span>
@@ -968,6 +1075,14 @@ document.getElementById("maxIter").addEventListener("change", ev => {
 document.getElementById("btnDel").onclick = () => {
   if (selectedEdge) { deleteSelectedEdge(); return; }
   if (!selected) return;
+  const removed = graph.nodes.find(n => n.id === selected);
+  if (removed && (removed.type === "memory" || removed.type === "route")) {
+    const incoming = graph.edges.filter(e => e.to === selected && (e.kind || "data") === "data");
+    const outgoing = graph.edges.filter(e => e.from === selected && (e.kind || "data") === "data");
+    if (incoming.length === 1 && outgoing.length === 1) {
+      graph.edges.push({ id: `e-${incoming[0].from}-${outgoing[0].to}-${uid()}`, from: incoming[0].from, to: outgoing[0].to, kind: "data" });
+    }
+  }
   graph.nodes = graph.nodes.filter(n => n.id !== selected);
   graph.edges = graph.edges.filter(e => e.from !== selected && e.to !== selected);
   selected = null;
@@ -976,9 +1091,9 @@ document.getElementById("btnDel").onclick = () => {
   document.getElementById("insp").textContent = "Select a node";
 };
 
-async function loadServiceGraph(serviceId, announce = true) {
+async function loadServiceGraph(serviceId, announce = true, persistCurrent = true) {
   const id = serviceId || "active";
-  saveGraphLayout();
+  if (persistCurrent) saveGraphLayout();
   const response = await fetch(`/api/services/${encodeURIComponent(id)}/graph`);
   const body = await response.json();
   if (!response.ok || body.error) { toast(body.error || `Cannot load ${id}`); return; }
@@ -1064,6 +1179,31 @@ document.getElementById("btnFromPipe").onclick = async () => {
 };
 
 document.getElementById("btnSave").onclick = async () => {
+  if (graph.service_id) {
+    const savedServiceId = graph.service_id;
+    const j = await fetch(`/api/services/${encodeURIComponent(graph.service_id)}/graph`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(graph),
+    }).then(r => r.json());
+    if (j.error) { toast(j.error); return; }
+    // The server may clear a route chain when an exact lead model is chosen,
+    // and it establishes a new comparison baseline for future set/clear edits.
+    // Drop stale draft data/edges, retain positions/camera, then reload the
+    // canonical graph so a second edit cannot be compared with an old baseline.
+    const key = graphLayoutKey();
+    if (key) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(key) || "null") || {};
+        const positions = Object.fromEntries((graph.nodes || []).map(node => [
+          node.id, { x: Number(node.x) || 0, y: Number(node.y) || 0 },
+        ]));
+        localStorage.setItem(key, JSON.stringify({ positions, camera }));
+      } catch { /* storage can be disabled without breaking save */ }
+    }
+    await loadServiceGraph(savedServiceId, false, false);
+    toast(`Saved preset "${savedServiceId}"`);
+    return;
+  }
   const j = await fetch("/api/graphs", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(graph),
@@ -1104,6 +1244,62 @@ loadServiceChoices().then(() => {
   return loadServiceGraph(requestedService, false);
 }).catch(() => render());
 window.addEventListener("beforeunload", saveGraphLayout);
+
+// Live run visibility: a chat request against this preset (run anywhere — the
+// VS Code chat window, another tab) publishes the same lead/memory/workers/
+// review/answering phase updates the chat UI's thought-process display uses,
+// so the matching node lights up here as it actually executes.
+function setNodeStatus(nodeId, status) {
+  if (status) nodeStatus[nodeId] = status; else delete nodeStatus[nodeId];
+  const el = document.querySelector(`.node[data-id="${nodeId}"]`);
+  if (!el) return;
+  el.classList.remove("status-running", "status-done", "status-error");
+  if (status) el.classList.add(`status-${status}`);
+}
+const PHASE_NODE_SUFFIXES = {
+  lead: ["lead"], lead_done: ["lead"], lead_error: ["lead"],
+  memory: ["memory"], memory_done: ["memory"],
+  memory_store: ["memory"], memory_store_done: ["memory"],
+  review: ["review"], review_done: ["review"], review_error: ["review"],
+  answering: ["synthesis", "output"], answering_done: ["synthesis", "output"], answering_error: ["synthesis", "output"],
+};
+function applyStatusEvent(evt) {
+  if (evt.type !== "status" || !evt.phase || evt.service_id !== graph.service_id) return;
+  if (evt.phase === "planning") {
+    activeRunId = evt.run_id || null;
+    // A fresh run against this preset started — clear stale lights from the last one.
+    Object.keys(nodeStatus).forEach(id => { if (id.startsWith(`${graph.id}-`)) setNodeStatus(id, null); });
+    return;
+  }
+  if (activeRunId && evt.run_id && evt.run_id !== activeRunId) return;
+  const done = evt.phase.endsWith("_done");
+  const failed = evt.phase.endsWith("_error");
+  const status = failed ? "error" : done ? "done" : "running";
+  if (evt.phase === "workers" || evt.phase === "workers_done") {
+    graph.nodes.filter(n => n.id.startsWith(`${graph.id}-worker-`)).forEach(n => setNodeStatus(n.id, status));
+    return;
+  }
+  (PHASE_NODE_SUFFIXES[evt.phase] || []).forEach(suffix => setNodeStatus(`${graph.id}-${suffix}`, status));
+}
+(function watchLiveRuns() {
+  let es;
+  function connect() {
+    es = new EventSource("/api/events/stream");
+    es.onmessage = (msg) => {
+      let evt;
+      try { evt = JSON.parse(msg.data); } catch { return; }
+      applyStatusEvent(evt);
+    };
+    es.onerror = () => { es.close(); setTimeout(connect, 3000); };
+  }
+  connect();
+})();
+
+const helpModal = document.getElementById("helpModal");
+document.getElementById("btnHelp").onclick = () => { helpModal.hidden = false; };
+document.getElementById("btnHelpClose").onclick = () => { helpModal.hidden = true; };
+helpModal.addEventListener("click", (e) => { if (e.target === helpModal) helpModal.hidden = true; });
+window.addEventListener("keydown", (e) => { if (e.key === "Escape" && !helpModal.hidden) helpModal.hidden = true; });
   </script>
 </body>
 </html>

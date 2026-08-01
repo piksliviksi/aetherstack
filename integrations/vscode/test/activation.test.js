@@ -13,6 +13,11 @@ test("chat exposes a minimal action menu, modes, and model activity state", () =
   assert.match(html, /activityWords/);
   assert.match(html, /Ask anything…/);
   assert.match(html, /message.type === 'route'/);
+  assert.match(html, /Docker setup guide/);
+  assert.match(html, /dataset\.action = 'installDocker'/);
+  const graphHtml = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "aether-hub", "static", "graph.html"), "utf8");
+  assert.match(graphHtml, /answering_done/);
+  assert.match(graphHtml, /activeRunId/);
   assert.match(html, /vscode\.getState/);
   assert.doesNotMatch(html, /history-rail|historyToggle|historyRail/);
   assert.doesNotMatch(html, /class="header-actions"|id="historyMenuButton"|id="historyMenu"/);
@@ -78,6 +83,8 @@ test("one-button startup delegates to the platform bootstrap scripts", () => {
   const extension = fs.readFileSync(path.resolve(__dirname, "..", "extension.js"), "utf8");
   assert.match(extension, /if \(!root && prompt\) root = await installManagedRuntime\(context\)/);
   assert.match(extension, /bundled-runtime/);
+  assert.match(extension, /hubChat\.checkReadiness = \(\) => refreshRuntime\(false, true\)/);
+  assert.match(extension, /docs\.docker\.com\/get-started\/get-docker/);
 });
 
 test("extension activates and registers lifecycle/control commands", async () => {
@@ -161,6 +168,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
   };
   const stackControl = {
     SERVICES: serviceStatus.services,
+    checkDocker: async () => ({ installed: true, running: true }),
     checkServices: async () => serviceStatus,
     composeDetails: async () => [],
     composeLogs: async () => ({ stdout: "", stderr: "" }),

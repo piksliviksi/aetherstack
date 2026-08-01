@@ -315,6 +315,7 @@ class DynamicServiceTests(unittest.TestCase):
 
     def test_combined_chat_executes_lead_workers_review_and_synthesis(self) -> None:
         calls: list[tuple[str, str, list[dict] | None]] = []
+        phases: list[str] = []
 
         def completion(call: dict, messages: list[dict] | None = None) -> dict:
             calls.append((call.get("role", "lead"), call["model"], messages))
@@ -329,6 +330,7 @@ class DynamicServiceTests(unittest.TestCase):
             snapshot(),
             {"goal": "Plan a verified release", "verify": False, "token_saver": True},
             completion=completion,
+            on_status=lambda event: phases.append(event["phase"]),
         )
         self.assertTrue(result["ok"])
         self.assertEqual(result["answer"], f"response-{len(calls)}")
@@ -340,6 +342,26 @@ class DynamicServiceTests(unittest.TestCase):
         self.assertIn("Return only the final user-facing answer", calls[-1][2][0]["content"])
         self.assertIn("never mention a lead", calls[-1][2][0]["content"])
         self.assertIn("no undeclared names", calls[-1][2][0]["content"])
+        self.assertIn("answering_done", phases)
+        self.assertLess(phases.index("answering"), phases.index("answering_done"))
+
+    def test_failed_final_answer_emits_terminal_error_phase(self) -> None:
+        phases: list[str] = []
+
+        def completion(call: dict, messages: list[dict] | None = None) -> dict:
+            if messages and "Return only the final user-facing answer" in messages[0].get("content", ""):
+                raise RuntimeError("final failed")
+            return {"model": call["model"], "content": "draft", "usage": {}}
+
+        with self.assertRaisesRegex(RuntimeError, "final failed"):
+            services.execute_service(
+                "coding",
+                snapshot(),
+                {"goal": "Implement a helper", "verify": False},
+                completion=completion,
+                on_status=lambda event: phases.append(event["phase"]),
+            )
+        self.assertIn("answering_error", phases)
 
     def test_handoff_context_carries_reasoning_across_a_model_switch(self) -> None:
         """A session-scoped, server-stored reasoning trace — not client-replayed chat

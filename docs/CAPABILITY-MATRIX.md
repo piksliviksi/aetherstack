@@ -74,8 +74,11 @@ curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local" | jq .primary
 | `prefer` | Behavior |
 |----------|----------|
 | `local` | Bias Ollama |
-| `cloud` | Bias API providers |
-| `auto` | Local for `private`/`cheap`; cloud for `vision`/`reason`/`long_context` |
+| `cloud` | Bias API providers and authenticated host CLI seats |
+| `subscription` | Bias available authenticated Codex, Claude, or Grok host CLI seats; falls back normally when none are available |
+| `auto` | Local for `private`/`cheap`; authenticated host CLI first for code/tools/reasoning when available, then cloud/local candidates |
+
+`subscription` refers to an already authenticated host CLI seat (`executor: host_cli`), not a browser session or an API subscription key.
 
 YAML `routing.fallbacks` lists ordered aliases when scoring finds none.
 

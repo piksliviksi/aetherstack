@@ -28,6 +28,7 @@ test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete acti
 
   const configuration = { get: () => undefined, inspect: () => ({}), update: async () => {} };
   let chatViewProvider = null;
+  const externalUrls = [];
   const vscode = {
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     Disposable,
@@ -43,7 +44,7 @@ test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete acti
       registerCommand: (name, handler) => { registered.set(name, handler); return new Disposable(); },
       executeCommand: async (name, ...args) => registered.get(name)?.(...args),
     },
-    env: { openExternal: async () => {} },
+    env: { openExternal: async (uri) => { externalUrls.push(uri.value); } },
     workspace: {
       workspaceFolders: [{ uri: { fsPath: "D:\\workspace\\aetherstack" } }],
       getConfiguration: () => configuration,
@@ -68,6 +69,7 @@ test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete acti
 
   const stackControl = {
     SERVICES: [],
+    checkDocker: async () => ({ installed: true, running: true }),
     checkServices: async () => ({ checkedAt: new Date().toISOString(), up: false, services: [] }),
     composeDetails: async () => [],
     composeLogs: async () => ({ stdout: "", stderr: "" }),
@@ -134,6 +136,8 @@ test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete acti
     };
     chatViewProvider.resolveWebviewView({ webview, onDidDispose: () => {} });
     assert.equal(typeof handler, "function");
+    await handler({ type: "installDocker" });
+    assert.deepEqual(externalUrls, ["https://docs.docker.com/get-started/get-docker/"]);
 
     // Bypass loadServices/network — give HubChat a fixed preset to route to directly.
     chatViewProvider.services = [{ id: "coding", label: "Coding", summary: "sum" }];

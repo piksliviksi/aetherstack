@@ -15,7 +15,7 @@ from typing import Any
 import yaml
 
 from agents import pick_model_for_role, plan_event, apply_runtime_update
-from matrix import _score_model
+from matrix import _score_model, tiers_match
 
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
@@ -270,7 +270,7 @@ def _pick_for_stage(snapshot: dict[str, Any], stage: dict[str, Any]) -> dict[str
     for name in prefer_models:
         meta = models.get(name)
         if meta and meta.get("available"):
-            if sel.get("tier") and meta.get("tier") != sel.get("tier"):
+            if sel.get("tier") and not tiers_match(meta, sel.get("tier")):
                 continue
             if sel.get("maker") and str(meta.get("provider") or "").lower() != str(sel["maker"]).lower():
                 continue
@@ -292,7 +292,7 @@ def _pick_for_stage(snapshot: dict[str, Any], stage: dict[str, Any]) -> dict[str
     for name, meta in models.items():
         if not meta.get("available"):
             continue
-        if sel.get("tier") and meta.get("tier") != sel.get("tier"):
+        if sel.get("tier") and not tiers_match(meta, sel.get("tier")):
             continue
         if sel.get("maker") and str(meta.get("provider") or "").lower() != str(sel["maker"]).lower():
             continue
@@ -303,9 +303,15 @@ def _pick_for_stage(snapshot: dict[str, Any], stage: dict[str, Any]) -> dict[str
         if needs and not (needs & caps):
             continue
         if strategy == "cheapest":
-            rank = {"0": 0, 0: 0, "low": 1, "medium": 2, "high": 3, "very_high": 4}.get(
-                meta.get("cost", "medium"), 2
-            )
+            rank = {
+                "0": 0,
+                0: 0,
+                "low": 1,
+                "account": 2,
+                "medium": 2,
+                "high": 3,
+                "very_high": 4,
+            }.get(meta.get("cost", "medium"), 2)
             score = 100.0 - 20.0 * rank
             if meta.get("tier") == "local":
                 score += 10

@@ -122,6 +122,25 @@
     .history-item:focus-visible, .history-item button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
     @media (max-width: 520px) { main { padding: 10px; } #activeModels { max-width: 34vw; } .statusline { display: none; } }
     @media (prefers-reduced-motion: reduce) { .idle-art pre { opacity: .42; } }
+    #readinessBanner { display: none; flex-direction: column; gap: 8px; margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--vscode-panel-border); border-radius: var(--ae-radius); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
+    #readinessBanner.show { display: flex; }
+    #readinessBanner.error { border-color: var(--vscode-errorForeground, var(--vscode-panel-border)); }
+    .readiness-steps { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; }
+    .readiness-step { display: flex; align-items: center; gap: 5px; color: var(--vscode-descriptionForeground); }
+    .readiness-step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); flex: none; }
+    .readiness-step.ok { color: var(--vscode-foreground); }
+    .readiness-step.ok .dot { background: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
+    .readiness-step.pending .dot { background: var(--vscode-charts-yellow); }
+    .readiness-step.error .dot { background: var(--vscode-errorForeground); }
+    .readiness-message { font-size: 12px; color: var(--vscode-foreground); }
+    .readiness-actions { display: flex; gap: 8px; }
+    .readiness-btn { padding: 4px 10px; border-radius: var(--ae-radius-sm); border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; font: inherit; font-size: 12px; }
+    .readiness-btn:hover { background: var(--vscode-button-hoverBackground); }
+    .readiness-btn.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+    .readiness-btn.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    #readinessTip { display: none; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--ae-radius); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); font-size: 12px; align-items: center; justify-content: space-between; gap: 8px; }
+    #readinessTip.show { display: flex; }
+    #readinessTip button { background: transparent; border: 0; color: var(--vscode-descriptionForeground); cursor: pointer; font: inherit; }
   </style>
 </head>
 <body>
@@ -135,6 +154,22 @@
     <label style="display:flex;align-items:center;min-width:auto"><input id="tokenSaver" type="checkbox"> Prefer lower token cost</label>
   </section>
   <section class="agents"><strong>Dynamic team</strong><div class="muted" id="serviceDescription"></div><div id="activities" class="activities"></div><div id="agents" class="agent-list"></div><details class="graph"><summary>Active preset node graph</summary><div id="serviceGraph" class="graph-flow"></div></details></section>
+  <div id="readinessBanner">
+    <div class="readiness-steps">
+      <span id="stepDocker" class="readiness-step"><span class="dot"></span>Docker</span>
+      <span id="stepRuntime" class="readiness-step"><span class="dot"></span>Runtime</span>
+      <span id="stepAi" class="readiness-step"><span class="dot"></span>AI ready</span>
+    </div>
+    <div id="readinessMessage" class="readiness-message"></div>
+    <div class="readiness-actions">
+      <button type="button" id="readinessStart" class="readiness-btn">Start all services</button>
+      <button type="button" id="readinessLogs" class="readiness-btn secondary">Open Output</button>
+    </div>
+  </div>
+  <div id="readinessTip">
+    <span>Ready. Ask naturally — Auto picks the right preset for you. <code>/help</code> for shortcuts.</span>
+    <button type="button" id="readinessTipDismiss" aria-label="Dismiss">✕</button>
+  </div>
   <div id="route"></div>
   <div id="messages"></div>
   <div id="idleArt" class="idle-art"><pre id="idleArtPre"></pre></div>
@@ -208,6 +243,54 @@
   let pendingAttachments = [];
   const restored = vscode.getState() || {};
   let activeConversationId = typeof restored.conversationId === 'string' ? restored.conversationId : null;
+  function setStep(el, state) {
+    el.className = 'readiness-step' + (state ? ' ' + state : '');
+  }
+  function renderReadiness(readiness, showTip) {
+    const r = readiness || { docker: { installed: true, running: true }, runtimeUp: false, aiReady: false, modelCount: 0 };
+    const dockerOk = Boolean(r.docker && r.docker.running);
+    const dockerState = dockerOk ? 'ok' : (r.docker && r.docker.installed === false) ? 'error' : 'pending';
+    setStep($('stepDocker'), dockerState);
+    setStep($('stepRuntime'), r.runtimeUp ? 'ok' : (dockerOk ? 'pending' : ''));
+    setStep($('stepAi'), r.aiReady ? 'ok' : (r.runtimeUp ? 'pending' : ''));
+    const fullyReady = dockerOk && r.runtimeUp && r.aiReady;
+    const banner = $('readinessBanner');
+    const msg = $('readinessMessage');
+    const startBtn = $('readinessStart');
+    if (fullyReady) {
+      banner.classList.remove('show', 'error');
+    } else {
+      banner.classList.add('show');
+      if (!dockerOk && r.docker && r.docker.installed === false) {
+        banner.classList.add('error');
+        msg.textContent = 'Docker is not installed. Install Docker Desktop (or Docker Engine), then press Start all services.';
+        startBtn.textContent = 'Docker setup guide';
+        startBtn.dataset.action = 'installDocker';
+      } else if (!dockerOk) {
+        banner.classList.add('error');
+        msg.textContent = 'Docker is installed but not running. Start Docker Desktop, then press Start all services.';
+        startBtn.textContent = 'Start all services';
+        startBtn.dataset.action = 'startAll';
+      } else if (!r.runtimeUp) {
+        banner.classList.remove('error');
+        msg.textContent = 'Starting the AetherStack stack can take a while on first run (image pulls, model download). Watch progress in Output.';
+        startBtn.textContent = 'Start all services';
+        startBtn.dataset.action = 'startAll';
+      } else if (!r.aiReady) {
+        banner.classList.remove('error');
+        msg.textContent = 'Stack is up, but no model is available yet — local provisioning may still be finishing. Give it a moment, or open Output for details.';
+        startBtn.textContent = 'Start all services';
+        startBtn.dataset.action = 'startAll';
+      }
+    }
+    $('readinessTip').classList.toggle('show', Boolean(showTip) && fullyReady);
+  }
+  $('readinessStart').addEventListener('click', () => vscode.postMessage({ type: $('readinessStart').dataset.action || 'startAll' }));
+  $('readinessLogs').addEventListener('click', () => vscode.postMessage({ type: 'openLogs' }));
+  $('readinessTipDismiss').addEventListener('click', () => {
+    $('readinessTip').classList.remove('show');
+    vscode.postMessage({ type: 'dismissTip' });
+  });
   function renderHistory(items) {
     const rows = items.map((item) => {
       const row = text('div', '', 'history-item');
@@ -691,6 +774,7 @@
       renderTeam();
       $('status').textContent = message.notice || '';
       $('status').className = message.error ? 'error' : 'muted';
+      renderReadiness(message.readiness, message.showTip);
     } else if (message.type === 'busy') {
       $('prompt').disabled = Boolean(message.value); $('refresh').disabled = Boolean(message.value);
       historyBusy = Boolean(message.value);

@@ -15,6 +15,7 @@ from typing import Any
 import yaml
 
 from matrix import route as matrix_route
+from matrix import tiers_match
 
 ROOT = Path(__file__).resolve().parent
 MODES_PATH = Path(os.environ.get("AETHER_AGENT_MODES_PATH", str(ROOT / "agent_modes.yaml")))
@@ -129,7 +130,8 @@ def _model_matches_filters(name: str, meta: dict[str, Any], sel: dict[str, Any])
         if str(meta.get("provider") or "").lower() != str(sel["maker"]).lower():
             return False
     if sel.get("tier"):
-        if str(meta.get("tier") or "").lower() != str(sel["tier"]).lower():
+        # host_cli / subscription are aliases for authenticated host CLI seats
+        if not tiers_match(meta, sel["tier"]):
             return False
     return True
 

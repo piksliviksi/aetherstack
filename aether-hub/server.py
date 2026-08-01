@@ -5,9 +5,11 @@ from __future__ import annotations
 import html as html_lib
 import json
 import os
+import queue
 import sys
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -49,6 +51,7 @@ from services import (  # noqa: E402
     execute_service,
     list_services,
     plan_service,
+    save_service_graph,
     set_auto_order,
 )
 from first_run import reset as first_run_reset  # noqa: E402
@@ -165,6 +168,37 @@ _matrix_raw: dict = {}
 _discover: dict = {}
 _host_scan: dict = {}
 _memory = MemoryStore(REDIS_URL)
+
+# Broadcast bus for live node-status events: execute_service/execute_auto's
+# existing on_status callback (phase/model updates originally built just for
+# the calling chat window) is fanned out here too, so any other client — the
+# node graph canvas open in another tab — can subscribe over SSE and light up
+# the matching node in real time, without a second parallel status mechanism.
+_stage_lock = threading.Lock()
+_stage_subscribers: list["queue.Queue"] = []
+
+
+def _stage_subscribe() -> "queue.Queue":
+    q: "queue.Queue" = queue.Queue(maxsize=200)
+    with _stage_lock:
+        _stage_subscribers.append(q)
+    return q
+
+
+def _stage_unsubscribe(q: "queue.Queue") -> None:
+    with _stage_lock:
+        if q in _stage_subscribers:
+            _stage_subscribers.remove(q)
+
+
+def _stage_publish(event: dict) -> None:
+    with _stage_lock:
+        subs = list(_stage_subscribers)
+    for q in subs:
+        try:
+            q.put_nowait(event)
+        except queue.Full:
+            pass
 
 
 def _redis_client():
@@ -606,6 +640,26 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._send(404, {"error": str(e)})
             return
+        if path == "/api/events/stream":
+            self._send_sse_start()
+            q = _stage_subscribe()
+            try:
+                last_ping = time.time()
+                while True:
+                    try:
+                        evt = q.get(timeout=15)
+                        self._send_sse_event(evt)
+                    except queue.Empty:
+                        pass
+                    if time.time() - last_ping > 15:
+                        self.wfile.write(b": ping\n\n")
+                        self.wfile.flush()
+                        last_ping = time.time()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                _stage_unsubscribe(q)
+            return
         if path == "/api/activity-words":
             self._send(200, list_words())
             return
@@ -902,6 +956,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, save_graph(body or {}))
             except Exception as e:
                 self._send(400, {"error": str(e)})
+            return
+        if path.startswith("/api/services/") and path.endswith("/graph"):
+            service_id = path[len("/api/services/") : -len("/graph")].strip("/")
+            if service_id == "active":
+                service_id = get_runtime().get("service") or default_service_id()
+            try:
+                self._send(200, save_service_graph(service_id, body or {}))
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
             return
         if path == "/api/graphs/auto-connect":
             g = body.get("graph") or body
@@ -1228,6 +1293,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/services/") and path.endswith("/run/stream"):
             service_id = path[len("/api/services/") : -len("/run/stream")].strip("/")
+            run_id = str(body.get("run_id") or uuid.uuid4().hex)
             self._send_sse_start()
             try:
                 def on_delta(chunk_text: str) -> None:
@@ -1235,12 +1301,17 @@ class Handler(BaseHTTPRequestHandler):
 
                 def on_status(payload: dict) -> None:
                     # phase/model only — no prompt content
-                    event = {"type": "status"}
+                    event = {"type": "status", "run_id": run_id}
                     if isinstance(payload, dict):
                         for key in ("phase", "model", "models", "label"):
                             if payload.get(key) is not None:
                                 event[key] = payload[key]
                     self._send_sse_event(event)
+                    # Fan the same phase/model updates out to any other client —
+                    # e.g. the node graph canvas open in another tab — watching
+                    # this preset run live, not just the caller of this request.
+                    if service_id != "auto":
+                        _stage_publish({**event, "service_id": service_id})
 
                 sid = body.get("session_id") or body.get("session")
                 if service_id == "auto":
@@ -1588,6 +1659,8 @@ def _paths() -> list[str]:
         "POST /api/services/{id}/plan",
         "POST /api/services/{id}/run  ← use id=auto for direct models + unified memory",
         "GET  /api/services/{id|active}/graph ← editable resolved preset tree",
+        "POST /api/services/{id|active}/graph ← save node edits back into service_catalog.yaml",
+        "GET  /api/events/stream     ← SSE: live lead/worker/review/memory phase updates for any running preset",
         "GET|POST|DELETE /api/activity-words  ← editable inference activity text",
         "GET  /api/update            ← check upstream",
         "POST /api/update/stage      ← download without applying",

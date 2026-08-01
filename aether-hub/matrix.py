@@ -263,6 +263,42 @@ def annotate_availability(matrix: dict[str, Any], ollama: dict[str, Any] | None 
     return snapshot
 
 
+def normalize_tier(value: Any) -> str:
+    """Canonical location tier. Host CLI subscriptions map to 'subscription'."""
+    tier = str(value or "").strip().lower().replace("-", "_")
+    if tier in {"host_cli", "hostcli", "cli", "subscription"}:
+        return "subscription"
+    return tier
+
+
+def normalize_prefer(value: Any) -> str:
+    prefer = str(value or "auto").strip().lower().replace("-", "_")
+    if prefer in {"host_cli", "hostcli", "cli"}:
+        return "subscription"
+    if prefer not in {"local", "cloud", "subscription", "auto"}:
+        return "auto"
+    return prefer
+
+
+def model_tier(meta: dict[str, Any] | None) -> str:
+    meta = meta or {}
+    if meta.get("executor") == "host_cli":
+        return "subscription"
+    return normalize_tier(meta.get("tier"))
+
+
+def tiers_match(meta_or_tier: Any, want: Any) -> bool:
+    """True when a model tier satisfies an authored tier filter."""
+    if want is None or str(want).strip() == "":
+        return True
+    want_n = normalize_tier(want)
+    if isinstance(meta_or_tier, dict):
+        have = model_tier(meta_or_tier)
+    else:
+        have = normalize_tier(meta_or_tier)
+    return have == want_n
+
+
 def _score_model(meta: dict[str, Any], needs: set[str], prefer: str | None) -> float:
     if not meta.get("available"):
         return -1e9
@@ -275,21 +311,36 @@ def _score_model(meta: dict[str, Any], needs: set[str], prefer: str | None) -> f
     else:
         score = 100.0 + 10.0 * len(needs)
 
-    tier = meta.get("tier")
-    if prefer == "local" and tier == "local":
+    prefer_n = normalize_prefer(prefer)
+    tier = model_tier(meta)
+    if prefer_n == "local" and tier == "local":
         score += 50
-    if prefer == "cloud" and tier == "cloud":
+    elif prefer_n == "cloud" and tier in {"cloud", "subscription"}:
+        # Host CLI subscriptions count as cloud-side capacity for routing.
         score += 50
-    if prefer == "auto":
+    elif prefer_n == "subscription" and tier == "subscription":
+        # Subscription workmode: bias authenticated Codex/Claude/Grok CLIs.
+        score += 55
+    elif prefer_n == "auto":
         # prefer local for private/cheap/fast needs
         if needs & {"private", "cheap"} and tier == "local":
             score += 40
-        if needs & {"vision", "reason", "long_context"} and tier == "cloud":
-            score += 30
+        if needs & {"vision", "reason", "long_context", "code", "tools"}:
+            if tier == "subscription":
+                # Prefer already-paid host CLI subscriptions for real work.
+                score += 40
+            elif tier == "cloud":
+                score += 30
 
-    cost = {"0": 20, 0: 20, "low": 15, "medium": 5, "high": 0, "very_high": -10}.get(
-        meta.get("cost", "medium"), 5
-    )
+    cost = {
+        "0": 20,
+        0: 20,
+        "low": 15,
+        "medium": 5,
+        "account": 12,  # subscription seat — already paid, treat favorably vs API high
+        "high": 0,
+        "very_high": -10,
+    }.get(meta.get("cost", "medium"), 5)
     score += cost
     lat = {"very_low": 15, "low": 10, "medium": 5, "high": 0}.get(meta.get("latency", "medium"), 5)
     score += lat
@@ -302,7 +353,7 @@ def route(
     prefer: str | None = "auto",
 ) -> dict[str, Any]:
     needs = set(n.strip() for n in (need or ["chat"]) if n and n.strip())
-    prefer = (prefer or "auto").lower()
+    prefer = normalize_prefer(prefer)
     models = snapshot.get("models") or {}
     routing = snapshot.get("routing") or {}
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.17
+
+- **Service presets are editable node graphs, not a read-only preview.** The node editor's Save now writes pinned models, required capabilities, cost cap, and run location straight back into `service_catalog.yaml`, touching only the edited service's own block — every other preset's formatting and comments stay byte-identical.
+- **The lead's real fallback chain is visible and rewirable.** Primary model → second choice → third → a guaranteed local-GPU fallback now render as their own row of nodes; reordering or rewiring them and saving changes which model auto-selection tries first, in that order.
+- **A preset can opt into the same three-tier memory pool the freeform canvas uses** (tree / project / global, search / store) via its own Memory node — deleting the node opts the preset back out. Uses the existing `resolve_memory_namespace`/`graph_exec` machinery rather than a second parallel mechanism.
+- **Live per-node status during a real run**, over a new `GET /api/events/stream` SSE broadcast: lead/memory/workers/review/answering phases light up the matching node as they actually happen, sourced from the same phase events Chat's thought-process display already uses.
+- Add an in-editor Help panel covering node wiring, the preset save flow, the memory node, and the fallback-chain nodes.
+- Fix the `Run location` (tier) inspector field silently not saving.
+- Strip ANSI color codes from Compose/one-click output written into the AetherStack Output panel.
+
 ## 0.3.16
 
 - **Fix Auto mode answering the scaffolding instead of the question.** The host-CLI bridge flattened every message — system turns included — into one prompt with `SYSTEM:`/`USER:` headers and piped it to the CLI as user text, which a coding agent reads as an injected instruction block and refuses. System turns now travel via each CLI's own mechanism: `--append-system-prompt` (Claude), `--rules` (Grok), `-c developer_instructions=` (Codex). A lone user turn is sent verbatim.

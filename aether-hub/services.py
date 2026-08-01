@@ -5,6 +5,8 @@ import copy
 import json
 import os
 import re
+import stat
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -19,11 +21,12 @@ from attachments import build_image_content_part, decode_attachment, extract_pdf
 from cross_memory import get_xref_state, pull_context
 from inference_runtime import begin as begin_inference
 from inference_runtime import finish as finish_inference
-from matrix import _score_model
+from matrix import _score_model, normalize_prefer, tiers_match
 from memory import MemoryStore
 
 ROOT = Path(__file__).resolve().parent
 CATALOG_PATH = Path(os.environ.get("AETHER_SERVICE_CATALOG", str(ROOT / "service_catalog.yaml")))
+_catalog_write_lock = threading.Lock()
 PROFILE_DIR = Path(os.environ.get("AETHER_SERVICE_PROFILE_DIR", str(ROOT / "profiles" / "services")))
 LITELLM_BASE_URL = os.environ.get("LITELLM_INTERNAL_URL", "http://litellm:4000").rstrip("/")
 CLI_BRIDGE_URL = os.environ.get("AETHER_CLI_BRIDGE_URL", "http://host.docker.internal:8767").rstrip("/")
@@ -147,7 +150,16 @@ def load_service_profile(service_id: str, profile_dir: Path | None = None) -> tu
 
 
 def _cost_rank(value: Any) -> int:
-    return {0: 0, "0": 0, "low": 1, "medium": 2, "high": 3, "very_high": 4}.get(value, 2)
+    # "account" = host CLI subscription seat (already paid; treat like medium-low)
+    return {
+        0: 0,
+        "0": 0,
+        "low": 1,
+        "account": 2,
+        "medium": 2,
+        "high": 3,
+        "very_high": 4,
+    }.get(value, 2)
 
 
 def _candidate_models(
@@ -157,12 +169,15 @@ def _candidate_models(
     used_providers: set[str],
 ) -> list[tuple[float, str, dict[str, Any]]]:
     needs = set(str(item) for item in (blueprint.get("needs") or ["chat"]))
-    prefer = str(blueprint.get("prefer") or "auto")
+    prefer = normalize_prefer(blueprint.get("prefer") or "auto")
+    want_tier = blueprint.get("tier")
     max_cost = _cost_rank(blueprint.get("max_cost", "very_high"))
     strategy = str(blueprint.get("strategy") or "best_score")
     ranked = []
     for alias, meta in (snapshot.get("models") or {}).items():
         if not meta.get("available") or _cost_rank(meta.get("cost")) > max_cost:
+            continue
+        if want_tier and not tiers_match(meta, want_tier):
             continue
         score = _score_model(meta, needs, prefer)
         if score < 0:
@@ -272,6 +287,62 @@ def classify_service(goal: str, snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_display_chain(
+    snapshot: dict[str, Any], candidates: list[tuple[float, str, dict[str, Any]]], limit: int = 3
+) -> list[dict[str, Any]]:
+    """Top-N ranked candidates plus a guaranteed local-tier entry at the end, so the
+    node graph can render the real primary -> ... -> local-GPU-fallback chain that
+    auto-resolution actually falls back through, not just the single winning pick."""
+    models = snapshot.get("models") or {}
+    chain_aliases = [alias for _, alias, _ in candidates[:limit]]
+    if not any(models.get(alias, {}).get("tier") == "local" for alias in chain_aliases):
+        local = next((alias for _, alias, meta in candidates if meta.get("tier") == "local"), None)
+        if not local:
+            local = next(
+                (alias for alias, meta in models.items() if meta.get("tier") == "local" and meta.get("available")),
+                None,
+            )
+        if local:
+            chain_aliases = [*chain_aliases, local]
+    return [
+        {"model": alias, "tier": models.get(alias, {}).get("tier"), "provider": models.get(alias, {}).get("provider")}
+        for alias in chain_aliases
+    ]
+
+
+def _normalize_chain(chain: list[Any], models: dict[str, Any]) -> list[dict[str, Any]]:
+    """`fallback_chain` has two producers with different shapes: an authored
+    chain from the catalog (graph_to_service_patch saves plain model-alias
+    strings, matching how pin_model/needs/etc. are stored) and
+    `_build_display_chain`'s auto-ranked chain (list[dict] with tier/provider
+    already resolved). service_to_graph only knows how to render dicts, so
+    without this normalizer a saved string chain silently collapses to a
+    single-entry chain on reload — exactly the round-trip a saved graph must
+    not lose."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for link in chain:
+        if isinstance(link, dict):
+            alias = link.get("model")
+        elif isinstance(link, str):
+            alias = link
+        else:
+            continue
+        alias = alias.strip() if isinstance(alias, str) else ""
+        if not alias or alias in seen:
+            continue
+        seen.add(alias)
+        meta = models.get(alias) or {}
+        out.append(
+            {
+                "model": alias,
+                "tier": (link.get("tier") if isinstance(link, dict) else None) or meta.get("tier"),
+                "provider": (link.get("provider") if isinstance(link, dict) else None) or meta.get("provider"),
+            }
+        )
+    return out
+
+
 def _resolve_agent(
     snapshot: dict[str, Any],
     agent_id: str,
@@ -280,7 +351,6 @@ def _resolve_agent(
     used_models: set[str],
     used_providers: set[str],
 ) -> dict[str, Any]:
-    candidates = _candidate_models(snapshot, blueprint, used_models, used_providers)
     needs = list(blueprint.get("needs") or ["chat"])
     base = {
         "id": agent_id,
@@ -288,9 +358,83 @@ def _resolve_agent(
         "label": blueprint.get("label") or role.title(),
         "needs": needs,
         "strategy": blueprint.get("strategy") or "best_score",
+        "max_cost": blueprint.get("max_cost"),
     }
+    models = snapshot.get("models") or {}
+    # Whether the catalog actually stores a fallback_chain for this role, vs.
+    # `fallback_chain` below being _build_display_chain's live auto-ranked
+    # preview. graph.py's service_to_graph uses this to mark preview-only
+    # route nodes "synthetic" so an unrelated save can't freeze the current
+    # auto-ranking into the catalog as if the user had authored it.
+    chain_authored = bool(blueprint.get("fallback_chain"))
+
+    def pick(alias: str, meta: dict[str, Any], chain: list[Any], *, explicit_pin: bool) -> dict[str, Any]:
+        used_models.add(alias)
+        if meta.get("provider"):
+            used_providers.add(str(meta["provider"]))
+        capabilities = list(meta.get("capabilities") or [])
+        missing_capabilities = sorted(set(needs) - set(capabilities))
+        return {
+            **base,
+            "available": True,
+            "model": alias,
+            "provider": meta.get("provider"),
+            "backend": meta.get("backend"),
+            "tier": meta.get("tier"),
+            "cost": meta.get("cost"),
+            "capabilities": capabilities,
+            "missing_capabilities": missing_capabilities,
+            "capability_fit": "full" if not missing_capabilities else "partial",
+            "availability_reason": None,
+            "score": 999.0,
+            "pinned": True,
+            # Only a plain pin_model (not a fallback-chain win) round-trips as
+            # an explicit single-model choice in the node graph — see
+            # graph.py's agent_node(), which stamps model_explicit from this
+            # so re-saving an already-pinned preset doesn't need the user to
+            # re-touch the model dropdown to keep the pin.
+            "model_explicit": explicit_pin,
+            "fallback_chain": _normalize_chain(chain, models),
+            "chain_authored": chain_authored,
+        }
+
+    # An explicit, user-wired fallback chain (from the node graph's route nodes)
+    # takes priority over everything else: try each alias in order, first
+    # available wins. Reordering/rewiring those nodes and saving is what changes
+    # this list, so auto-selection literally follows the wiring.
+    authored_chain = blueprint.get("fallback_chain") or None
+    if authored_chain:
+        for link in authored_chain:
+            # Catalog storage is plain alias strings, but tolerate a stray
+            # {"model": alias, ...} dict (e.g. hand-edited YAML, or a chain
+            # copied from a resolved/display value) rather than crashing on
+            # an unhashable dict key.
+            alias = link.get("model") if isinstance(link, dict) else link
+            if not alias or not isinstance(alias, str):
+                continue
+            meta = models.get(alias) or {}
+            if meta.get("available"):
+                return pick(alias, meta, list(authored_chain), explicit_pin=False)
+
+    pin = blueprint.get("pin_model")
+    pinned_meta = models.get(pin) if pin else None
+    if pin and pinned_meta and pinned_meta.get("available"):
+        return pick(pin, pinned_meta, authored_chain or [pin], explicit_pin=True)
+
+    candidates = _candidate_models(snapshot, blueprint, used_models, used_providers)
+    display_chain = _normalize_chain(authored_chain, models) if authored_chain else _build_display_chain(snapshot, candidates)
     if not candidates:
-        return {**base, "available": False, "suggestion": _offline_suggestion(snapshot, needs)}
+        reason = f"pinned model '{pin}' is unavailable" if pin else None
+        suggestion = _offline_suggestion(snapshot, needs)
+        if reason and suggestion:
+            suggestion = {**suggestion, "note": reason}
+        return {
+            **base,
+            "available": False,
+            "suggestion": suggestion,
+            "fallback_chain": display_chain,
+            "chain_authored": chain_authored,
+        }
     score, alias, meta = candidates[0]
     capabilities = list(meta.get("capabilities") or [])
     missing_capabilities = sorted(set(needs) - set(capabilities))
@@ -310,6 +454,8 @@ def _resolve_agent(
         "capability_fit": "full" if not missing_capabilities else "partial",
         "availability_reason": meta.get("availability_reason"),
         "score": round(score, 2),
+        "fallback_chain": display_chain,
+        "chain_authored": chain_authored,
     }
 
 
@@ -345,6 +491,7 @@ def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]
         "mode": service.get("mode") or defaults.get("mode") or "multi_agent",
         "lean_mode": service.get("lean_mode") or defaults.get("lean_mode") or "balanced",
         "token_saver": bool(service.get("token_saver", defaults.get("token_saver", False))),
+        "memory": service.get("memory"),
         "agents": agents,
         "ready": not missing and not partial and bool(available),
         "degraded": bool(available) and bool(missing or partial),
@@ -576,6 +723,115 @@ def default_service_id() -> str:
         raise ValueError("service catalog is empty")
     # The first catalog entry is the visible first preset (Research by default).
     return next(iter(services))
+
+
+def _replace_service_block(raw_text: str, service_id: str, new_service: dict[str, Any]) -> str:
+    """Splice a single service's YAML block back into the catalog's raw text,
+    leaving every other line byte-identical. A plain `yaml.safe_dump(catalog, ...)`
+    of the whole ~600-line hand-authored file reformats every service (flow-style
+    lists/dicts become block-style, blank-line spacing changes) on every single
+    graph save, which would make every preset edit produce a huge unrelated diff
+    across services nobody touched."""
+    lines = raw_text.split("\n")
+    start_marker = f"  {service_id}:"
+    start_idx = next(
+        (i for i, line in enumerate(lines) if line == start_marker or line.startswith(start_marker + " ")),
+        None,
+    )
+    if start_idx is None:
+        raise ValueError(f"service '{service_id}' block not found in {CATALOG_PATH.name}")
+    end_idx = len(lines)
+    for i in range(start_idx + 1, len(lines)):
+        line = lines[i]
+        if line.strip() == "":
+            continue
+        if len(line) - len(line.lstrip(" ")) < 4:
+            end_idx = i
+            break
+    while end_idx > start_idx + 1 and lines[end_idx - 1].strip() == "":
+        end_idx -= 1
+    dumped = yaml.safe_dump(
+        {service_id: new_service}, sort_keys=False, allow_unicode=True, width=100, default_flow_style=None
+    )
+    new_block = ["  " + line if line else line for line in dumped.rstrip("\n").split("\n")]
+    return "\n".join(lines[:start_idx] + new_block + lines[end_idx:])
+
+
+def save_service_graph(service_id: str, graph: dict[str, Any]) -> dict[str, Any]:
+    """Write node-graph edits (pinned models, needs, strategy, max_cost, the
+    memory node's scope/action, and the fallback-chain order) back into
+    service_catalog.yaml for the given service, touching only that service's
+    own block. Note: a lead node's instructions_md is separate external
+    behavior-profile markdown, not the catalog's `instructions:` field — it is
+    intentionally not written here (see graph_to_service_patch)."""
+    from graph import graph_to_service_patch
+
+    patch = graph_to_service_patch(graph)
+    if patch.get("id") and patch["id"] != service_id:
+        raise ValueError("graph does not belong to this service")
+
+    def apply_role(existing: dict[str, Any], role_patch: dict[str, Any]) -> dict[str, Any]:
+        updated = dict(existing)
+        for key, value in role_patch.items():
+            if value is None:
+                updated.pop(key, None)
+            else:
+                updated[key] = value
+        return updated
+
+    # ThreadingHTTPServer can process two graph saves at once. Lock the entire
+    # read/modify/replace transaction so one service update cannot restore a
+    # stale snapshot over another. A unique temporary path also avoids threads
+    # writing the same PID-based file.
+    with _catalog_write_lock:
+        raw_text = CATALOG_PATH.read_text(encoding="utf-8")
+        catalog = yaml.safe_load(raw_text)
+        catalog_services = (catalog or {}).get("services") or {}
+        if service_id not in catalog_services:
+            raise ValueError(f"unknown service: {service_id}")
+        service = dict(catalog_services[service_id])
+
+        for role_key in ("lead", "reviewer"):
+            if patch.get(role_key):
+                service[role_key] = apply_role(service.get(role_key) or {}, patch[role_key])
+        if patch.get("workstreams"):
+            # build_service_graph() shows the smallest-useful-team view
+            # (minimize_service_agents), so the graph may display fewer workers
+            # than the catalog actually defines. Update in place by position and
+            # never shrink the list to len(patch) — that would silently delete
+            # catalog workstreams the minimized preview simply didn't render.
+            existing = list(service.get("workstreams") or [])
+            for index, worker_patch in enumerate(patch["workstreams"]):
+                if not worker_patch:
+                    continue
+                if index < len(existing):
+                    existing[index] = apply_role(existing[index], worker_patch)
+                else:
+                    existing.append(apply_role({}, worker_patch))
+            service["workstreams"] = existing
+        if "memory" in patch:
+            if patch["memory"] is None:
+                service.pop("memory", None)
+            else:
+                service["memory"] = patch["memory"]
+
+        new_text = _replace_service_block(raw_text, service_id, service)
+        tmp_path = CATALOG_PATH.with_name(
+            f".{CATALOG_PATH.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp"
+        )
+        try:
+            tmp_path.write_text(new_text, encoding="utf-8")
+            try:
+                os.chmod(tmp_path, stat.S_IMODE(CATALOG_PATH.stat().st_mode))
+            except OSError:
+                pass
+            os.replace(tmp_path, CATALOG_PATH)
+        finally:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+        return {"ok": True, "id": service_id, "service": service}
 
 
 def build_service_graph(
@@ -880,6 +1136,42 @@ def _auto_pull_xref(memory: MemoryStore | None, goal: str) -> str:
     except Exception:
         pass
     return ""
+
+
+def _service_memory_ops(service_id: str, resolved_service: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build a memory_op descriptor (same shape graph_exec.py's freeform-canvas
+    Memory nodes produce) from a service preset's saved memory-node config, so
+    chat's Auto/preset path draws on the exact same three-tier pool
+    (tree/project/global via resolve_memory_namespace) instead of a separate
+    mechanism. Presets that have never had their memory node edited/saved carry
+    no `memory` key and get no op — purely opt-in."""
+    cfg = resolved_service.get("memory")
+    if not cfg:
+        return []
+    from graph import MEMORY_ACTIONS, MEMORY_SCOPES, resolve_memory_namespace
+
+    scope = str(cfg.get("scope") or "tree").strip().lower()
+    if scope not in MEMORY_SCOPES:
+        scope = "tree"
+    action = str(cfg.get("action") or "search").strip().lower()
+    if action not in MEMORY_ACTIONS:
+        action = "search"
+    namespace = resolve_memory_namespace(
+        scope=scope,
+        graph_id=f"service-{service_id}",
+        project_id=cfg.get("project_id") or service_id,
+        namespace=cfg.get("namespace"),
+    )
+    return [
+        {
+            "node_id": f"service-{service_id}-memory",
+            "label": "Cross-project memory",
+            "scope": scope,
+            "action": action,
+            "namespace": namespace,
+            "project_id": cfg.get("project_id") or service_id,
+        }
+    ]
 
 
 def _select_vision_model(snapshot: dict[str, Any]) -> str | None:
@@ -1365,6 +1657,18 @@ def execute_service(
     handoff_context = _load_handoff_context(memory, session_id, lead_call.get("model"))
     xref_block = _auto_pull_xref(memory, goal)
 
+    # Preset-level Memory node (tree/project/global — same pool and namespace
+    # resolution as the freeform canvas's Memory nodes, see graph.py). Only
+    # presets whose graph has been saved with a memory node carry this.
+    memory_ops = _service_memory_ops(service_id, plan.get("service") or {})
+    memory_block = ""
+    if any(op.get("action") == "search" for op in memory_ops):
+        from graph_exec import _memory_reads
+
+        _emit_status(on_status, "memory", label="Memory…")
+        memory_block = _memory_reads(memory, memory_ops, goal)
+        _emit_status(on_status, "memory_done", label="Memory done…")
+
     lead_messages = copy.deepcopy(lead_call.get("messages") or [])
     if history:
         lead_messages.append({"role": "user", "content": f"Recent conversation:\n{history}"})
@@ -1372,8 +1676,14 @@ def execute_service(
         lead_messages.append({"role": "user", "content": handoff_context})
     if xref_block:
         lead_messages.append({"role": "user", "content": xref_block})
+    if memory_block:
+        lead_messages.append({"role": "user", "content": memory_block})
     _emit_status(on_status, "lead", model=lead_call.get("model"), label="Lead…")
-    lead = completion(lead_call, lead_messages)
+    try:
+        lead = completion(lead_call, lead_messages)
+    except Exception:
+        _emit_status(on_status, "lead_error", model=lead_call.get("model"), label="Lead failed")
+        raise
     _emit_status(on_status, "lead_done", model=lead.get("model") or lead_call.get("model"), label="Lead done…")
 
     def run_worker(call: dict[str, Any]) -> dict[str, Any]:
@@ -1429,12 +1739,8 @@ def execute_service(
             review = completion(supervisor_call, review_messages)
         except Exception as exc:
             review = {"model": supervisor_call.get("model"), "content": "", "error": str(exc)[:500], "usage": {}}
-        _emit_status(
-            on_status,
-            "review_done",
-            model=(review or {}).get("model") or supervisor_call.get("model"),
-            label="Review done…",
-        )
+        review_phase = "review_error" if review.get("error") else "review_done"
+        _emit_status(on_status, review_phase, model=(review or {}).get("model") or supervisor_call.get("model"), label="Review failed" if review.get("error") else "Review done…")
 
     final_call = dict(lead_call)
     final_call["max_tokens"] = lead_call.get("max_tokens") or 2000
@@ -1464,12 +1770,23 @@ def execute_service(
     attachments = [item for item in (event.get("attachments") or []) if isinstance(item, dict)]
     _augment_final_message_with_attachments(final_messages, attachments, snapshot, final_call)
     _emit_status(on_status, "answering", model=final_call.get("model"), label="Answering…")
-    if on_delta is not None and not _is_host_cli(snapshot, final_call.get("model")):
-        final = _chat_completion_stream(final_call, final_messages, on_delta)
-    else:
-        final = completion(final_call, final_messages)
-        if on_delta is not None:
-            on_delta(final.get("content") or "")
+    try:
+        if on_delta is not None and not _is_host_cli(snapshot, final_call.get("model")):
+            final = _chat_completion_stream(final_call, final_messages, on_delta)
+        else:
+            final = completion(final_call, final_messages)
+            if on_delta is not None:
+                on_delta(final.get("content") or "")
+    except Exception:
+        _emit_status(on_status, "answering_error", model=final_call.get("model"), label="Answer failed")
+        raise
+    _emit_status(on_status, "answering_done", model=final.get("model") or final_call.get("model"), label="Answer ready")
+    if any(op.get("action") == "store" for op in memory_ops):
+        from graph_exec import _memory_writes
+
+        _emit_status(on_status, "memory_store", label="Storing memory…")
+        _memory_writes(memory, memory_ops, goal, final.get("content") or "")
+        _emit_status(on_status, "memory_store_done", label="Memory stored…")
     steps = [
         {"role": "lead-plan", "model": lead.get("model"), "content": lead.get("content")},
         *workers,

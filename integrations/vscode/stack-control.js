@@ -216,6 +216,17 @@ async function checkServices() {
   };
 }
 
+// Distinguishes "Docker isn't installed" from "Docker is installed but its
+// daemon isn't running" — the two blank-machine failure modes need different
+// next steps (install vs. open Docker Desktop / start the service).
+async function checkDocker() {
+  const locator = process.platform === "win32" ? "where.exe" : "which";
+  const found = await execFileResult(locator, ["docker"], { timeout: 5_000 }).catch(() => ({ ok: false }));
+  if (!found.ok) return { installed: false, running: false };
+  const info = await execFileResult("docker", ["info"], { timeout: 8_000 }).catch(() => ({ ok: false }));
+  return { installed: true, running: Boolean(info.ok) };
+}
+
 const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
 
 function appendBoundedOutput(current, chunk, limit = MAX_CAPTURE_BYTES) {
@@ -462,6 +473,7 @@ function normalizeLocalUiUrl(value) {
 
 module.exports = {
   SERVICES,
+  checkDocker,
   checkServices,
   conciseError,
   findStackRoot,

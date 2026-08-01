@@ -38,6 +38,7 @@ NODE_TYPES = {
     "analyser": {"label": "Analyser", "ports_in": -1, "ports_out": -1, "color": "#fbbf24", "pass_through": False},
     "tester": {"label": "Tester", "ports_in": -1, "ports_out": -1, "color": "#22d3ee", "pass_through": False},
     "memory": {"label": "Memory", "ports_in": -1, "ports_out": -1, "color": "#fb7185", "pass_through": True},
+    "route": {"label": "Model route", "ports_in": -1, "ports_out": -1, "color": "#e0a458", "pass_through": False},
     # Private: local-GPU-only inference over a folder of PDF/text; vault-isolated
     "private": {
         "label": "Private",
@@ -136,6 +137,7 @@ _DEFAULT_DATA = {
     },
     "slash": {"commands": ["/done all", "/compact"]},
     "output": {},
+    "route": {"model": None, "tier": None},
 }
 
 # Memory node scopes (tiers). Distinct from agent run-location `tier` (local/cloud/host_cli).
@@ -458,6 +460,13 @@ def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, 
 
     def agent_node(agent: dict[str, Any] | None, node_id: str, ntype: str, x: int, y: int, label: str) -> dict[str, Any]:
         agent = agent or {}
+        editable = {
+            "model": agent.get("model"),
+            "needs": list(agent.get("needs") or []),
+            "strategy": agent.get("strategy") or "best_score",
+            "max_cost": agent.get("max_cost"),
+            "tier": agent.get("tier"),
+        }
         return {
             "id": node_id,
             "type": ntype,
@@ -471,11 +480,18 @@ def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, 
                 "backend": agent.get("backend"),
                 "tier": agent.get("tier"),
                 "strategy": agent.get("strategy") or "best_score",
+                "max_cost": agent.get("max_cost"),
                 "needs": list(agent.get("needs") or []),
                 "available": bool(agent.get("available")),
                 "service_id": service.get("id"),
                 "instructions_md": service.get("behavior_markdown") or "",
                 "instructions_source": service.get("behavior_source") or "",
+                "model_explicit": bool(agent.get("model_explicit")),
+                # Baseline values let graph_to_service_patch distinguish an
+                # actual inspector edit from resolved display metadata. This
+                # is especially important for model/tier: every loaded node
+                # has both, but an unrelated save must not pin either one.
+                "_service_original": editable,
             },
         }
 
@@ -490,21 +506,76 @@ def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, 
         },
     )
     goal["id"] = f"{service_id}-goal"
-    lead_node = agent_node(lead, f"{service_id}-lead", "master", 180, center_y, "Lead")
+
+    # Memory node: reuses the same three-tier scope/action model as the freeform
+    # canvas (see resolve_memory_namespace/memory_op_from_node) — a preset that
+    # saves this node opts its lead call into that pool; deleting it opts out.
+    memory_cfg = {**_DEFAULT_DATA["memory"], **(service.get("memory") or {})}
+    memory_node = new_node(
+        "memory",
+        100,
+        center_y + 90,
+        {**memory_cfg, "label": "Cross-project memory", "service_id": service.get("id")},
+    )
+    memory_node["id"] = f"{service_id}-memory"
+
+    # Lead's real fallback chain (primary -> ... -> local-GPU fallback), made
+    # visible and rewirable: see _resolve_agent/_build_display_chain in services.py.
+    raw_chain = (lead or {}).get("fallback_chain") or []
+    # Normally _resolve_agent already returns list[dict] here (_normalize_chain),
+    # but tolerate a direct caller passing catalog-shaped list[str] too, rather
+    # than silently dropping every entry down to just the single winning model.
+    chain = []
+    for link in raw_chain:
+        if isinstance(link, dict) and link.get("model"):
+            chain.append(link)
+        elif isinstance(link, str) and link:
+            chain.append({"model": link, "tier": None})
+    # No authored chain in the catalog: `chain` here is either empty or
+    # `_build_display_chain`'s live auto-ranked preview (see _resolve_agent).
+    # Either way it's synthetic/display-only — graph_to_service_patch must not
+    # save it back as a real chain (that would freeze the current auto-ranking
+    # into the catalog on any unrelated save, and shadow a plain pin_model
+    # edit on the lead).
+    synthetic = not bool(lead and lead.get("chain_authored"))
+    if synthetic and not chain and lead and lead.get("model"):
+        chain = [{"model": lead.get("model"), "tier": lead.get("tier")}]
+    route_nodes = []
+    route_x = 130
+    for index, link in enumerate(chain):
+        is_local_last = link.get("tier") == "local" and index == len(chain) - 1
+        rn = new_node(
+            "route",
+            route_x,
+            center_y - 90,
+            {
+                "model": link.get("model"),
+                "tier": link.get("tier"),
+                "label": "Local GPU fallback" if is_local_last else f"Route {index + 1}",
+                "service_id": service.get("id"),
+                "synthetic": synthetic,
+            },
+        )
+        rn["id"] = f"{service_id}-route-{index + 1}"
+        route_nodes.append(rn)
+        route_x += 110
+    shift = len(route_nodes) * 110
+
+    lead_node = agent_node(lead, f"{service_id}-lead", "master", 180 + shift, center_y, "Lead")
     worker_nodes = [
-        agent_node(agent, f"{service_id}-worker-{index + 1}", "worker", 370, 45 + index * 130, f"Worker {index + 1}")
+        agent_node(agent, f"{service_id}-worker-{index + 1}", "worker", 370 + shift, 45 + index * 130, f"Worker {index + 1}")
         for index, agent in enumerate(workers)
     ]
-    reviewer_node = agent_node(reviewer, f"{service_id}-review", "analyser", 570, center_y, "Review")
-    synthesis_node = agent_node(lead, f"{service_id}-synthesis", "master", 760, center_y, "Final synthesis")
+    reviewer_node = agent_node(reviewer, f"{service_id}-review", "analyser", 570 + shift, center_y, "Review")
+    synthesis_node = agent_node(lead, f"{service_id}-synthesis", "master", 760 + shift, center_y, "Final synthesis")
     synthesis_node["data"]["label"] = "Final synthesis"
     synthesis_node["data"]["role"] = "synthesizer"
-    output = new_node("output", 930, center_y, {"label": "Final answer", "service_id": service.get("id")})
+    output = new_node("output", 930 + shift, center_y, {"label": "Final answer", "service_id": service.get("id")})
     output["id"] = f"{service_id}-output"
 
     if not worker_nodes:
-        worker_nodes = [agent_node(None, f"{service_id}-worker-1", "worker", 370, center_y, "Unresolved worker")]
-    nodes = [goal, lead_node, *worker_nodes, reviewer_node, synthesis_node, output]
+        worker_nodes = [agent_node(None, f"{service_id}-worker-1", "worker", 370 + shift, center_y, "Unresolved worker")]
+    nodes = [goal, memory_node, *route_nodes, lead_node, *worker_nodes, reviewer_node, synthesis_node, output]
     edges = []
 
     def connect(source: dict[str, Any], target: dict[str, Any], kind: str = "data") -> None:
@@ -517,8 +588,14 @@ def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, 
             }
         )
 
+    connect(goal, memory_node)
+    chain_entry = route_nodes[0] if route_nodes else lead_node
+    connect(memory_node, chain_entry)
+    for a, b in zip(route_nodes, route_nodes[1:]):
+        connect(a, b)
+    if route_nodes:
+        connect(route_nodes[-1], lead_node)
     # Fan-out: lead → each worker; fan-in: each worker → reviewer
-    connect(goal, lead_node)
     for worker in worker_nodes:
         connect(lead_node, worker)
         connect(worker, reviewer_node)
@@ -619,6 +696,8 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
             memory_ops.append(memory_op_from_node(n, graph))
             continue
         if t == "output":
+            continue
+        if t == "route":
             continue
         role = d.get("role") or ROLE_MAP.get(t, t)
         if t == "private":
@@ -763,6 +842,155 @@ def pipeline_to_graph(pipeline_id: str | None = None, pipeline: dict | None = No
     g["nodes"] = nodes
     g["edges"] = auto_connect(nodes)["edges"]
     return g
+
+
+def graph_to_service_patch(graph: dict[str, Any]) -> dict[str, Any]:
+    """Extract role edits (pinned model, needs, strategy, max_cost), the memory
+    node's tier/action config, and the wired fallback-chain order from a
+    service-bound graph (see service_to_graph) so they can be written back into
+    the matching service_catalog.yaml entry."""
+    service_id = graph.get("service_id")
+    if not service_id:
+        raise ValueError("graph is not bound to a service (missing service_id)")
+
+    def role_patch(node: dict[str, Any] | None) -> dict[str, Any]:
+        d = (node or {}).get("data") or {}
+        patch: dict[str, Any] = {}
+        original = d.get("_service_original")
+        fields = {
+            "pin_model": "model",
+            "needs": "needs",
+            "strategy": "strategy",
+            "max_cost": "max_cost",
+            "tier": "tier",
+        }
+        if isinstance(original, dict):
+            edited = set(d.get("edited_fields") or [])
+            if d.get("model_explicit") and d.get("model") != original.get("model"):
+                edited.add("model")
+            for catalog_key, data_key in fields.items():
+                current = d.get(data_key)
+                before = original.get(data_key)
+                if data_key in edited and current != before:
+                    # None means delete this authored override. An empty needs
+                    # list has the same meaning: fall back to the catalog/runtime
+                    # default rather than persisting a silently ineffective [].
+                    patch[catalog_key] = None if current in (None, "") or (data_key == "needs" and current == []) else current
+        else:
+            # Backward-compatible boundary for service graphs created before
+            # _service_original existed. Only explicit UI intent is safe to
+            # persist; resolved values must remain display-only.
+            edited = set(d.get("edited_fields") or [])
+            if d.get("model_explicit"):
+                edited.add("model")
+            for catalog_key, data_key in fields.items():
+                if data_key in edited:
+                    current = d.get(data_key)
+                    patch[catalog_key] = None if current in (None, "") or (data_key == "needs" and current == []) else current
+        return patch
+
+    nodes = {n["id"]: n for n in graph.get("nodes") or []}
+    lead = nodes.get(f"{graph.get('id')}-lead")
+    reviewer = nodes.get(f"{graph.get('id')}-review")
+    memory_node = nodes.get(f"{graph.get('id')}-memory")
+    workers = sorted(
+        (n for nid, n in nodes.items() if nid.startswith(f"{graph.get('id')}-worker-")),
+        key=lambda n: (
+            (0, int(n["id"].rsplit("-", 1)[-1]))
+            if n["id"].rsplit("-", 1)[-1].isdigit()
+            else (1, n["id"])
+        ),
+    )
+    # Note: a node's `instructions_md` is the long external behavior-profile
+    # markdown (profiles/services/<id>.md via load_service_profile), not the
+    # catalog's short `instructions:` field — the two are unrelated text, and
+    # there is currently no write-back path for profile-markdown edits made in
+    # the inspector, so this patch intentionally leaves both alone rather than
+    # overwriting the wrong field.
+
+    patch: dict[str, Any] = {"id": service_id}
+    lead_patch = role_patch(lead)
+    # Product rule: an exact lead-model choice replaces authored routing. If
+    # both were persisted, _resolve_agent's route chain would shadow the pin
+    # and the model selector would appear to have done nothing.
+    lead_pin_changed = "pin_model" in lead_patch and lead_patch["pin_model"] is not None
+    if lead_patch:
+        patch["lead"] = lead_patch
+    reviewer_patch = role_patch(reviewer)
+    if reviewer_patch:
+        patch["reviewer"] = reviewer_patch
+    if workers:
+        patch["workstreams"] = [role_patch(w) for w in workers]
+
+    # Memory node uses the same scope/action/project_id/namespace fields as the
+    # freeform canvas (MEMORY_SCOPES/MEMORY_ACTIONS) — deleting the node from
+    # this preset's graph and saving means the preset stops opting into the pool.
+    if memory_node is not None:
+        d = memory_node.get("data") or {}
+        scope = (d.get("scope") or "tree").strip().lower()
+        if scope not in MEMORY_SCOPES:
+            scope = "tree"
+        action = (d.get("action") or "search").strip().lower()
+        if action not in MEMORY_ACTIONS:
+            action = "search"
+        patch["memory"] = {
+            "scope": scope,
+            "action": action,
+            "project_id": d.get("project_id") or None,
+            "namespace": d.get("namespace") or None,
+        }
+    else:
+        patch["memory"] = None
+
+    # Walk the wired edges (not node ids) starting from goal, so reordering or
+    # rewiring the route chain on the canvas is what changes the saved fallback
+    # order — not the original node layout. Deliberately does NOT require the
+    # memory node: deleting memory (to opt the preset out of it) must not also
+    # silently stop route edits from saving.
+    outgoing: dict[str, list[str]] = {}
+    for e in graph.get("edges") or []:
+        if e.get("kind", "data") != "data":
+            continue
+        outgoing.setdefault(e.get("from"), []).append(e.get("to"))
+    goal_node = nodes.get(f"{graph.get('id')}-goal")
+    lead_id = f"{graph.get('id')}-lead"
+    chain_models: list[str] = []
+    cursor = goal_node["id"] if goal_node is not None else None
+    seen: set[str] = set()
+    while cursor is not None and cursor != lead_id:
+        candidates = [
+            nid
+            for nid in outgoing.get(cursor, [])
+            if nid not in seen
+            and nid in nodes
+            and (nid == lead_id or nodes[nid].get("type") in ("memory", "route"))
+        ]
+        if len(candidates) > 1:
+            raise ValueError("service route is ambiguous: each goal/memory/route node must have one path to lead")
+        nxt = candidates[0] if candidates else None
+        if nxt is None:
+            break
+        seen.add(nxt)
+        node = nodes[nxt]
+        if node.get("type") == "route":
+            d = node.get("data") or {}
+            # A synthetic placeholder (service_to_graph's "no authored chain
+            # yet, show the live-resolved model so the canvas isn't empty")
+            # must not be saved back as a real one-entry chain — that would
+            # fabricate a chain out of nothing on every save and bury a plain
+            # pin_model edit on the lead under a spurious fallback_chain.
+            if not d.get("synthetic") and d.get("model"):
+                chain_models.append(d["model"])
+        cursor = nxt
+    if goal_node is not None and lead_id in nodes and cursor != lead_id:
+        raise ValueError("service route is disconnected: wire goal through optional memory/routes to lead")
+    # Always write the chain — including an explicit empty list — whenever this
+    # is a real service graph (goal + lead both present): deleting every route
+    # node and saving must clear the catalog's old chain, not leave it stuck.
+    if goal_node is not None and lead_id in nodes:
+        patch.setdefault("lead", {})
+        patch["lead"]["fallback_chain"] = [] if lead_pin_changed else chain_models
+    return patch
 
 
 def save_graph(graph: dict[str, Any]) -> dict[str, Any]:

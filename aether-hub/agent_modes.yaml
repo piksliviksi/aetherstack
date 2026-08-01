@@ -127,10 +127,21 @@ presets:
     roles:
       inline: { select: { strategy: best_score } }
 
+  # Prefer authenticated host CLI seats (Codex/Claude/Grok subscriptions)
+  subscription:
+    mode: multi_agent
+    token_saver: false
+    roles:
+      mastermind: { select: { strategy: best_score, prefer: subscription } }
+      supervisor: { select: { strategy: best_score, prefer: subscription } }
+      worker: { select: { strategy: best_score, prefer: subscription } }
+      inline: { select: { strategy: best_score, prefer: subscription } }
+
 # Cost ranking for comparisons (lower = cheaper)
 cost_rank:
   0: 0
   low: 1
+  account: 2
   medium: 2
   high: 3
   very_high: 4
