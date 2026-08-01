@@ -47,8 +47,8 @@ code --install-extension AetherStack.aetherstack
 ```bash
 # Marketplace:
 code --install-extension AetherStack.aetherstack
-# or the exact VSIX downloaded from the v0.3.17 GitHub Release:
-code --install-extension aetherstack-0.3.17.vsix
+# or the exact VSIX downloaded from the v0.3.18 GitHub Release:
+code --install-extension aetherstack-0.3.18.vsix
 # or unpacked folder (dev):
 code --install-extension path/to/aetherstack/integrations/vscode
 ```

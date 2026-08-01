@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.18
+
+- Fix portable system scans failing on lowercase JSON booleans interpolated into Python source.
+- Detect the authenticated Claude Code CLI bundled by the official VS Code extension, matching the existing bundled Codex discovery path.
+- Keep host CLI subscription detection available from the local runtime bridge so Codex, Claude, and Grok can be picked up even when Ollama is unhealthy.
+- Start the local runtime bridge on a free port when VS Code already owns `8767`, and pass that exact bridge URL/token to the Hub.
+
 ## 0.3.17
 
 - **Service presets are editable node graphs, not a read-only preview.** The node editor's Save now writes pinned models, required capabilities, cost cap, and run location straight back into `service_catalog.yaml`, touching only the edited service's own block — every other preset's formatting and comments stay byte-identical.

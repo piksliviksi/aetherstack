@@ -73,6 +73,7 @@ async function resolveCommand(command) {
   const locator = process.platform === "win32" ? "where.exe" : "which";
   const result = await execResult(locator, [command]);
   if (!result.ok && command === "codex") return findBundledCodex();
+  if (!result.ok && command === "claude") return findBundledClaude();
   if (!result.ok) return null;
   const candidates = result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
   if (process.platform !== "win32") return candidates[0] || null;
@@ -113,6 +114,25 @@ async function findBundledCodex() {
         const candidate = path.join(binRoot, platform, executable);
         if (fs.existsSync(candidate)) return candidate;
       }
+    }
+  }
+  return null;
+}
+
+async function findBundledClaude() {
+  const roots = [
+    process.env.VSCODE_EXTENSIONS,
+    path.join(os.homedir(), ".vscode", "extensions"),
+    path.join(os.homedir(), ".vscode-insiders", "extensions"),
+  ].filter(Boolean);
+  const executable = process.platform === "win32" ? "claude.exe" : "claude";
+  for (const root of roots) {
+    let extensions;
+    try { extensions = (await fs.promises.readdir(root)).filter((name) => /^anthropic\.claude-code-/i.test(name)).sort().reverse(); }
+    catch { continue; }
+    for (const extension of extensions) {
+      const candidate = path.join(root, extension, "resources", "native-binary", executable);
+      if (fs.existsSync(candidate)) return candidate;
     }
   }
   return null;
@@ -496,6 +516,7 @@ module.exports = {
   createCliBridge,
   discoverCliModels,
   findBundledCodex,
+  findBundledClaude,
   promptFromMessages,
   splitMessages,
   runCliModel,

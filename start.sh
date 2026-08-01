@@ -121,6 +121,16 @@ select_fallback_port() {
   return 1
 }
 
+select_cli_bridge_port() {
+  local configured="${AETHER_CLI_BRIDGE_PORT:-8767}" candidate
+  for candidate in "$configured" 8767 8768 8769 8770 8771 8772 8773 8774 8775 8776 8777; do
+    [[ "$candidate" =~ ^[0-9]+$ ]] || continue
+    (( candidate >= 1024 && candidate <= 65535 )) || continue
+    if port_is_available "$candidate"; then printf '%s\n' "$candidate"; return 0; fi
+  done
+  return 1
+}
+
 find_host_ollama() {
   # The configured/default port can be squatted by an unrelated process;
   # probe common alternate ports for a real host Ollama before concluding
@@ -380,10 +390,17 @@ if [[ -f "$CLI_BRIDGE_PID_FILE" ]]; then
 fi
 if command -v node >/dev/null 2>&1; then
   cyan "  Detecting host CLI subscriptions (Codex, Claude Code, Grok)…"
+  cli_bridge_port="$(select_cli_bridge_port)" || { red "  ERROR: no free loopback port for the host CLI bridge (tried 8767-8777)."; exit 1; }
+  if [[ "$cli_bridge_port" != "${AETHER_CLI_BRIDGE_PORT:-8767}" ]]; then
+    yellow "  Port ${AETHER_CLI_BRIDGE_PORT:-8767} is occupied; using CLI bridge port $cli_bridge_port."
+  fi
   export AETHER_CLI_BRIDGE_TOKEN="${AETHER_CLI_BRIDGE_TOKEN:-$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')}"
-  export AETHER_CLI_BRIDGE_URL="${AETHER_CLI_BRIDGE_URL:-http://host.docker.internal:8767}"
+  export AETHER_CLI_BRIDGE_PORT="$cli_bridge_port"
+  export AETHER_CLI_BRIDGE_URL="http://host.docker.internal:$cli_bridge_port"
   AETHER_STACK_ROOT="$ROOT" nohup node "$ROOT/scripts/cli-bridge-daemon.js" >"$CLI_BRIDGE_LOG" 2>&1 &
-  echo $! > "$CLI_BRIDGE_PID_FILE"
+  cli_bridge_pid=$!
+  echo "$cli_bridge_pid" > "$CLI_BRIDGE_PID_FILE"
+  disown "$cli_bridge_pid" 2>/dev/null || true
   sleep 1
   if [[ -s "$CLI_BRIDGE_LOG" ]]; then sed 's/^/  /' "$CLI_BRIDGE_LOG"; fi
 else
@@ -448,6 +465,22 @@ for model in "${startup_models[@]}"; do
     if (( pull_status != 0 )); then red "  ERROR: failed to pull Ollama model $model"; exit 1; fi
   fi
 done
+if [[ -n "${AETHER_CLI_BRIDGE_TOKEN:-}" && -n "${AETHER_CLI_BRIDGE_PORT:-}" && -f "$CLI_BRIDGE_PID_FILE" ]]; then
+  cli_bridge_pid="$(cat "$CLI_BRIDGE_PID_FILE" 2>/dev/null || true)"
+  if [[ -z "$cli_bridge_pid" ]] || ! kill -0 "$cli_bridge_pid" 2>/dev/null; then
+    yellow "  Host CLI bridge stopped during startup; restarting it on port $AETHER_CLI_BRIDGE_PORT."
+    AETHER_STACK_ROOT="$ROOT" nohup node "$ROOT/scripts/cli-bridge-daemon.js" >"$CLI_BRIDGE_LOG" 2>&1 &
+    cli_bridge_pid=$!
+    echo "$cli_bridge_pid" > "$CLI_BRIDGE_PID_FILE"
+    disown "$cli_bridge_pid" 2>/dev/null || true
+    sleep 1
+    if [[ -s "$CLI_BRIDGE_LOG" ]]; then sed 's/^/  /' "$CLI_BRIDGE_LOG"; fi
+    if ! kill -0 "$cli_bridge_pid" 2>/dev/null; then
+      red "  ERROR: host CLI bridge failed to stay running; see $CLI_BRIDGE_LOG."
+      exit 1
+    fi
+  fi
+fi
 "${DC[@]}" restart aether-hub litellm >/dev/null
 
 deadline=$((SECONDS + 120))

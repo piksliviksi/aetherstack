@@ -33,17 +33,38 @@ fi
 hub_ok=false
 curl -sf --max-time 2 "$HUB_URL/api/health" >/dev/null 2>&1 && hub_ok=true
 
-python3 - <<PY
+export AETHER_SCAN_DOCKER_OK="$docker_ok"
+export AETHER_SCAN_CONTAINERS="$containers"
+export AETHER_SCAN_OLLAMA_OK="$ollama_ok"
+export AETHER_SCAN_OLLAMA_BASE_URL="$host_ollama_url"
+export AETHER_SCAN_OLLAMA_MODELS="$ollama_models"
+export AETHER_SCAN_HUB_OK="$hub_ok"
+export AETHER_SCAN_HUB_URL="$HUB_URL"
+
+python3 - <<'PY'
 import json, time, os, platform, socket
+def env_bool(name):
+    return os.environ.get(name, "false").lower() == "true"
+
+def env_json(name, fallback):
+    try:
+        return json.loads(os.environ.get(name, fallback))
+    except Exception:
+        return json.loads(fallback)
+
 report = {
   "ts": time.time(),
   "host": socket.gethostname(),
   "os": platform.platform(),
   "ram_gb": round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 ** 3), 1),
-  "docker": {"ok": json.loads("${docker_ok}"), "containers": json.loads('''${containers}''')},
-  "containers": json.loads('''${containers}'''),
-  "ollama": {"localhost_ok": json.loads("${ollama_ok}"), "base_url": "${host_ollama_url}", "models": json.loads('''${ollama_models}''')},
-  "hub": {"ok": json.loads("${hub_ok}"), "url": "${HUB_URL}"},
+  "docker": {"ok": env_bool("AETHER_SCAN_DOCKER_OK"), "containers": env_json("AETHER_SCAN_CONTAINERS", "[]")},
+  "containers": env_json("AETHER_SCAN_CONTAINERS", "[]"),
+  "ollama": {
+      "localhost_ok": env_bool("AETHER_SCAN_OLLAMA_OK"),
+      "base_url": os.environ.get("AETHER_SCAN_OLLAMA_BASE_URL", ""),
+      "models": env_json("AETHER_SCAN_OLLAMA_MODELS", "[]"),
+  },
+  "hub": {"ok": env_bool("AETHER_SCAN_HUB_OK"), "url": os.environ.get("AETHER_SCAN_HUB_URL", "http://127.0.0.1:8766")},
 }
 path = ".aetherstack/system-scan.json"
 with open(path, "w", encoding="utf-8") as f:
@@ -51,10 +72,10 @@ with open(path, "w", encoding="utf-8") as f:
 print("Wrote", path)
 print(json.dumps(report, indent=2)[:2000])
 # push to hub
-if json.loads("${hub_ok}"):
+if env_bool("AETHER_SCAN_HUB_OK"):
     import urllib.request
     body = json.dumps({"host_scan": report}).encode()
-    req = urllib.request.Request("${HUB_URL}/api/discover", data=body, headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(os.environ.get("AETHER_SCAN_HUB_URL", "http://127.0.0.1:8766") + "/api/discover", data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
         urllib.request.urlopen(req, timeout=10)
         print("Posted host_scan to hub")
