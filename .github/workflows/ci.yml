@@ -26,6 +26,8 @@ jobs:
           cache-dependency-path: integrations/vscode/package.json
       - name: Test extension source
         run: npm --prefix integrations/vscode test
+      - name: Test CLI source
+        run: npm --prefix integrations/cli test
       - name: Validate Unix startup scripts
         if: runner.os != 'Windows'
         shell: bash

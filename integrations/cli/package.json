@@ -1,0 +1,21 @@
+{
+  "name": "aetherstack-cli",
+  "displayName": "AetherStack CLI",
+  "description": "Terminal client for AetherStack Hub — list, run, cancel, build, import, and export presets against a local Hub. No dependencies.",
+  "version": "0.1.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "bin": {
+    "aetherstack": "bin/aetherstack.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md"
+  ]
+}
