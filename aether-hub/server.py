@@ -72,7 +72,10 @@ from matrix import (  # noqa: E402
     probe_host_cli_bridge,
     route,
 )
-import gdpr  # noqa: E402
+try:
+    import gdpr  # noqa: E402
+except ImportError:  # optional WIP / operator module
+    gdpr = None  # type: ignore
 import auth as hub_auth  # noqa: E402
 import tenancy  # noqa: E402
 from memory import MemoryStore  # noqa: E402
@@ -975,6 +978,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, _memory.stats(ns))
             return
+        if path in ("/api/gdpr", "/api/gdpr/consent") and gdpr is None:
+            self._send(503, {"error": "gdpr module not installed", "code": "service_unavailable"})
+            return
         if path == "/api/gdpr":
             settings = gdpr.get_settings()
             self._send(200, {**settings, "subprocessors": gdpr.subprocessors()})
@@ -1258,6 +1264,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, execute_slash(text, _memory, session_id=sid))
             except Exception as e:
                 self._send(500, {"error": str(e)})
+            return
+        if path.startswith("/api/gdpr") and gdpr is None:
+            self._send(503, {"error": "gdpr module not installed", "code": "service_unavailable"})
             return
         if path == "/api/gdpr":
             try:
