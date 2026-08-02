@@ -7,3 +7,7 @@
 - Keep the repair narrow and protect adjacent behavior.
 - Add a regression test that fails before and passes after the repair.
 - Finish with root cause, fix, evidence, and remaining risk.
+
+## Self-audit prompt
+
+Investigate AetherStack for reproducible bugs in startup, model discovery, fallback, preset execution, streaming, and UI state. Trace likely root causes and run or identify regression tests that would fail before each fix and pass after it.

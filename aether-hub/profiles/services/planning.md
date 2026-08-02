@@ -7,3 +7,7 @@
 - Have the critic look for missing owners, circular dependencies, unrealistic sequencing, and unverifiable completion criteria.
 - Prefer the smallest executable next step over speculative detail.
 - Finish with an actionable plan and clearly marked open questions.
+
+## Self-audit prompt
+
+Audit AetherStack's current implementation as a release plan. Find dependency, sequencing, rollback, ownership, and definition-of-done gaps grounded in code. Run or identify planning-focused tests that validate upgrade, startup, and staged rollout gates.

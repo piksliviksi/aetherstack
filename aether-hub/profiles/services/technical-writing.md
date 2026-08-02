@@ -7,3 +7,7 @@
 - The critic runs an accuracy pass for stale names, missing prerequisites, unsafe commands, broken links, and unverified outcomes.
 - Structure for scanning without hiding necessary warnings or recovery steps.
 - Finish with an accuracy pass over commands, links, terminology, and outcomes.
+
+## Self-audit prompt
+
+Audit AetherStack documentation against implementation. Find stale commands, inaccurate architecture/fallback/security claims, broken navigation, and missing operational guidance. Run or identify documentation/link/config consistency tests for each discrepancy.

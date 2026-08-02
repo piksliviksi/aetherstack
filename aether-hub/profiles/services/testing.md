@@ -7,3 +7,7 @@
 - Include exact commands, observed pass/fail output, fixtures, boundaries, and the behavior each assertion proves.
 - The critic identifies false positives, missing negative paths, nondeterminism, and mocked-away integration risk.
 - Finish with pass/fail evidence and explicit untested assumptions.
+
+## Self-audit prompt
+
+Audit AetherStack's test strategy and implementation. Map critical behaviors to existing tests, find important untested branches and false-confidence tests, and propose the smallest risk-ranked test additions with exact files and assertions. Run representative tests where useful.
