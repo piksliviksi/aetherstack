@@ -249,3 +249,89 @@ def test_graph_with_no_runnable_stages_raises() -> None:
     empty = {"id": "g", "nodes": [{"id": "g1", "type": "goal", "data": {"text": "hi"}}], "edges": []}
     with pytest.raises(ValueError, match="no runnable stages"):
         execute_graph(empty, _snapshot(), {"goal": "hi"}, completion=_completion([]))
+
+
+def _snapshot_multi() -> dict:
+    return {
+        "models": {
+            name: {
+                "available": True,
+                "tier": "cloud",
+                "provider": name,
+                "capabilities": ["chat", "code"],
+            }
+            for name in ("model-a", "model-b", "model-c")
+        }
+    }
+
+
+def _parallel_graph() -> dict:
+    return {
+        "id": "test-parallel",
+        "title": "Parallel",
+        "nodes": [
+            {"id": "g1", "type": "goal", "data": {"text": "survey the options"}},
+            {"id": "p1", "type": "worker", "data": {"label": "Fan out", "parallel": 3}},
+        ],
+        "edges": [{"id": "e1", "from": "g1", "to": "p1"}],
+    }
+
+
+def test_parallel_node_fans_out_to_distinct_models_and_combines_output() -> None:
+    calls = []
+    result = execute_graph(
+        _parallel_graph(),
+        _snapshot_multi(),
+        {"goal": "survey the options"},
+        completion=_completion(calls),
+    )
+    assert result["ok"] is True
+    used_models = {c["model"] for c in calls}
+    assert len(used_models) == 3, "each parallel branch should use a distinct model"
+    for model in used_models:
+        assert f"[{model}]" in result["answer"]
+    assert result["steps"][0]["models"] and len(result["steps"][0]["models"]) == 3
+
+
+def test_parallel_node_combines_whatever_branches_succeed() -> None:
+    def flaky(call, messages):
+        if call["model"] == "model-b":
+            raise RuntimeError("no capacity")
+        return {
+            "model": call["model"],
+            "content": f"Observed output from {call['model']}: repository path src/example.py was checked and verification passed with a reproducible test command.",
+            "usage": {"total_tokens": 5},
+        }
+
+    result = execute_graph(
+        _parallel_graph(),
+        _snapshot_multi(),
+        {"goal": "survey the options"},
+        completion=flaky,
+    )
+    assert result["ok"] is True
+    assert "[model-b]" not in result["answer"]
+    assert result["steps"][0]["degraded"] is True
+
+
+def test_cancel_check_stops_a_run_before_it_starts_the_next_stage() -> None:
+    calls = []
+    cancelled_after_first = {"n": 0}
+
+    def cancel_check() -> bool:
+        cancelled_after_first["n"] += 1
+        # cancel_check() is consulted before each stage (and once before memory
+        # read); this returns False for the first two checks so stage 0 runs,
+        # then True so stage 1 never starts.
+        return cancelled_after_first["n"] > 2
+
+    with pytest.raises(Exception, match="cancelled"):
+        execute_graph(
+            _graph(with_memory=False),
+            _snapshot(),
+            {"goal": "build the thing"},
+            completion=_completion(calls),
+            cancel_check=cancel_check,
+        )
+    # the first stage was allowed to run; the second was cut off by cancellation
+    assert len(calls) == 1

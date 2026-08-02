@@ -57,6 +57,7 @@ from services import (  # noqa: E402
     save_service_graph,
     save_auto_graph,
     set_auto_order,
+    RunCancelled,
 )
 from first_run import reset as first_run_reset  # noqa: E402
 from first_run import run as first_run_run  # noqa: E402
@@ -84,7 +85,7 @@ from graph import (  # noqa: E402
     plan_graph,
     save_graph,
 )
-from graph_exec import GraphExecutionError, execute_graph  # noqa: E402
+from graph_exec import GraphExecutionError, GraphRunCancelled, execute_graph  # noqa: E402
 from pipelines import (  # noqa: E402
     export_pipeline,
     get_pipeline,
@@ -257,6 +258,39 @@ def _stage_unsubscribe(q: "queue.Queue") -> None:
     with _stage_lock:
         if q in _stage_subscribers:
             _stage_subscribers.remove(q)
+
+
+# A client-visible run_id -> cancel flag, so switching presets/services mid-run
+# (or an explicit Cancel click) can actually stop the server-side work instead
+# of only hiding it client-side. Runs register themselves for their duration
+# and are always removed in a `finally`, so this cannot grow unbounded.
+_run_cancel_lock = threading.Lock()
+_run_cancel_flags: dict[str, bool] = {}
+
+
+def _register_run(run_id: str) -> None:
+    with _run_cancel_lock:
+        _run_cancel_flags[run_id] = False
+
+
+def _unregister_run(run_id: str) -> None:
+    with _run_cancel_lock:
+        _run_cancel_flags.pop(run_id, None)
+
+
+def _cancel_run(run_id: str) -> bool:
+    with _run_cancel_lock:
+        if run_id not in _run_cancel_flags:
+            return False
+        _run_cancel_flags[run_id] = True
+        return True
+
+
+def _make_cancel_check(run_id: str):
+    def check() -> bool:
+        with _run_cancel_lock:
+            return bool(_run_cancel_flags.get(run_id))
+    return check
 
 
 def _stage_publish(event: dict) -> None:
@@ -1144,6 +1178,86 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(502, {"error": f"graph execution failed: {str(e)[:500]}"})
             return
+        if path == "/api/graphs/run/stream":
+            graph_body = body.get("graph")
+            if not graph_body and body.get("graph_id"):
+                graph_body = load_graph(str(body["graph_id"]))
+            if not graph_body:
+                self._send(404, {"error": "graph or graph_id is required"})
+                return
+            graph_id = str(graph_body.get("service_id") or graph_body.get("id") or "graph")
+            run_id = str(body.get("run_id") or uuid.uuid4().hex)
+            self._send_sse_start()
+            _register_run(run_id)
+            try:
+                body["_workspace_write_authorized"] = self._workspace_write_authorized()
+
+                def on_delta(chunk_text: str) -> None:
+                    self._send_sse_event({"type": "delta", "text": chunk_text})
+
+                def on_status(payload: dict) -> None:
+                    event = {"type": "status", "run_id": run_id}
+                    if isinstance(payload, dict):
+                        for key in ("phase", "model", "models", "label", "stage_id", "index", "total"):
+                            if payload.get(key) is not None:
+                                event[key] = payload[key]
+                    self._send_sse_event(event)
+                    # Same fan-out channel /run/stream uses, so this graph's own
+                    # canvas (or any other tab watching it) lights up live instead
+                    # of only reacting to a run started elsewhere.
+                    _stage_publish({**event, "service_id": graph_id})
+
+                result = execute_graph(
+                    graph_body,
+                    get_snapshot(),
+                    body or {},
+                    memory=_memory,
+                    session_id=body.get("session_id") or body.get("session"),
+                    on_status=on_status,
+                    on_delta=on_delta,
+                    cancel_check=_make_cancel_check(run_id),
+                )
+                self._send_sse_event({"type": "done", "result": result})
+            except GraphRunCancelled:
+                self._send_sse_event_safe({"type": "cancelled", "run_id": run_id})
+            except ValueError as e:
+                self._send_sse_event_safe(
+                    {"type": "error", "error": str(e), "code": "invalid_request", "request_id": self.request_id}
+                )
+            except PermissionError as e:
+                self._send_sse_event_safe(
+                    {
+                        "type": "error",
+                        "error": str(e),
+                        "code": "workspace_write_unauthorized",
+                        "request_id": self.request_id,
+                    }
+                )
+            except GraphExecutionError as e:
+                self._send_sse_event_safe(
+                    {"type": "error", "error": str(e), "code": "graph_execution_failed", "steps": e.steps}
+                )
+            except Exception as e:
+                sys.stderr.write(f"[hub] request_id={self.request_id} graph_stream_error={str(e)[:1000]}\n")
+                self._send_sse_event_safe(
+                    {
+                        "type": "error",
+                        "error": "AetherStack could not complete the streamed graph run.",
+                        "code": "upstream_error",
+                        "request_id": self.request_id,
+                    }
+                )
+            finally:
+                _unregister_run(run_id)
+            return
+        if path == "/api/runs/cancel":
+            run_id = str(body.get("run_id") or "").strip()
+            if not run_id:
+                self._send(400, {"error": "run_id is required"})
+                return
+            found = _cancel_run(run_id)
+            self._send(200, {"ok": True, "run_id": run_id, "found": found})
+            return
         if path.startswith("/api/pipelines/") and path.endswith("/vote"):
             pid = path[len("/api/pipelines/") : -len("/vote")].strip("/")
             try:
@@ -1405,6 +1519,7 @@ class Handler(BaseHTTPRequestHandler):
             service_id = path[len("/api/services/") : -len("/run/stream")].strip("/")
             run_id = str(body.get("run_id") or uuid.uuid4().hex)
             self._send_sse_start()
+            _register_run(run_id)
             try:
                 body["_workspace_write_authorized"] = self._workspace_write_authorized()
                 def on_delta(chunk_text: str) -> None:
@@ -1425,6 +1540,7 @@ class Handler(BaseHTTPRequestHandler):
                         _stage_publish({**event, "service_id": service_id})
 
                 sid = body.get("session_id") or body.get("session")
+                cancel_check = _make_cancel_check(run_id)
                 if service_id == "auto":
                     result = execute_auto(
                         get_snapshot(),
@@ -1433,6 +1549,7 @@ class Handler(BaseHTTPRequestHandler):
                         on_status=on_status,
                         memory=_memory,
                         session_id=sid,
+                        cancel_check=cancel_check,
                     )
                 else:
                     result = execute_service(
@@ -1443,8 +1560,11 @@ class Handler(BaseHTTPRequestHandler):
                         on_status=on_status,
                         memory=_memory,
                         session_id=sid,
+                        cancel_check=cancel_check,
                     )
                 self._send_sse_event({"type": "done", "result": result})
+            except RunCancelled:
+                self._send_sse_event_safe({"type": "cancelled", "run_id": run_id})
             except ValueError as e:
                 self._send_sse_event_safe(
                     {
@@ -1473,6 +1593,8 @@ class Handler(BaseHTTPRequestHandler):
                         "request_id": self.request_id,
                     }
                 )
+            finally:
+                _unregister_run(run_id)
             return
         if path.startswith("/api/combos/") and path.endswith("/launch"):
             cid = path[len("/api/combos/") : -len("/launch")].strip("/")
@@ -1810,6 +1932,9 @@ def _paths() -> list[str]:
         "GET|POST /api/graphs",
         "POST /api/graphs/auto-connect",
         "POST /api/graphs/to-pipeline | from-pipeline | plan",
+        "POST /api/graphs/run          ← blocking; use run/stream for live node status",
+        "POST /api/graphs/run/stream   ← SSE: same fan-out as services/*/run/stream, node-level status/delta",
+        "POST /api/runs/cancel  {run_id} ← stops a running services/*/run/stream or graphs/run/stream run server-side",
         "POST /api/sessions/{id}/message",
         "GET  /api/sessions/{id}/status",
         "/api/health",

@@ -35,6 +35,7 @@ NODE_TYPES = {
     "goal": {"label": "Goal", "ports_in": -1, "ports_out": -1, "color": "#3b82f6", "pass_through": False},
     "master": {"label": "Master", "ports_in": -1, "ports_out": -1, "color": "#a78bfa", "pass_through": False},
     "worker": {"label": "Worker", "ports_in": -1, "ports_out": -1, "color": "#34d399", "pass_through": False},
+    "parallel": {"label": "Parallel", "ports_in": -1, "ports_out": -1, "color": "#6ea8d8", "pass_through": False},
     "analyser": {"label": "Analyser", "ports_in": -1, "ports_out": -1, "color": "#fbbf24", "pass_through": False},
     "tester": {"label": "Tester", "ports_in": -1, "ports_out": -1, "color": "#22d3ee", "pass_through": False},
     "memory": {"label": "Memory", "ports_in": -1, "ports_out": -1, "color": "#fb7185", "pass_through": True},
@@ -62,6 +63,7 @@ DEFAULT_PRIVATE_GLOBS = ("*.pdf", "*.txt", "*.md", "*.markdown", "*.text")
 ROLE_MAP = {
     "master": "mastermind",
     "worker": "builder",
+    "parallel": "builder",
     "analyser": "critic",
     "tester": "tester",
     "private": "private_local",
@@ -88,6 +90,17 @@ _DEFAULT_DATA = {
         "max_cost": "medium",
         "strategy": "cheapest",
         "parallel": 2,
+        "workspace_write": False,
+    },
+    "parallel": {
+        "role": "builder",
+        "instructions_md": "",
+        "maker": None,
+        "model": None,
+        "tier": None,
+        "max_cost": "medium",
+        "strategy": "cheapest",
+        "parallel": 3,
         "workspace_write": False,
     },
     "analyser": {
@@ -766,12 +779,13 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
                 ["reason", "chat"]
                 if t in ("master", "analyser")
                 else ["code", "chat"]
-                if t == "worker"
+                if t in ("worker", "parallel")
                 else ["cheap", "fast"]
             ),
             "ack": bool(d.get("ack")),
             "gate": bool(d.get("gate")),
             "parallel": int(d.get("parallel") or 1),
+            "stream": bool(d.get("stream", True)),
             "behavior_markdown": str(d.get("instructions_md") or "")[:100_000],
             "behavior_source": str(d.get("instructions_source") or "")[:500],
             "pass_through": bool(NODE_TYPES.get(t, {}).get("pass_through")),

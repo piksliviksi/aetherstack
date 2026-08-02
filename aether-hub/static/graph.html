@@ -151,6 +151,7 @@
     <button type="button" id="btnPlan">Plan models</button>
     <input id="runGoal" type="text" placeholder="Goal for this workflow" style="width:min(320px,24vw)" />
     <button type="button" class="primary" id="btnRun">Run workflow</button>
+    <button type="button" id="btnCancelRun" hidden>Cancel run</button>
     <select id="autoSequenceMode" title="How Auto advances through its model order" hidden>
       <option value="sequential_exhaustion">Sequential until limit</option>
       <option value="per_request">Start from first model each request</option>
@@ -261,6 +262,7 @@ const TYPES = {
   master: { label: "Lead agent", color: "#d6b36a", description: "Plans the work, delegates tasks, and owns the final direction.", passThrough: false },
   analyser: { label: "Reviewer", color: "#bd8c66", description: "Challenges evidence and checks an intermediate result before release.", passThrough: false },
   worker: { label: "Worker agent", color: "#7d9b82", description: "Executes a focused part of the active service in parallel or sequentially.", passThrough: false },
+  parallel: { label: "Parallel", color: "#6ea8d8", description: "Splits the incoming signal across N branches — each can use a different model — and combines their answers into one output for the next node.", passThrough: false },
   tester: { label: "Test agent", color: "#789596", description: "Runs validation and reports failures back into the workflow.", passThrough: false },
   private: {
     label: "Private",
@@ -291,14 +293,14 @@ let drag = null;
 let link = null; // {from, x, y}
 let pan = null;
 let camera = { x: 0, y: 0 };
-const AGENT_NODE_TYPES = new Set(["master", "analyser", "worker", "tester"]);
+const AGENT_NODE_TYPES = new Set(["master", "analyser", "worker", "parallel", "tester"]);
 const PASS_THROUGH_TYPES = new Set(
   Object.keys(TYPES).filter(t => TYPES[t].passThrough)
 );
 const DRAFT_DATA_KEYS = new Set([
   "label", "text", "role", "agent_ref", "model", "provider", "backend", "tier", "strategy",
   "needs", "available", "service_id", "maker", "max_cost", "parallel", "gate", "ack",
-  "workspace_write",
+  "workspace_write", "stream",
   "purpose", "commands", "namespace", "action", "scope", "project_id",
   "input_folder", "input_globs", "gpu_only", "private_vault",
   "instructions_md", "instructions_source", "edited_fields",
@@ -369,10 +371,11 @@ function uid() { return "n_" + Math.random().toString(36).slice(2, 9); }
 function defaultData(t) {
   const map = {
     goal: { label: "Goal", text: "" },
-    master: { label: "Lead agent", role: "mastermind", model: null, instructions_md: "", max_cost: "high", strategy: "best_score" },
-    analyser: { label: "Reviewer", role: "critic", model: null, instructions_md: "", gate: true, ack: true, max_cost: "high", strategy: "best_score" },
-    worker: { label: "Worker agent", role: "builder", tier: null, model: null, instructions_md: "", strategy: "cheapest", parallel: 2, max_cost: "medium" },
-    tester: { label: "Test agent", role: "tester", strategy: "cheapest", tier: "local", model: null, instructions_md: "", max_cost: "low" },
+    master: { label: "Lead agent", role: "mastermind", model: null, instructions_md: "", max_cost: "high", strategy: "best_score", stream: true },
+    analyser: { label: "Reviewer", role: "critic", model: null, instructions_md: "", gate: true, ack: true, max_cost: "high", strategy: "best_score", stream: true },
+    worker: { label: "Worker agent", role: "builder", tier: null, model: null, instructions_md: "", strategy: "cheapest", parallel: 2, max_cost: "medium", stream: true },
+    parallel: { label: "Parallel", role: "builder", tier: null, model: null, instructions_md: "", strategy: "cheapest", parallel: 3, max_cost: "medium" },
+    tester: { label: "Test agent", role: "tester", strategy: "cheapest", tier: "local", model: null, instructions_md: "", max_cost: "low", stream: true },
     private: {
       label: "Private local",
       role: "private_local",
@@ -527,14 +530,37 @@ function agentOptions(data) {
   return html;
 }
 
+const COST_TIER_LABELS = {
+  low: "Light (low cost / fast)",
+  account: "Light (subscription seat)",
+  medium: "Medium",
+  high: "High",
+  very_high: "Very high (heaviest / most capable)",
+};
+function costTierLabel(cost) {
+  return COST_TIER_LABELS[cost] || "Unclassified";
+}
+const COST_TIER_ORDER = ["low", "account", "medium", "high", "very_high", ""];
 function modelOptions(current) {
   let html = option("", "Auto-resolve from capabilities", current);
   if (current && !liveChoices.models.some(model => model.alias === current)) {
     html += option(current, `${current} — currently unavailable`, current);
   }
-  html += liveChoices.models.map(model =>
-    option(model.alias, `${model.alias} — ${model.provider || "unknown"} · ${model.backend || "unknown backend"}`, current)
-  ).join("");
+  const groups = new Map();
+  liveChoices.models.forEach(model => {
+    const key = COST_TIER_ORDER.includes(model.cost) ? model.cost : "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(model);
+  });
+  COST_TIER_ORDER.forEach(key => {
+    const models = groups.get(key);
+    if (!models || !models.length) return;
+    html += `<optgroup label="${esc(costTierLabel(key))}">`;
+    html += models.map(model =>
+      option(model.alias, `${model.alias} — ${model.provider || "unknown"} · ${model.backend || "unknown backend"}`, current)
+    ).join("");
+    html += "</optgroup>";
+  });
   return html;
 }
 
@@ -548,19 +574,21 @@ const FIELD_LABELS = {
   label: "Node name", text: "Goal or input", role: "Agent role", model: "Model",
   instructions_md: "Behavior instructions (.md)", needs: "Required capabilities",
   strategy: "Model selection", max_cost: "Maximum cost", tier: "Run location",
-  parallel: "Parallel workers", gate: "Block until approved", ack: "Require acknowledgement",
+  parallel: "Parallel branches", gate: "Block until approved", ack: "Require acknowledgement",
   purpose: "Purpose", namespace: "Namespace override", commands: "Slash commands",
   action: "Memory action", scope: "Memory tier", project_id: "Project id",
   input_folder: "Input folder (PDF / text)", input_globs: "File globs",
   gpu_only: "GPU only (local)", private_vault: "Private vault isolation",
   workspace_write: "Allow workspace edits",
+  stream: "Stream tokens live (gateway models only — host CLIs can't stream)",
 };
 const INSPECTOR_FIELDS = {
   goal: ["label", "text"],
-  master: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "workspace_write", "instructions_md"],
-  analyser: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "gate", "ack", "workspace_write", "instructions_md"],
-  worker: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "workspace_write", "instructions_md"],
-  tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "workspace_write", "instructions_md"],
+  master: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "workspace_write", "instructions_md"],
+  analyser: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "gate", "ack", "workspace_write", "instructions_md"],
+  worker: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "stream", "workspace_write", "instructions_md"],
+  parallel: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "workspace_write", "instructions_md"],
+  tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "workspace_write", "instructions_md"],
   private: ["label", "model", "input_folder", "input_globs", "gpu_only", "private_vault", "instructions_md"],
   memory: ["label", "scope", "action", "project_id", "namespace"],
   route: ["label", "model", "tier"],
@@ -1284,28 +1312,95 @@ document.getElementById("autoSequenceMode").onchange = event => {
   graph.sequence_mode = event.target.value;
 };
 
+let activeGraphRunId = null;
+
+async function readSseStream(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      try { onEvent(JSON.parse(line.slice(5).trim())); } catch { /* ignore malformed chunk */ }
+    }
+  }
+}
+
+function genRunId() {
+  return (crypto.randomUUID ? crypto.randomUUID() : `run-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+}
+
 document.getElementById("btnRun").onclick = async () => {
   const goal = document.getElementById("runGoal").value.trim()
     || (graph.nodes.find(node => node.type === "goal")?.data?.text || "").trim();
   if (!goal) { toast("Enter a workflow goal"); return; }
   const button = document.getElementById("btnRun");
+  const cancelButton = document.getElementById("btnCancelRun");
   button.disabled = true;
-  document.getElementById("planOut").textContent = "on it..";
+  cancelButton.hidden = false;
+  const runId = genRunId();
+  activeGraphRunId = runId;
+  activeRunId = runId;
+  Object.keys(nodeStatus).forEach(id => { if (id.startsWith(`${graph.id}-`) || graph.nodes.some(n => n.id === id)) setNodeStatus(id, null); });
+  const outEl = document.getElementById("planOut");
+  outEl.textContent = "on it..";
+  let answerText = "";
   try {
-    const response = await fetch("/api/graphs/run", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph, goal, session_id: `graph-${graph.id}` }),
+    const response = await fetch("/api/graphs/run/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+      body: JSON.stringify({ graph, goal, session_id: `graph-${graph.id}`, run_id: runId }),
     });
-    const result = await response.json();
-    if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
-    document.getElementById("planOut").textContent = result.answer || JSON.stringify(result, null, 2);
-    toast(`Workflow complete · ${result.stage_count || 0} stages`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    let finalResult = null;
+    let cancelled = false;
+    let streamError = null;
+    await readSseStream(response, evt => {
+      if (evt.type === "delta" && evt.text) {
+        answerText += evt.text;
+        outEl.textContent = answerText;
+      } else if (evt.type === "status") {
+        applyStatusEvent(evt);
+      } else if (evt.type === "done") {
+        finalResult = evt.result;
+      } else if (evt.type === "cancelled") {
+        cancelled = true;
+      } else if (evt.type === "error") {
+        streamError = evt.error || "graph run failed";
+      }
+    });
+    if (cancelled) {
+      outEl.textContent = "Run cancelled.";
+      toast("Workflow cancelled");
+    } else if (streamError) {
+      throw new Error(streamError);
+    } else if (finalResult) {
+      outEl.textContent = finalResult.answer || JSON.stringify(finalResult, null, 2);
+      toast(`Workflow complete · ${finalResult.stage_count || 0} stages`);
+    }
   } catch (error) {
-    document.getElementById("planOut").textContent = error.message;
+    outEl.textContent = error.message;
     toast("Workflow failed");
   } finally {
     button.disabled = graph.service_id === "auto";
+    cancelButton.hidden = true;
+    if (activeGraphRunId === runId) activeGraphRunId = null;
   }
+};
+
+document.getElementById("btnCancelRun").onclick = async () => {
+  if (!activeGraphRunId) return;
+  try {
+    await fetch("/api/runs/cancel", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: activeGraphRunId }),
+    });
+  } catch { /* best-effort */ }
 };
 
 document.getElementById("btnPlan").onclick = async () => {
@@ -1359,7 +1454,11 @@ const PHASE_NODE_SUFFIXES = {
   answering: ["synthesis", "output"], answering_done: ["synthesis", "output"], answering_error: ["synthesis", "output"],
 };
 function applyStatusEvent(evt) {
-  if (evt.type !== "status" || !evt.phase || evt.service_id !== graph.service_id) return;
+  if (evt.type !== "status" || !evt.phase) return;
+  // Built-in presets: service_id === graph.id. Custom/unsaved canvases have no
+  // service_id, so graph_exec's own events (see execute_graph) are tagged with
+  // graph.id instead — match either so both sources light up their canvas.
+  if (evt.service_id !== graph.service_id && evt.service_id !== graph.id) return;
   if (evt.phase === "planning") {
     activeRunId = evt.run_id || null;
     // A fresh run against this preset started — clear stale lights from the last one.
@@ -1370,6 +1469,10 @@ function applyStatusEvent(evt) {
   const done = evt.phase.endsWith("_done");
   const failed = evt.phase.endsWith("_error");
   const status = failed ? "error" : done ? "done" : "running";
+  // Custom-graph node ids from graph_exec (execute_graph) are the node's own
+  // id already — no phase-name translation needed, unlike the fixed
+  // lead/worker/review vocabulary built-in presets use below.
+  if (evt.stage_id) { setNodeStatus(String(evt.stage_id), status); return; }
   if (evt.phase === "workers" || evt.phase === "workers_done") {
     graph.nodes.filter(n => n.id.startsWith(`${graph.id}-worker-`)).forEach(n => setNodeStatus(n.id, status));
     return;

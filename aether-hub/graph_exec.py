@@ -15,16 +15,18 @@ pick up work an Auto session started and vice versa.
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from graph import graph_to_pipeline
 from memory import MemoryStore
 from pipelines import _pick_for_stage
-from services import _chat_completion, worker_output_needs_correction
+from services import _chat_completion, _chat_completion_stream, _is_host_cli, worker_output_needs_correction
 
 MAX_STAGE_OUTPUT_CHARS = 20_000
 MAX_CONTEXT_CHARS = 12_000
 MAX_STAGES = 40
+MAX_PARALLEL_BRANCHES = 8
 
 
 class GraphExecutionError(RuntimeError):
@@ -32,6 +34,14 @@ class GraphExecutionError(RuntimeError):
 
     def __init__(self, message: str, steps: list[dict[str, Any]]) -> None:
         super().__init__(message)
+        self.steps = steps
+
+
+class GraphRunCancelled(RuntimeError):
+    """Raised when a caller-supplied cancel_check() reports the run was cancelled."""
+
+    def __init__(self, steps: list[dict[str, Any]]) -> None:
+        super().__init__("run cancelled")
         self.steps = steps
 
 
@@ -162,6 +172,60 @@ def _stage_messages(
     ]
 
 
+def _run_one_call(
+    completion: Callable[[dict[str, Any], list[dict[str, Any]]], dict[str, Any]],
+    call: dict[str, Any],
+    messages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """One completion + the standard evidence-correction retry pass."""
+    result = completion(call, messages)
+    first_usage = result.get("usage") or {}
+    if worker_output_needs_correction(result.get("content")):
+        retry_messages = [
+            *messages,
+            {
+                "role": "user",
+                "content": (
+                    "The stage response was intent-only or unsupported. Perform the bounded work now and replace "
+                    "it with concrete evidence-backed findings. If this is an implementation stage, make the "
+                    "allowed workspace edits and report changed paths plus verification output."
+                ),
+            },
+        ]
+        result = completion(call, retry_messages)
+        retry_usage = result.get("usage") or {}
+        result["usage"] = {
+            key: int(first_usage.get(key) or 0) + int(retry_usage.get(key) or 0)
+            for key in set(first_usage) | set(retry_usage)
+        }
+        if worker_output_needs_correction(result.get("content")):
+            raise RuntimeError("stage output rejected after two intent-only or unsupported responses")
+    return result
+
+
+def _resolve_parallel_branches(
+    snapshot: dict[str, Any], stage: dict[str, Any], count: int
+) -> list[dict[str, Any]]:
+    """Resolve up to `count` models for a parallel-fanout stage, preferring distinct models."""
+    count = max(1, min(count, MAX_PARALLEL_BRANCHES))
+    models = dict(snapshot.get("models") or {})
+    branches: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for _ in range(count):
+        candidate_snapshot = {
+            **snapshot,
+            "models": {
+                alias: meta for alias, meta in models.items() if alias not in used or len(used) >= len(models)
+            },
+        }
+        resolved = _pick_for_stage(candidate_snapshot, stage)
+        if not resolved.get("model") or not resolved.get("available", True):
+            break
+        branches.append(resolved)
+        used.add(resolved["model"])
+    return branches
+
+
 def execute_graph(
     graph: dict[str, Any],
     snapshot: dict[str, Any],
@@ -170,6 +234,8 @@ def execute_graph(
     memory: MemoryStore | None = None,
     session_id: str | None = None,
     on_status: Callable[[dict[str, Any]], None] | None = None,
+    on_delta: Callable[[str], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Execute a node graph stage by stage against the shared memory pool."""
     event = dict(event or {})
@@ -192,28 +258,45 @@ def execute_graph(
     completion = completion or _chat_completion
     started = time.time()
 
-    _emit(on_status, "memory_read", label="Reading shared memory…")
-    context = _memory_reads(memory, memory_ops, goal)
+    _emit(on_status, "planning", label="Starting graph run…")
 
     outputs: dict[str, str] = {}
     steps: list[dict[str, Any]] = []
     usage_items: list[dict[str, Any]] = []
     stage_ids = {str(stage.get("id")) for stage in stages if stage.get("id")}
 
+    def _check_cancelled() -> None:
+        if cancel_check is not None and cancel_check():
+            raise GraphRunCancelled(steps)
+
+    _check_cancelled()
+    _emit(on_status, "memory_read", label="Reading shared memory…")
+    context = _memory_reads(memory, memory_ops, goal)
+
     for index, stage in enumerate(stages):
-        resolved = _pick_for_stage(snapshot, stage)
-        model = resolved.get("model")
-        label = stage.get("label") or stage.get("role") or stage.get("id")
-        if not model or not resolved.get("available", True):
+        _check_cancelled()
+        stage_id = stage.get("id")
+        label = stage.get("label") or stage.get("role") or stage_id
+        branch_count = max(1, int(stage.get("parallel") or 1))
+        is_parallel = branch_count > 1
+
+        if is_parallel:
+            branches = _resolve_parallel_branches(snapshot, stage, branch_count)
+        else:
+            resolved = _pick_for_stage(snapshot, stage)
+            branches = [resolved] if resolved.get("model") and resolved.get("available", True) else []
+
+        if not branches:
             steps.append(
                 {
-                    "stage_id": stage.get("id"),
+                    "stage_id": stage_id,
                     "label": label,
                     "role": stage.get("role"),
-                    "model": model,
+                    "model": None,
                     "error": "no available model for this stage",
                 }
             )
+            _emit(on_status, "stage_error", stage_id=stage_id, label=label)
             continue
         required_stage_inputs = [
             source for source in (stage.get("inputs_from") or []) if source in stage_ids
@@ -221,21 +304,26 @@ def execute_graph(
         if required_stage_inputs and not any(source in outputs for source in required_stage_inputs):
             steps.append(
                 {
-                    "stage_id": stage.get("id"),
+                    "stage_id": stage_id,
                     "label": label,
                     "role": stage.get("role"),
-                    "model": model,
+                    "model": branches[0].get("model"),
                     "error": "no successful upstream stage output",
                 }
             )
+            _emit(on_status, "stage_error", stage_id=stage_id, label=label)
             continue
+
+        models_label = ", ".join(b["model"] for b in branches)
         _emit(
             on_status,
             "stage",
-            model=model,
-            label=f"{label} · {model}",
+            model=branches[0]["model"],
+            models=[b["model"] for b in branches],
+            label=f"{label} · {models_label}",
             index=index,
             total=len(stages),
+            stage_id=stage_id,
         )
         upstream = _join_upstream_blocks(
             [
@@ -245,57 +333,78 @@ def execute_graph(
             ]
         )
         messages = _stage_messages(stage, goal, context, upstream)
-        call = {
-            "model": model,
-            "max_tokens": int(event.get("max_tokens") or 2000),
-            "role": stage.get("role") or "worker",
-            "workspace_write": bool(stage.get("workspace_write")),
-        }
-        try:
-            result = completion(call, messages)
-            first_usage = result.get("usage") or {}
-            if worker_output_needs_correction(result.get("content")):
-                retry_messages = [
-                    *messages,
-                    {
-                        "role": "user",
-                        "content": (
-                            "The stage response was intent-only or unsupported. Perform the bounded work now and replace "
-                            "it with concrete evidence-backed findings. If this is an implementation stage, make the "
-                            "allowed workspace edits and report changed paths plus verification output."
-                        ),
-                    },
-                ]
-                result = completion(call, retry_messages)
-                retry_usage = result.get("usage") or {}
-                result["usage"] = {
-                    key: int(first_usage.get(key) or 0) + int(retry_usage.get(key) or 0)
-                    for key in set(first_usage) | set(retry_usage)
-                }
-                if worker_output_needs_correction(result.get("content")):
-                    raise RuntimeError("stage output rejected after two intent-only or unsupported responses")
-            text = str(result.get("content") or "").strip()
-            outputs[stage.get("id")] = text[:MAX_STAGE_OUTPUT_CHARS]
-            usage_items.append(result.get("usage") or {})
+
+        def _run_branch(resolved: dict[str, Any]) -> dict[str, Any]:
+            model = resolved["model"]
+            call = {
+                "model": model,
+                "max_tokens": int(event.get("max_tokens") or 2000),
+                "role": stage.get("role") or "worker",
+                "workspace_write": bool(stage.get("workspace_write")),
+            }
+            can_stream = (
+                on_delta is not None
+                and not is_parallel
+                and stage.get("stream", True)
+                and not _is_host_cli(snapshot, model)
+            )
+            try:
+                if can_stream:
+                    result = _chat_completion_stream(call, messages, on_delta)
+                    if worker_output_needs_correction(result.get("content")):
+                        result = _run_one_call(completion, call, messages)
+                else:
+                    result = _run_one_call(completion, call, messages)
+            except Exception as exc:
+                # Caught per-branch (not propagated through the thread pool) so one
+                # failing parallel branch degrades the stage instead of failing it.
+                result = {"content": "", "error": str(exc)[:500]}
+            return {"model": model, "branch_label": resolved.get("model") or model, "result": result}
+
+        if len(branches) == 1:
+            branch_results = [_run_branch(branches[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=len(branches)) as pool:
+                branch_results = list(pool.map(_run_branch, branches))
+
+        succeeded = [b for b in branch_results if b.get("result", {}).get("content")]
+        if not succeeded:
             steps.append(
                 {
-                    "stage_id": stage.get("id"),
+                    "stage_id": stage_id,
                     "label": label,
                     "role": stage.get("role"),
-                    "model": model,
-                    "content": text,
+                    "model": branches[0]["model"],
+                    "error": "every parallel branch failed" if is_parallel else "empty response",
                 }
             )
-        except Exception as exc:
-            steps.append(
-                {
-                    "stage_id": stage.get("id"),
-                    "label": label,
-                    "role": stage.get("role"),
-                    "model": model,
-                    "error": str(exc)[:500],
-                }
+            _emit(on_status, "stage_error", stage_id=stage_id, label=label)
+            continue
+
+        for item in succeeded:
+            usage_items.append(item["result"].get("usage") or {})
+
+        if is_parallel:
+            text = "\n\n".join(
+                f"[{item['model']}]\n{str(item['result'].get('content') or '').strip()}" for item in succeeded
             )
+            degraded = len(succeeded) < len(branch_results)
+        else:
+            text = str(succeeded[0]["result"].get("content") or "").strip()
+            degraded = False
+        outputs[stage_id] = text[:MAX_STAGE_OUTPUT_CHARS]
+        steps.append(
+            {
+                "stage_id": stage_id,
+                "label": label,
+                "role": stage.get("role"),
+                "model": branches[0]["model"],
+                "models": [item["model"] for item in succeeded] if is_parallel else None,
+                "content": text,
+                "degraded": degraded,
+            }
+        )
+        _emit(on_status, "stage_done", stage_id=stage_id, label=label)
 
     answered = [step for step in steps if step.get("content")]
     if not answered:
@@ -315,6 +424,7 @@ def execute_graph(
         answer_step = answered[-1]
     answer = answer_step["content"]
 
+    _check_cancelled()
     _emit(on_status, "memory_write", label="Writing shared memory…")
     written = _memory_writes(memory, memory_ops, goal, answer)
     if memory is not None and session_id:

@@ -1794,6 +1794,7 @@ def execute_auto(
     on_status: Callable[[dict[str, Any]], None] | None = None,
     memory: MemoryStore | None = None,
     session_id: str | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """
     Auto mode: direct model chat (host CLIs as detected) + unified memory + failover.
@@ -1872,6 +1873,8 @@ def execute_auto(
     )
 
     for index, item in enumerate(chain):
+        if cancel_check is not None and cancel_check():
+            raise RunCancelled("run cancelled")
         model = item["model"]
         host = item.get("executor") == "host_cli" or _is_host_cli(snapshot, model)
         label = f"{'CLI' if host else 'Local'} · {model}"
@@ -2074,6 +2077,10 @@ def worker_output_needs_correction(content: Any) -> bool:
     return bool(_INTENT_ONLY_RE.search(text)) and not bool(_COMPLETED_WORK_RE.search(text))
 
 
+class RunCancelled(RuntimeError):
+    """Raised when a caller-supplied cancel_check() reports the run was cancelled."""
+
+
 def execute_service(
     service_id: str,
     snapshot: dict[str, Any],
@@ -2083,6 +2090,7 @@ def execute_service(
     on_status: Callable[[dict[str, Any]], None] | None = None,
     memory: MemoryStore | None = None,
     session_id: str | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Execute a bounded lead -> workers -> review -> synthesis service run.
 
@@ -2106,6 +2114,11 @@ def execute_service(
     if len(goal) > 100_000:
         raise ValueError("goal exceeds 100000 characters")
     completion = completion or _chat_completion
+
+    def _check_cancelled() -> None:
+        if cancel_check is not None and cancel_check():
+            raise RunCancelled("run cancelled")
+
     _emit_status(on_status, "planning", label="Planning…")
     plan = plan_service(service_id, snapshot, event)
     activation = _activate_resolved_service(plan["service"], event)
@@ -2173,6 +2186,7 @@ def execute_service(
             ),
         }
     )
+    _check_cancelled()
     lead_started = time.perf_counter()
     _emit_status(on_status, "lead", model=lead_call.get("model"), label="Lead…")
     try:
@@ -2306,6 +2320,7 @@ def execute_service(
 
     workers = []
     if worker_calls:
+        _check_cancelled()
         workers_started = time.perf_counter()
         worker_models = [c.get("model") for c in worker_calls if c.get("model")]
         _emit_status(
@@ -2343,6 +2358,7 @@ def execute_service(
 
     review = None
     if supervisor_call and supervisor_call.get("model"):
+        _check_cancelled()
         review_started = time.perf_counter()
         _emit_status(on_status, "review", model=supervisor_call.get("model"), label="Review…")
         review_messages = copy.deepcopy(supervisor_call.get("messages") or [])
@@ -2389,6 +2405,7 @@ def execute_service(
     ]
     attachments = [item for item in (event.get("attachments") or []) if isinstance(item, dict)]
     _augment_final_message_with_attachments(final_messages, attachments, snapshot, final_call)
+    _check_cancelled()
     final_started = time.perf_counter()
     _emit_status(on_status, "answering", model=final_call.get("model"), label="on it..")
     honest_incomplete = False

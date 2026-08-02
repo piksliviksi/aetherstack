@@ -1002,10 +1002,17 @@ class HubChat {
 
   async run(message, webview = this.activeWebview()) {
     if (!webview) throw new Error("AetherStack Chat view is not available.");
+    const state = this.stateFor(webview);
+    // Aborting here only stops the client from reading further — the Hub keeps
+    // executing that run server-side. Best-effort tell it to actually stop.
+    const priorRunId = state.activeRunId;
+    state.activeRunId = null;
     this.activeRuns.get(webview)?.abort();
+    if (priorRunId) {
+      this.hubRequest("/api/runs/cancel", { method: "POST", body: JSON.stringify({ run_id: priorRunId }) }).catch(() => {});
+    }
     const controller = new AbortController();
     this.activeRuns.set(webview, controller);
-    const state = this.stateFor(webview);
     const generation = state.generation;
     const isCurrentRun = () => (
       this.activeRuns.get(webview) === controller
@@ -1176,6 +1183,7 @@ class HubChat {
           },
           (event) => {
             if (event.type === "status") {
+              if (event.run_id) state.activeRunId = event.run_id;
               publishProgress({
                 phase: event.phase || "running",
                 label: event.label || "",
