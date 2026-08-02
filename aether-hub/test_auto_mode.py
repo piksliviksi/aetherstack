@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import services  # noqa: E402
 from services import (  # noqa: E402
     DEFAULT_MEMORY_CONTEXT_KB,
     MEMORY_CONTEXT_KB_OPTIONS,
@@ -100,19 +101,25 @@ def test_execute_auto_failsover_to_local() -> None:
             raise RuntimeError("429 rate limit: weekly quota exceeded")
         return {"model": model, "content": f"ok from {model}", "usage": {"total_tokens": 3}}
 
-    result = execute_auto(
-        _snap(),
-        {"goal": "Write a hello world function"},
-        completion=completion,
-        session_id="fail-over-test",
-    )
-    assert result["ok"] is True
-    assert result["auto_mode"] is True
-    assert result["model"] == "local-default"
-    assert result["memory"] == "unified"
-    assert "grok-cli" in calls and "claude-cli" in calls and "local-default" in calls
-    assert len(result["failover_attempts"]) >= 2
-    assert _auto_session_model.get("fail-over-test") == "local-default"
+    try:
+        result = execute_auto(
+            _snap(),
+            {"goal": "Write a hello world function"},
+            completion=completion,
+            session_id="fail-over-test",
+        )
+        assert result["ok"] is True
+        assert result["auto_mode"] is True
+        assert result["model"] == "local-default"
+        assert result["memory"] == "unified"
+        assert "grok-cli" in calls and "claude-cli" in calls and "local-default" in calls
+        assert len(result["failover_attempts"]) >= 2
+        assert _auto_session_model.get("fail-over-test") == "local-default"
+    finally:
+        # The exhaustion errors above put grok-cli/claude-cli into the
+        # cross-session cooldown (services.py); clear it so later tests in
+        # this file/process see a clean chain again.
+        services._auto_model_cooldown.clear()
 
 
 def test_describe_auto() -> None:

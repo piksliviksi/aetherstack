@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.20
+
+- **Auto no longer keeps retrying a model that just hit a real quota/session limit.** Exhaustion is now tracked cross-session (not just per-session), so once one session discovers a model is out of headroom, every other session skips it too until a cooldown elapses, instead of each new session re-probing and failing on the same dead model first.
+- **Evidence gate now catches `path.py:123`-style fabricated citations**, not just the `path.py line 123` phrasing — closing the gap where a model could fabricate a citation in the format every host CLI actually emits and still pass the check.
+- **Health-check failures are no longer trusted for the full 5-minute cache TTL** — a single slow/transient response now gets retried in 30s instead of being treated with the same confidence as a verified-healthy result.
+- **The OpenAI-compatible gateway strips `workspace_write`** from incoming requests — that path had no authorization gate for it, unlike `/api/graphs/run` and `/api/services/*/run`.
+- **The CLI bridge verifies its token before trusting a reused port.** Previously, discovering another process already listening on the bridge's port was enough to treat it as "our" bridge; now it's health-checked with the current token first, so a stale or mismatched token (e.g. from `start.sh`'s daemon) fails fast instead of surfacing a confusing error deep inside a later model-sync call. The daemon also binds loopback-only.
+- **VS Code Chat**: the preset menu, model picker, and mode dropdown no longer list "Auto" twice; `/clear` now archives the session to AetherStack memory and clears the transcript (previously only the built-in web dashboard could do this); the "on it.." busy indicator no longer renders twice and now animates its dots instead of showing a static string.
+- **Local fallback model upgraded**: `local-default` now runs `qwen2.5-coder:7b` instead of `qwen2.5-coder:1.5b`. The 1.5b model is Auto's true last resort — after every cloud/subscription model in the chain is exhausted — and was visibly degrading answer quality at that point; 7b is a meaningfully more capable floor for real coding work.
+
 ## 0.3.19
 
 - **Auto preset now has an editable model-order chain** with `sequential_exhaustion`/`per_request` continuation modes, wired end-to-end through the Hub API and VS Code Control Center.

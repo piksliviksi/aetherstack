@@ -67,6 +67,22 @@ VS Code does **not** run LLMs on the GPU itself. Point Continue/Cline at `http:/
 | **Windows + AMD** | WSL Ollama (ROCm/DXG) or host Ollama |
 | **Linux** | Host Ollama (ROCm / CUDA as available) |
 
+**Model size matters.** `local-default` is Auto's last-resort fallback once every
+cloud/subscription model in your chain is exhausted, so it's worth pulling a
+model that can actually carry a coding session rather than just reply. Sub-2B
+models (e.g. `qwen2.5-coder:1.5b`/`0.5b`) are fine for a quick smoke test but
+visibly degrade on real refactors and multi-file reasoning. For decent
+coding output — roughly the minimum bar you'd expect from a lightweight
+GPT-5.4-class model, not a toy — pull at least:
+
+```bash
+ollama pull qwen2.5-coder:7b
+```
+
+7B is the default `local-default` backend as of 0.3.20. Bigger local models
+(`local-llama` / `llama3.1:8b`, or your own alias in `capability_matrix.yaml`)
+work too if your GPU/VRAM has the headroom.
+
 ## Settings
 
 | Setting | Default |

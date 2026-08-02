@@ -126,6 +126,17 @@ From VS Code, open **AetherStack → Control & Services** and press **Start all 
 | Host Ollama | Required for local GPU inference |
 | `.env` | Copy from `.env.example`; set keys in use |
 
+**Pick a local model that can actually code.** Auto only reaches local Ollama
+after every cloud/subscription model in the chain is exhausted, so treat it as
+a real fallback, not a placeholder. Sub-2B models pull fast but noticeably
+degrade on real coding tasks. For decent output — roughly the floor you'd
+want from a lightweight GPT-5.4-class model — pull at least
+`qwen2.5-coder:7b` (the `local-default` alias's backend as of 0.3.20):
+
+```bash
+ollama pull qwen2.5-coder:7b
+```
+
 | Open | URL |
 |------|-----|
 | Simple services UI | http://localhost:8766 |
