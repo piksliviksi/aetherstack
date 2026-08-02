@@ -54,9 +54,9 @@ models:
   local-default:
     tier: local
     provider: ollama
-    backend: ollama/qwen2.5-coder:1.5b
+    backend: ollama/qwen2.5-coder:7b
     capabilities: [chat, code, reason, tools, private, cheap]
-    context: 8192
+    context: 32768
     cost: 0
     latency: low
     notes: Default local — host Ollama selects Metal, Vulkan, ROCm, CUDA, or CPU for the platform

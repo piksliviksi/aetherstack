@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 90
     env:
       AETHER_NO_BROWSER: "1"
-      AETHER_OLLAMA_MODELS: qwen2.5-coder:1.5b,nomic-embed-text
+      AETHER_OLLAMA_MODELS: qwen2.5-coder:7b,nomic-embed-text
       OLLAMA_HOST: 127.0.0.1:11435
       OLLAMA_BASE_URL: http://host.docker.internal:11435
       OLLAMA_MODELS: ${{ runner.temp }}/aetherstack-ollama-models-${{ github.run_id }}
