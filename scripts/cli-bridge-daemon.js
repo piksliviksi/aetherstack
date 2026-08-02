@@ -25,7 +25,9 @@ if (!token) {
   process.exit(1);
 }
 
-const bridge = createCliBridge({ token, port, cwd, host: "0.0.0.0" });
+// Loopback-only: Docker Desktop's host.docker.internal reaches ports bound to
+// 127.0.0.1 on the host, so this does not need to bind every interface.
+const bridge = createCliBridge({ token, port, cwd });
 
 async function main() {
   const { port: boundPort, reused } = await bridge.start();
@@ -39,7 +41,7 @@ async function main() {
     process.exit(0);
     return;
   }
-  console.log(`[cli-bridge] status=started Listening on 0.0.0.0:${boundPort}`);
+  console.log(`[cli-bridge] status=started Listening on 127.0.0.1:${boundPort}`);
   const models = await bridge.models(true);
   const labels = Object.values(models).map((model) => model.label);
   if (labels.length) {

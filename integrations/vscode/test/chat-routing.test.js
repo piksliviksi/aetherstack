@@ -35,6 +35,11 @@ test("slash commands select or run dynamic service presets", () => {
   });
 });
 
+test("/clear archives and clears, optionally forcing past open tasks", () => {
+  assert.deepEqual(parseChatInput("/clear", "auto", serviceIds), { action: "clear", force: false });
+  assert.deepEqual(parseChatInput("/clear force", "auto", serviceIds), { action: "clear", force: true });
+});
+
 test("unknown slash commands fail closed with discoverable help", () => {
   const result = parseChatInput("/telepathy do it", "auto", serviceIds);
   assert.equal(result.action, "error");

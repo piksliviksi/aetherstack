@@ -126,6 +126,26 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertFalse(openai_gateway.authorized("Bearer ", key=""))
         self.assertTrue(openai_gateway.authorized("Bearer generated-secret", key="generated-secret"))
 
+    def test_gateway_strips_workspace_write_from_chat_completions(self) -> None:
+        snapshot = {
+            "models": {
+                "claude-cli": {
+                    "available": True,
+                    "executor": "host_cli",
+                    "capabilities": ["chat"],
+                }
+            }
+        }
+        request, _meta = openai_gateway.sanitize_request(
+            {
+                "model": "claude-cli",
+                "messages": [{"role": "user", "content": "hi"}],
+                "workspace_write": True,
+            },
+            snapshot,
+        )
+        self.assertNotIn("workspace_write", request)
+
     def test_hub_errors_have_stable_codes_and_hide_internal_failures(self) -> None:
         public = hub_server._public_error_payload(400, {"error": "goal is required"}, "req-1")
         self.assertEqual(public["error"], "goal is required")

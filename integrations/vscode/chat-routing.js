@@ -39,6 +39,10 @@ function parseChatInput(input, selectedService = "auto", availableServiceIds = [
   const command = String(rawCommand || "").toLowerCase();
   if (command === "help") return { action: "help" };
   if (command === "presets" || command === "services") return { action: "presets" };
+  if (command === "clear") {
+    const force = restParts.some((part) => String(part).toLowerCase() === "force");
+    return { action: "clear", force };
+  }
 
   let serviceId;
   let promptParts = restParts;
@@ -69,6 +73,7 @@ function commandHelp(services = []) {
     "• /auto <goal> — use detected host CLI models (Grok/Claude/Codex) as-is + unified memory; fail over on limits to the next model, then local Ollama GPU for coding",
     "• /preset <name> <goal> — use a named multi-agent preset",
     "• /presets — list the presets available on this system",
+    "• /clear — archive this session to AetherStack memory, then clear the chat",
     "• /help — show this help",
     dynamic ? `Shortcuts: ${dynamic}` : "",
   ].filter(Boolean).join("\n");

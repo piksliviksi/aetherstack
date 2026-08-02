@@ -242,7 +242,11 @@
   const MEMORY_CONTEXT_OPTIONS = [256, 512, 1024, 2048];
   let historyBusy = false;
   let runMeta = { busy: false, phase: '', label: '', model: '', models: [], startedAt: 0 };
-  const ACTIVITY_TEXT = 'on it..';
+  const ACTIVITY_BASE = 'On it';
+  const ACTIVITY_DOT_FRAMES = ['', '.', '..', '...'];
+  let activityDotIndex = 0;
+  function activityLabel() { return ACTIVITY_BASE + ACTIVITY_DOT_FRAMES[activityDotIndex % ACTIVITY_DOT_FRAMES.length]; }
+  function dedupeAuto(list) { return (list || []).filter((service) => service.id !== 'auto'); }
   const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
   let pendingAttachments = [];
   const restored = vscode.getState() || {};
@@ -397,7 +401,7 @@
     const current = $('service').value || 'auto';
     const options = [
       { id: 'auto', label: 'Auto', summary: 'Host CLIs, then local' },
-      ...services.map((service) => ({
+      ...dedupeAuto(services).map((service) => ({
         id: service.id,
         label: service.label || service.id,
         summary: service.summary || '',
@@ -431,15 +435,19 @@
     $('tokenLine').hidden = !showTokens;
   }
   function rotateActivity() {
+    activityDotIndex += 1;
     const model = runMeta.model || (runMeta.models || [])[0] || '';
-    $('activityText').textContent = model ? `${ACTIVITY_TEXT} · ${model}` : ACTIVITY_TEXT;
+    $('activityText').textContent = model ? `${activityLabel()} · ${model}` : activityLabel();
   }
   function paintRunChrome() {
     if (!runMeta.busy) return;
     const secs = Math.max(0, Math.floor((Date.now() - (runMeta.startedAt || Date.now())) / 1000));
     const model = runMeta.model || (runMeta.models || []).filter(Boolean).join(', ');
-    const phase = runMeta.label || runMeta.phase || ACTIVITY_TEXT;
-    $('status').textContent = model ? `${phase} · ${model} · ${secs}s` : `${phase} · ${secs}s`;
+    // The "on it.." phrase already lives in #activityText (animated); #status
+    // only adds the phase/model/elapsed detail so the phrase isn't shown twice.
+    const phase = runMeta.label && runMeta.label !== ACTIVITY_BASE ? runMeta.label : (runMeta.phase || '');
+    const parts = [phase, model, `${secs}s`].filter(Boolean);
+    $('status').textContent = parts.join(' · ');
     $('status').className = 'muted';
     if (model) {
       $('activeModels').textContent = `Answering: ${model}`;
@@ -459,10 +467,10 @@
     runMeta.busy = Boolean(value);
     if (value) {
       runMeta.startedAt = Date.now();
-      if (!runMeta.label) runMeta.label = ACTIVITY_TEXT;
+      activityDotIndex = 0;
       rotateActivity();
       paintRunChrome();
-      activityTimer = setInterval(rotateActivity, 1900);
+      activityTimer = setInterval(rotateActivity, 500);
       elapsedTimer = setInterval(paintRunChrome, 500);
     } else {
       $('activityText').textContent = '';
@@ -657,7 +665,7 @@
   messageSeq = transcript.reduce((max, item) => Math.max(max, item.id || 0), 0);
   if (!transcript.length) { $('idleArt').style.display = 'flex'; $('messages').style.flex = '0'; }
   let pickerIndex = -1;
-  function pickerOptions() { return [{ id: 'auto', label: 'Auto' }, ...services.map((service) => ({ id: service.id, label: service.label || service.id }))]; }
+  function pickerOptions() { return [{ id: 'auto', label: 'Auto' }, ...dedupeAuto(services).map((service) => ({ id: service.id, label: service.label || service.id }))]; }
   function closeModelPicker() { $('modelPicker').hidden = true; }
   function renderModelPicker() {
     const options = pickerOptions();
@@ -804,7 +812,7 @@
       updateMenuStates();
       $('cwdLine').textContent = message.cwd || '';
       const auto = text('option', 'Auto'); auto.value = 'auto';
-      $('service').replaceChildren(auto, ...services.map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
+      $('service').replaceChildren(auto, ...dedupeAuto(services).map((service) => { const option = text('option', service.label || service.id); option.value = service.id; return option; }));
       const preferred = current || restored.serviceId || 'auto';
       $('service').value = preferred === 'auto' || services.some((service) => service.id === preferred) ? preferred : 'auto';
       activeServiceId = activeServiceId || restored.activeServiceId || '';
@@ -818,22 +826,20 @@
       $('actionMenu').classList.toggle('busy', historyBusy);
       $('newConversation').disabled = historyBusy;
       if (message.value) {
-        runMeta.label = runMeta.label || ACTIVITY_TEXT;
-        $('status').textContent = ACTIVITY_TEXT;
+        $('status').textContent = '';
       } else {
         $('status').textContent = '';
       }
       setBusy(Boolean(message.value));
     } else if (message.type === 'progress') {
       runMeta.phase = message.phase || runMeta.phase;
-      runMeta.label = ACTIVITY_TEXT;
       if (message.model) runMeta.model = message.model;
       if (Array.isArray(message.models) && message.models.length) runMeta.models = message.models;
       if (runMeta.busy) paintRunChrome();
       else {
         // Keep status readable even if progress arrives slightly before busy.
         const model = runMeta.model || (runMeta.models || [])[0] || '';
-        $('status').textContent = model ? `${runMeta.label} · ${model}` : runMeta.label;
+        $('status').textContent = model ? `${runMeta.phase} · ${model}` : runMeta.phase;
         if (model) { $('activeModels').textContent = `Answering: ${model}`; $('activeModels').classList.add('live'); }
       }
     } else if (message.type === 'inference') {
@@ -879,6 +885,12 @@
       renderTeam(); saveState();
     } else if (message.type === 'command') {
       addMessage('assistant', message.content || '');
+    } else if (message.type === 'cleared') {
+      messageSeq = 0;
+      transcript = [];
+      $('messages').replaceChildren();
+      saveState();
+      addMessage('assistant', message.message || 'Documented in memory and cleared working context.');
     } else if (message.type === 'conversations') {
       renderHistory(message.items || []);
     } else if (message.type === 'conversationIdentity') {

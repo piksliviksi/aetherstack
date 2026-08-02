@@ -1032,6 +1032,28 @@ class HubChat {
         await webview.postMessage({ type: "command", content });
         return;
       }
+      if (parsed.action === "clear") {
+        const sessionId = state.activeConversationId || "vscode-chat";
+        const result = await this.hubRequest("/api/slash", {
+          method: "POST",
+          body: JSON.stringify({ session_id: sessionId, text: parsed.force ? "/clear force" : "/clear" }),
+        });
+        if (!result || result.ok === false) {
+          await webview.postMessage({
+            type: "command",
+            content: (result && result.message) || "Could not clear: open tasks remain. Use /clear force.",
+          });
+          return;
+        }
+        const entry = this.conversations.find((item) => item.id === state.activeConversationId);
+        if (entry) {
+          entry.transcript = [];
+          entry.updatedAt = Date.now();
+          await this.context.globalState.update("aetherstack.conversations", this.conversations);
+        }
+        await webview.postMessage({ type: "cleared", message: result.message || "Documented in memory and cleared working context." });
+        return;
+      }
       if (parsed.action === "select") {
         state.selectedServiceId = parsed.serviceId;
         await webview.postMessage({

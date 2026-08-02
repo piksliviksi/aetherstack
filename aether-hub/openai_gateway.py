@@ -62,6 +62,11 @@ def model_list(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 def sanitize_request(payload: dict[str, Any], snapshot: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     request = dict(payload or {})
+    # This OpenAI-compatible facade has no workspace-write authorization concept
+    # (unlike /api/graphs/run and /api/services/*/run, which gate it behind
+    # _workspace_write_authorized) — always strip it so a client cannot enable
+    # host CLI filesystem writes through this path.
+    request.pop("workspace_write", None)
     model = str(request.get("model") or "").strip()
     if not model:
         raise GatewayError("model is required")

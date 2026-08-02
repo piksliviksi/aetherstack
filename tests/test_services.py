@@ -238,6 +238,14 @@ class DynamicServiceTests(unittest.TestCase):
             )
         )
 
+    def test_fabricated_colon_style_citation_is_rejected(self) -> None:
+        self.assertTrue(
+            services.worker_output_needs_correction(
+                "Observed evidence: totally_made_up_module.py:9142 shows the dispatcher "
+                "drops the tier filter and the result confirms the regression is real."
+            )
+        )
+
     def test_worker_is_removed_after_two_intent_only_responses(self) -> None:
         def completion(call: dict, messages: list[dict] | None = None) -> dict:
             if call.get("role") == "worker":
@@ -436,6 +444,40 @@ class DynamicServiceTests(unittest.TestCase):
         )
         self.assertIn(failed, resolved["failed_models"])
         self.assertNotEqual(resolved["agents"][0].get("model"), failed)
+
+    def test_verify_model_failure_is_not_cached_for_the_full_ttl(self) -> None:
+        services._verify_cache.clear()
+
+        class HealthyResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({"healthy_count": 1, "unhealthy_count": 0}).encode()
+
+        calls = {"n": 0}
+
+        def flaky_urlopen(*_args, **_kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise TimeoutError("slow backend")
+            return HealthyResponse()
+
+        with mock.patch.object(services.urllib.request, "urlopen", side_effect=flaky_urlopen):
+            self.assertFalse(services._verify_model("some-model"))
+            # A failed check must not be trusted for the full 5-minute TTL —
+            # simulate time passing just past the short failure TTL and retry.
+            cached_at, ok = services._verify_cache["some-model"]
+            services._verify_cache["some-model"] = (
+                cached_at - services.VERIFY_FAILURE_TTL_SECONDS - 1,
+                ok,
+            )
+            self.assertTrue(services._verify_model("some-model"))
 
     def test_host_cli_completion_uses_authenticated_bridge_not_litellm(self) -> None:
         class Response:

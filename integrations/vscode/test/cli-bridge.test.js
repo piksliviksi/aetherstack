@@ -50,6 +50,12 @@ test("bridge requires its bearer token and exposes OpenAI-compatible completions
   }
 });
 
+test("the start.sh daemon does not force a non-loopback bind", () => {
+  const daemonPath = path.join(__dirname, "..", "..", "..", "scripts", "cli-bridge-daemon.js");
+  const source = fs.readFileSync(daemonPath, "utf8");
+  assert.equal(/host:\s*["']0\.0\.0\.0["']/.test(source), false);
+});
+
 test("default bind is loopback-only when no host is given", async () => {
   const bridge = createCliBridge({
     token: "loopback-default-token",
@@ -113,6 +119,23 @@ test("a second VS Code window reads the authenticated bridge it reuses", async (
     assert.deepEqual(Object.keys(models).sort(), ["claude-cli", "codex-cli", "grok-cli"]);
   } finally {
     second.stop();
+    first.stop();
+  }
+});
+
+test("reusing a port with a mismatched token fails fast instead of reporting success", async () => {
+  const first = createCliBridge({ token: "correct-token", port: 0, host: "127.0.0.1", resolver, runner });
+  const firstState = await first.start();
+  const second = createCliBridge({
+    token: "wrong-token",
+    port: firstState.port,
+    host: "127.0.0.1",
+    resolver,
+    runner,
+  });
+  try {
+    await assert.rejects(second.start(), /rejected this token/);
+  } finally {
     first.stop();
   }
 });

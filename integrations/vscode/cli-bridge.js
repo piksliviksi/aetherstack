@@ -568,6 +568,23 @@ function createCliBridge(options = {}) {
       });
       if (reused) {
         server = null;
+        // A different process owns that port. Verify our token is actually
+        // accepted before treating it as our own bridge — otherwise a stale
+        // or mismatched token (e.g. start.sh's daemon vs. the extension's
+        // SecretStorage token) would silently "succeed" here and only fail
+        // later, deep inside a model-sync call.
+        await new Promise((resolve, reject) => {
+          const probe = http.get(
+            { hostname: "127.0.0.1", port, path: "/health", headers: { Authorization: `Bearer ${token}` }, timeout: 5_000 },
+            (response) => {
+              response.resume();
+              if (response.statusCode === 200) resolve();
+              else reject(new Error(`existing bridge on port ${port} rejected this token (HTTP ${response.statusCode})`));
+            },
+          );
+          probe.on("timeout", () => probe.destroy(new Error(`existing bridge on port ${port} did not respond to a health check`)));
+          probe.on("error", reject);
+        });
         reusedServer = true;
       }
       else port = server.address().port;

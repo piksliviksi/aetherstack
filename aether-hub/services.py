@@ -49,6 +49,9 @@ LITELLM_BASE_URL = os.environ.get("LITELLM_INTERNAL_URL", "http://litellm:4000")
 CLI_BRIDGE_URL = os.environ.get("AETHER_CLI_BRIDGE_URL", "http://host.docker.internal:8767").rstrip("/")
 CLI_BRIDGE_TOKEN = os.environ.get("AETHER_CLI_BRIDGE_TOKEN", "")
 VERIFY_TTL_SECONDS = 5 * 60
+# A failed health check (one slow/transient response) should be retried soon,
+# not treated with the same confidence as a verified-healthy result.
+VERIFY_FAILURE_TTL_SECONDS = 30
 _verify_cache: dict[str, tuple[float, bool]] = {}
 _verify_cache_lock = threading.Lock()
 _preset_model_cooldown: dict[str, float] = {}
@@ -63,6 +66,17 @@ _auto_session_model: dict[str, str] = {}
 _auto_session_exhausted: dict[str, set[str]] = {}
 _auto_session_lru: OrderedDict[str, None] = OrderedDict()
 _auto_session_lock = threading.RLock()
+# Cross-session: once a model hits an actual quota/session-limit error, every
+# session (not just the one that hit it) should skip it until this cools down —
+# otherwise every new session_id re-probes and fails on a still-exhausted
+# model before reaching one that actually works.
+_auto_model_cooldown: dict[str, float] = {}
+_auto_model_cooldown_lock = threading.Lock()
+try:
+    _auto_cooldown_raw = int(os.environ.get("AETHER_AUTO_EXHAUSTED_COOLDOWN_SECONDS", "1800"))
+except ValueError:
+    _auto_cooldown_raw = 1800
+AUTO_EXHAUSTED_COOLDOWN_SECONDS = max(30, min(21_600, _auto_cooldown_raw))
 try:
     _auto_session_max_raw = int(os.environ.get("AETHER_AUTO_SESSION_MAX", "2048"))
 except ValueError:
@@ -132,6 +146,8 @@ def set_auto_order(order: Any, sequence_mode: Any = None) -> list[str]:
         _auto_session_model.clear()
         _auto_session_exhausted.clear()
         _auto_session_lru.clear()
+    with _auto_model_cooldown_lock:
+        _auto_model_cooldown.clear()
     return cleaned or list(HOST_CLI_AUTO_ORDER)
 
 
@@ -672,8 +688,10 @@ def minimize_service_agents(
 def _verify_model(alias: str) -> bool:
     with _verify_cache_lock:
         cached = _verify_cache.get(alias)
-    if cached and time.time() - cached[0] < VERIFY_TTL_SECONDS:
-        return cached[1]
+    if cached:
+        ttl = VERIFY_TTL_SECONDS if cached[1] else VERIFY_FAILURE_TTL_SECONDS
+        if time.time() - cached[0] < ttl:
+            return cached[1]
     key = os.environ.get("LITELLM_MASTER_KEY", "")
     url = f"{LITELLM_BASE_URL}/health?model={urllib.parse.quote(alias)}"
     request = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
@@ -1455,9 +1473,12 @@ def list_auto_failover_chain(
     models = snapshot.get("models") or {}
     chain: list[dict[str, Any]] = []
     seen: set[str] = set()
+    now = time.monotonic()
+    with _auto_model_cooldown_lock:
+        cooling_down = {alias for alias, until in _auto_model_cooldown.items() if until > now}
 
     def add(alias: str, reason: str) -> None:
-        if alias in seen:
+        if alias in seen or alias in cooling_down:
             return
         meta = models.get(alias) or {}
         if not meta.get("available"):
@@ -1945,12 +1966,18 @@ def execute_auto(
         except Exception as exc:
             last_error = str(exc)[:500]
             fail_kind = "limit_or_unavailable" if is_failover_error(exc) else "error"
-            if sid and sequence_mode == "sequential_exhaustion" and is_exhaustion_error(exc):
-                with _auto_session_lock:
-                    _auto_session_exhausted.setdefault(sid, set()).add(model)
-                    if _auto_session_model.get(sid) == model:
-                        _auto_session_model.pop(sid, None)
-                    _touch_auto_session(sid)
+            if is_exhaustion_error(exc):
+                # Global, cross-session: a real quota/session-limit hit means every
+                # session should skip this model until it cools down, not just the
+                # one that happened to discover it.
+                with _auto_model_cooldown_lock:
+                    _auto_model_cooldown[model] = time.monotonic() + AUTO_EXHAUSTED_COOLDOWN_SECONDS
+                if sid and sequence_mode == "sequential_exhaustion":
+                    with _auto_session_lock:
+                        _auto_session_exhausted.setdefault(sid, set()).add(model)
+                        if _auto_session_model.get(sid) == model:
+                            _auto_session_model.pop(sid, None)
+                        _touch_auto_session(sid)
             attempts.append(
                 {
                     "model": model,
@@ -1990,14 +2017,15 @@ _EVIDENCE_RE = re.compile(
 )
 _LINE_CITATION_RE = re.compile(
     r"(?P<path>[\w./\\-]+\.(?:py|js|ts|html|css|yaml|yml|json|md|sh|go|rs|java|cpp|h))"
-    r"[,:\s]*\bline\s+\d+",
+    r"(?:[,:\s]*\bline\s+\d+|:\d+(?:[-–]\d+)?)",
     re.IGNORECASE,
 )
 
 
 def _has_verifiable_citation(text: str) -> bool:
-    """A "path.py line N"-style claim must point at a real file; an illustrative or
-    plain evidence-shaped mention (no specific line claim) is left to the broader check."""
+    """A "path.py line N" or "path.py:N"-style claim must point at a real file; an
+    illustrative or plain evidence-shaped mention (no specific line claim) is left
+    to the broader check."""
     fabricated = False
     for match in _LINE_CITATION_RE.finditer(text):
         candidate = match.group("path").strip("/\\.,;:()[]{}\"'")
