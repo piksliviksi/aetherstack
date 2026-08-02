@@ -141,13 +141,19 @@ def pick_model_for_role(
     role: str,
     cfg: dict[str, Any] | None = None,
     need_override: list[str] | None = None,
+    role_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Pick a model for mastermind | supervisor | worker | inline."""
+    """Pick a model for mastermind | supervisor | worker | inline.
+
+    `role_override`, when given, is an ephemeral per-call override that takes
+    precedence over the process-global `_runtime.role_overrides` — use this for
+    a single request's fallback pin instead of mutating global state.
+    """
     cfg = cfg or load_modes_config()
     roles = cfg.get("roles") or {}
     role_cfg = copy.deepcopy(roles.get(role) or roles.get("inline") or {})
     # Merge runtime overrides
-    ov = (_runtime.get("role_overrides") or {}).get(role) or {}
+    ov = role_override if role_override is not None else (_runtime.get("role_overrides") or {}).get(role) or {}
     sel = dict(role_cfg.get("select") or {})
     sel.update({k: v for k, v in ov.items() if v is not None})
     prefer = ov.get("prefer") or role_cfg.get("prefer") or "auto"

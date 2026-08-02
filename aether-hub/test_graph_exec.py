@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402
 
-from graph_exec import execute_graph  # noqa: E402
+from graph_exec import MAX_STAGE_OUTPUT_CHARS, _join_upstream_blocks, execute_graph  # noqa: E402
 
 
 class FakeMemory:
@@ -92,6 +92,18 @@ def _completion(calls):
         }
 
     return run
+
+
+def test_upstream_truncation_keeps_block_boundaries() -> None:
+    blocks = [
+        ("stage-a", "A" * (MAX_STAGE_OUTPUT_CHARS // 2 + 100)),
+        ("stage-b", "B" * (MAX_STAGE_OUTPUT_CHARS // 2 + 100)),
+    ]
+    joined = _join_upstream_blocks(blocks)
+    assert len(joined) <= MAX_STAGE_OUTPUT_CHARS
+    assert joined.lstrip().startswith("[")
+    # the most recent block (stage-b) must survive whole with its header intact
+    assert "[stage-b]\n" + "B" * (MAX_STAGE_OUTPUT_CHARS // 2 + 100) in joined
 
 
 def test_stages_run_in_order_and_thread_their_output() -> None:

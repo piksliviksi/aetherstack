@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from agents import pick_model_for_role, plan_event, apply_runtime_update
+from agents import pick_model_for_role, plan_event
 from matrix import _score_model, tiers_match
 
 ROOT = Path(__file__).resolve().parent
@@ -332,11 +332,11 @@ def _pick_for_stage(snapshot: dict[str, Any], stage: dict[str, Any]) -> dict[str
             "tester": "worker",
         }
         role = role_map.get(stage.get("role") or "", "inline")
-        # apply select as temporary override
+        # apply select as an ephemeral, per-call override — never mutate global runtime state
         ov = {k: sel[k] for k in ("model", "maker", "tier", "strategy", "max_cost") if sel.get(k)}
-        if ov:
-            apply_runtime_update({"role_overrides": {role: ov}})
-        pick = pick_model_for_role(snapshot, role, need_override=list(needs))
+        pick = pick_model_for_role(
+            snapshot, role, need_override=list(needs), role_override=ov or None
+        )
         return {
             "stage_id": stage.get("id"),
             "role": stage.get("role"),

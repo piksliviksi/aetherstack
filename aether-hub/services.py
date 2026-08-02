@@ -1988,6 +1988,25 @@ _EVIDENCE_RE = re.compile(
     r"\b(?:observed|evidence|result|output|source|assumption|inference|reproduced|tested|line|symbol|function|class)\b)",
     re.IGNORECASE,
 )
+_LINE_CITATION_RE = re.compile(
+    r"(?P<path>[\w./\\-]+\.(?:py|js|ts|html|css|yaml|yml|json|md|sh|go|rs|java|cpp|h))"
+    r"[,:\s]*\bline\s+\d+",
+    re.IGNORECASE,
+)
+
+
+def _has_verifiable_citation(text: str) -> bool:
+    """A "path.py line N"-style claim must point at a real file; an illustrative or
+    plain evidence-shaped mention (no specific line claim) is left to the broader check."""
+    fabricated = False
+    for match in _LINE_CITATION_RE.finditer(text):
+        candidate = match.group("path").strip("/\\.,;:()[]{}\"'")
+        if not candidate:
+            continue
+        if (ROOT / candidate).exists() or (ROOT.parent / candidate).exists() or Path(candidate).exists():
+            return True
+        fabricated = True
+    return not fabricated
 _COMPLETED_WORK_RE = re.compile(
     r"\b(?:observed|found|checked|verified|ran|tested|reproduced|shows?|contains?|fails?|passes?|line\s+\d+)\b",
     re.IGNORECASE,
@@ -2019,6 +2038,8 @@ def worker_output_needs_correction(content: Any) -> bool:
     if len(text) < 120:
         return True
     if not _EVIDENCE_RE.search(text):
+        return True
+    if not _has_verifiable_citation(text):
         return True
     if _INTENT_ONLY_RE.search(text) and "\n" not in text:
         return True

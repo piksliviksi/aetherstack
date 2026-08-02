@@ -552,6 +552,7 @@ function createCliBridge(options = {}) {
   return {
     token,
     get port() { return port; },
+    get host() { return server ? server.address().address : null; },
     async start() {
       if (server) return { port, reused: false };
       server = http.createServer((request, response) => { handler(request, response); });
@@ -560,9 +561,10 @@ function createCliBridge(options = {}) {
           if (error && error.code === "EADDRINUSE") resolve(true);
           else reject(error);
         });
-      // Docker Desktop reaches this host port through host.docker.internal.
-      // Every route still requires the random SecretStorage-backed bearer token.
-      server.listen(port, options.host || "0.0.0.0", () => resolve(false));
+      // Default to loopback-only. Callers that need Docker Desktop's
+      // host.docker.internal reachability (e.g. scripts/cli-bridge-daemon.js)
+      // must opt in explicitly by passing host: "0.0.0.0" themselves.
+      server.listen(port, options.host || "127.0.0.1", () => resolve(false));
       });
       if (reused) {
         server = null;

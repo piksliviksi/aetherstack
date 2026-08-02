@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.19
+
+- **Auto preset now has an editable model-order chain** with `sequential_exhaustion`/`per_request` continuation modes, wired end-to-end through the Hub API and VS Code Control Center.
+- **Worker and graph-stage output now requires concrete evidence** before it's accepted, with one correction pass before an intent-only response is rejected; analysis/review requests enable a critic by default. The evidence check now also rejects fabricated file-and-line citations (a claimed `path.py line N` that doesn't exist) instead of accepting any evidence-shaped wording.
+- **Multi-user work packets**: adds `aether-hub/work_packet.py` and `docs/MULTI-USER.md` for coordinating parallel worker claims without silent overwrites.
+- **Fixed a cross-session model-routing leak**: a graph stage's fallback model pin no longer mutates process-global runtime state, so it can no longer bleed into other concurrent or later sessions on the same Hub.
+- **Fixed silent prompt corruption on large multi-stage graphs**: upstream stage output is now joined block-by-block so truncation can no longer cut through a `[stage-id]` header mid-block.
+- **CLI bridge now binds to loopback (`127.0.0.1`) by default** instead of all interfaces; Docker Desktop reachability remains an explicit opt-in for the callers that need it.
+- Unifies native VS Code Chat and the webview on one bounded service-request builder, hardens bundled CLI discovery (manifest/symlink checks), and removes the unused activity-word feature.
+
 ## 0.3.18
 
 - Fix portable system scans failing on lowercase JSON booleans interpolated into Python source.

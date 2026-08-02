@@ -44,6 +44,30 @@ def _emit(on_status: Callable[[dict[str, Any]], None] | None, phase: str, **fiel
         pass
 
 
+def _join_upstream_blocks(blocks: list[tuple[str, str]]) -> str:
+    """Join `[id]\\ncontent` blocks within MAX_STAGE_OUTPUT_CHARS without cutting a block in half.
+
+    Keeps the most recent blocks whole (headers intact); only the oldest included
+    block's content may be truncated (from the front, keeping its tail) to fit.
+    """
+    kept: list[str] = []
+    remaining = MAX_STAGE_OUTPUT_CHARS
+    for outputs_id, content in reversed(blocks):
+        block = f"[{outputs_id}]\n{content}"
+        separator = 2 if kept else 0  # "\n\n" between this block and the next
+        if len(block) + separator <= remaining:
+            kept.append(block)
+            remaining -= len(block) + separator
+            continue
+        header = f"[{outputs_id}]\n"
+        budget = remaining - separator - len(header)
+        if budget > 0:
+            kept.append(header + content[-budget:])
+        break
+    kept.reverse()
+    return "\n\n".join(kept)
+
+
 def _memory_reads(
     memory: MemoryStore | None,
     memory_ops: list[dict[str, Any]],
@@ -213,11 +237,13 @@ def execute_graph(
             index=index,
             total=len(stages),
         )
-        upstream = "\n\n".join(
-            f"[{outputs_id}]\n{outputs[outputs_id]}"
-            for outputs_id in (stage.get("inputs_from") or [])
-            if outputs_id in outputs
-        )[-MAX_STAGE_OUTPUT_CHARS:]
+        upstream = _join_upstream_blocks(
+            [
+                (outputs_id, outputs[outputs_id])
+                for outputs_id in (stage.get("inputs_from") or [])
+                if outputs_id in outputs
+            ]
+        )
         messages = _stage_messages(stage, goal, context, upstream)
         call = {
             "model": model,

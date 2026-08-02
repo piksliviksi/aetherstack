@@ -42,7 +42,7 @@ services:
       - WEBUI_AUTH=true
       - WEBUI_AUTH_TRUSTED_EMAIL_HEADER=X-AetherStack-Email
       - WEBUI_AUTH_TRUSTED_NAME_HEADER=X-AetherStack-Name
-      - CORS_ALLOW_ORIGIN=${CORS_ALLOW_ORIGIN:-http://127.0.0.1:3000}
+      - CORS_ALLOW_ORIGIN=${CORS_ALLOW_ORIGIN:-http://127.0.0.1:3000;http://localhost:3000}
       # Never place auth responses, profile data, or chats in browser/proxy caches.
       - CACHE_CONTROL=no-cache, no-store, must-revalidate, max-age=0
       - WEBUI_SESSION_COOKIE_SAME_SITE=strict
@@ -130,7 +130,7 @@ services:
       - AETHER_HUB_HOST=0.0.0.0
       - AETHER_PUBLIC_BIND_HOST=${AETHER_BIND_HOST:-127.0.0.1}
       - AETHER_HUB_PORT=8766
-      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.18}
+      - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.19}
       - AETHERSTACK_REVISION=${AETHERSTACK_REVISION:-}
       - AETHER_UPDATE_DIR=/host-aetherstack/updates
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}

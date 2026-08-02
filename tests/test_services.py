@@ -230,6 +230,14 @@ class DynamicServiceTests(unittest.TestCase):
             )
         )
 
+    def test_fabricated_file_citation_is_rejected(self) -> None:
+        self.assertTrue(
+            services.worker_output_needs_correction(
+                "I verified this in nonexistent_file.py line 42, evidence: output matches "
+                "the expected result and the function returns success after careful testing."
+            )
+        )
+
     def test_worker_is_removed_after_two_intent_only_responses(self) -> None:
         def completion(call: dict, messages: list[dict] | None = None) -> dict:
             if call.get("role") == "worker":

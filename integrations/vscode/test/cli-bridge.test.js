@@ -50,6 +50,21 @@ test("bridge requires its bearer token and exposes OpenAI-compatible completions
   }
 });
 
+test("default bind is loopback-only when no host is given", async () => {
+  const bridge = createCliBridge({
+    token: "loopback-default-token",
+    port: 0,
+    resolver,
+    runner,
+  });
+  const state = await bridge.start();
+  try {
+    assert.equal(bridge.host, "127.0.0.1");
+  } finally {
+    bridge.stop();
+  }
+});
+
 test("bridge quarantines a provider after a terminal account failure", async () => {
   const bridge = createCliBridge({
     token: "quarantine-token",
