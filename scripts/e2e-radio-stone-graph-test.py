@@ -12,6 +12,7 @@ E2E exercise of node graph + memory tiers + inference on:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -20,7 +21,9 @@ from pathlib import Path
 
 HUB = "http://127.0.0.1:8766"
 LITELLM = "http://127.0.0.1:4000/v1"
-API_KEY = "sk-aether-local"
+API_KEY = os.environ.get("LITELLM_MASTER_KEY", "")
+if not API_KEY:
+    raise RuntimeError("LITELLM_MASTER_KEY is required")
 GRAPH_ID = "test-radio-stone"
 PROJECT_ID = "lab-rf-stone"
 SESSION_ID = "vscode-chat-radio-stone"

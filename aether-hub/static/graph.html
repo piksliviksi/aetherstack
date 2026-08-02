@@ -149,6 +149,12 @@
     <button type="button" id="btnFromPipe">From pipeline…</button>
     <button type="button" id="btnSave">Save</button>
     <button type="button" id="btnPlan">Plan models</button>
+    <input id="runGoal" type="text" placeholder="Goal for this workflow" style="width:min(320px,24vw)" />
+    <button type="button" class="primary" id="btnRun">Run workflow</button>
+    <select id="autoSequenceMode" title="How Auto advances through its model order" hidden>
+      <option value="sequential_exhaustion">Sequential until limit</option>
+      <option value="per_request">Start from first model each request</option>
+    </select>
     <button type="button" id="btnCenter">Center tree</button>
     <button type="button" id="btnToPipe">Export pipeline JSON</button>
     <label class="chk" title="Allow cycles, feedback edges, and wiring Output back into earlier nodes">
@@ -174,9 +180,9 @@
     </div>
   </div>
   <div id="helpModal" hidden>
-    <div id="helpCard">
+    <div id="helpCard" role="dialog" aria-modal="true" aria-labelledby="helpTitle" tabindex="-1">
       <div id="helpHead">
-        <strong>Node graph editor — how it works</strong>
+        <strong id="helpTitle">Node graph editor — how it works</strong>
         <button type="button" id="btnHelpClose" aria-label="Close">✕</button>
       </div>
       <div id="helpBody">
@@ -235,6 +241,21 @@
   </div>
   <div id="toast"></div>
   <script>
+const fragmentParams = new URLSearchParams(location.hash.slice(1));
+const fragmentToken = fragmentParams.get("workspaceToken");
+if (fragmentToken) {
+  try { sessionStorage.setItem("aetherstack.workspaceToken", fragmentToken); } catch {}
+  history.replaceState(null, "", location.pathname + location.search);
+}
+const workspaceToken = fragmentToken || (() => {
+  try { return sessionStorage.getItem("aetherstack.workspaceToken") || ""; } catch { return ""; }
+})();
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+  const headers = new Headers(init.headers || {});
+  if (workspaceToken) headers.set("X-AetherStack-Workspace-Token", workspaceToken);
+  return nativeFetch(input, { ...init, headers });
+};
 const TYPES = {
   goal: { label: "Goal", color: "#8f918d", description: "Defines the objective and input passed into the agent tree.", passThrough: false },
   master: { label: "Lead agent", color: "#d6b36a", description: "Plans the work, delegates tasks, and owns the final direction.", passThrough: false },
@@ -248,7 +269,7 @@ const TYPES = {
     passThrough: false,
   },
   memory: { label: "Memory", color: "#978292", description: "Three-tier context pool: tree / project / global. Pass-through context node.", passThrough: true },
-  route: { label: "Model route", color: "#e0a458", description: "One candidate in the lead's real fallback chain — first available, in wiring order, wins. Reorder or rewire these and save to change auto-selection.", passThrough: false },
+  route: { label: "Model route", color: "#e0a458", description: "One candidate in a fallback chain. Reorder or rewire these and save to change selection priority.", passThrough: true },
   slash: { label: "Command", color: "#858784", description: "Slash hygiene commands. Pass-through utility node.", passThrough: true },
   output: { label: "Output", color: "#686b69", description: "Collects results (many inputs). Pass-through sink; recursive mode can feedback earlier.", passThrough: true },
 };
@@ -277,6 +298,7 @@ const PASS_THROUGH_TYPES = new Set(
 const DRAFT_DATA_KEYS = new Set([
   "label", "text", "role", "agent_ref", "model", "provider", "backend", "tier", "strategy",
   "needs", "available", "service_id", "maker", "max_cost", "parallel", "gate", "ack",
+  "workspace_write",
   "purpose", "commands", "namespace", "action", "scope", "project_id",
   "input_folder", "input_globs", "gpu_only", "private_vault",
   "instructions_md", "instructions_source", "edited_fields",
@@ -291,6 +313,16 @@ const MEMORY_ACTIONS = {
   store: "Store — record sequence output into this tier",
 };
 const liveChoices = { models: [], agents: [], roles: [] };
+const BEHAVIOR_PRESETS = {
+  research: ["Research", "Research the goal using concrete sources or repository evidence. Separate facts, inference, and uncertainty. Return cited findings, not search intent."],
+  planning: ["Plan", "Convert upstream research into an executable plan with dependencies, risks, acceptance criteria, and verification commands."],
+  ui: ["UX/UI", "Turn upstream requirements into implementable responsive flows and component states. Cover accessibility, loading, empty, error, and success states."],
+  critic: ["Critic", "Challenge upstream output. Identify unsupported claims, weak decisions, regressions, and missing tests. Rank issues and prescribe exact corrections."],
+  coding: ["Coding", "Implement the approved plan in the actual project. Follow existing conventions, keep scope bounded, and report changed files plus verification evidence."],
+  testing: ["Testing", "Run or design observable unit, integration, boundary, and regression checks. Report exact commands, pass/fail output, and untested assumptions."],
+  bugfixing: ["Bug fixing", "Use failing evidence to isolate root cause, apply the smallest repair, and add a regression test. Do not patch symptoms."],
+  security: ["White-hat security", "Within explicit authorization, perform bounded non-destructive checks. Return reproducible findings, severity, remediation, and regression tests."],
+};
 
 const palette = document.getElementById("paletteTypes");
 const nodesEl = document.getElementById("nodes");
@@ -307,6 +339,13 @@ Object.keys(TYPES).forEach(t => {
   d.setAttribute("aria-label", `${TYPES[t].label}: ${TYPES[t].description}`);
   d.draggable = true;
   d.addEventListener("dragstart", e => e.dataTransfer.setData("type", t));
+  d.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    const r = canvasWrap.getBoundingClientRect();
+    addNode(t, r.width / 2 - camera.x - 70, r.height / 2 - camera.y - 20);
+    toast(`Added ${TYPES[t].label}`);
+  });
   palette.appendChild(d);
 });
 
@@ -514,13 +553,14 @@ const FIELD_LABELS = {
   action: "Memory action", scope: "Memory tier", project_id: "Project id",
   input_folder: "Input folder (PDF / text)", input_globs: "File globs",
   gpu_only: "GPU only (local)", private_vault: "Private vault isolation",
+  workspace_write: "Allow workspace edits",
 };
 const INSPECTOR_FIELDS = {
   goal: ["label", "text"],
-  master: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "instructions_md"],
-  analyser: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "gate", "ack", "instructions_md"],
-  worker: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "instructions_md"],
-  tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "instructions_md"],
+  master: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "workspace_write", "instructions_md"],
+  analyser: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "gate", "ack", "workspace_write", "instructions_md"],
+  worker: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "workspace_write", "instructions_md"],
+  tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "workspace_write", "instructions_md"],
   private: ["label", "model", "input_folder", "input_globs", "gpu_only", "private_vault", "instructions_md"],
   memory: ["label", "scope", "action", "project_id", "namespace"],
   route: ["label", "model", "tier"],
@@ -567,6 +607,7 @@ function select(id) {
   const isPrivate = n.type === "private";
   if (isAgentNode) {
     html += `<label>Available agent preset<br/><select id="inspectorAgent">${agentOptions(d)}</select></label>`;
+    html += `<label>Stage behavior<br/><select id="behaviorPreset"><option value="">Custom</option>${Object.entries(BEHAVIOR_PRESETS).map(([key, value]) => option(key, value[0], "")).join("")}</select></label>`;
     html += `<label>Load behavior profile (.md)<br/><input id="agentMdFile" type="file" accept=".md,text/markdown,text/plain"/></label>`;
     html += `<div class="md-actions"><button type="button" id="clearAgentMd">Clear profile</button></div>`;
     if (d.instructions_source) html += `<div class="muted" style="margin-top:.3rem">Loaded: ${esc(d.instructions_source)}</div>`;
@@ -581,8 +622,9 @@ function select(id) {
   fields.forEach(k => {
     const v = d[k];
     const label = FIELD_LABELS[k] || k;
-    if (typeof v === "boolean" || k === "gate" || k === "ack" || k === "gpu_only" || k === "private_vault") {
+    if (typeof v === "boolean" || k === "gate" || k === "ack" || k === "gpu_only" || k === "private_vault" || k === "workspace_write") {
       html += `<label>${esc(label)}<br/><input type="checkbox" data-k="${esc(k)}" ${v?"checked":""}/></label>`;
+      if (k === "workspace_write") html += `<div class="node-help">Opt in only for implementation stages. The selected host CLI may modify files in the open VS Code workspace.</div>`;
     } else if (k === "model" && (isAgentNode || isPrivate || n.type === "route")) {
       html += `<label>${esc(label)}<br/><select data-k="model">${modelOptions(v)}</select></label>`;
       if (isPrivate) html += `<div class="node-help">Prefer a local GPU-backed alias (e.g. local-default).</div>`;
@@ -640,6 +682,16 @@ function select(id) {
       service_id: agent.service_id, model_explicit: true,
     });
     n.data.edited_fields = ["model", "needs", "strategy", "tier"];
+    saveGraphLayout();
+    select(n.id);
+  });
+  document.getElementById("behaviorPreset")?.addEventListener("change", event => {
+    const preset = BEHAVIOR_PRESETS[event.target.value];
+    if (!preset) return;
+    n.data.label = preset[0];
+    n.data.role = event.target.value;
+    n.data.instructions_md = preset[1];
+    n.data.edited_fields = [...new Set([...(n.data.edited_fields || []), "role", "instructions_md"] )];
     saveGraphLayout();
     select(n.id);
   });
@@ -1091,16 +1143,30 @@ document.getElementById("btnDel").onclick = () => {
   document.getElementById("insp").textContent = "Select a node";
 };
 
+let serviceGraphRequest = 0;
 async function loadServiceGraph(serviceId, announce = true, persistCurrent = true) {
+  const requestId = ++serviceGraphRequest;
   const id = serviceId || "active";
   if (persistCurrent) saveGraphLayout();
-  const response = await fetch(`/api/services/${encodeURIComponent(id)}/graph`);
-  const body = await response.json();
+  let response;
+  let body;
+  try {
+    response = await fetch(`/api/services/${encodeURIComponent(id)}/graph`);
+    body = await response.json();
+  } catch (error) {
+    if (requestId === serviceGraphRequest) toast(`Cannot load ${id}: ${error.message || error}`);
+    return;
+  }
+  if (requestId !== serviceGraphRequest) return;
   if (!response.ok || body.error) { toast(body.error || `Cannot load ${id}`); return; }
   graph = body;
   graph.recursive = !!body.recursive;
   graph.max_iterations = body.max_iterations || 3;
   graph.edges = body.edges || [];
+  const sequenceMode = document.getElementById("autoSequenceMode");
+  sequenceMode.hidden = body.service_id !== "auto";
+  sequenceMode.value = body.sequence_mode || "sequential_exhaustion";
+  document.getElementById("btnRun").disabled = body.service_id === "auto";
   const restoredLayout = restoreGraphLayout();
   selected = (body.nodes || []).find(node => node.type === "master")?.id || null;
   selectedEdge = null;
@@ -1179,6 +1245,7 @@ document.getElementById("btnFromPipe").onclick = async () => {
 };
 
 document.getElementById("btnSave").onclick = async () => {
+  if (graph.service_id === "auto") graph.sequence_mode = document.getElementById("autoSequenceMode").value;
   if (graph.service_id) {
     const savedServiceId = graph.service_id;
     const j = await fetch(`/api/services/${encodeURIComponent(graph.service_id)}/graph`, {
@@ -1211,6 +1278,34 @@ document.getElementById("btnSave").onclick = async () => {
   if (j.id) graph.id = j.id;
   saveGraphLayout();
   toast("Saved " + (j.id || ""));
+};
+
+document.getElementById("autoSequenceMode").onchange = event => {
+  graph.sequence_mode = event.target.value;
+};
+
+document.getElementById("btnRun").onclick = async () => {
+  const goal = document.getElementById("runGoal").value.trim()
+    || (graph.nodes.find(node => node.type === "goal")?.data?.text || "").trim();
+  if (!goal) { toast("Enter a workflow goal"); return; }
+  const button = document.getElementById("btnRun");
+  button.disabled = true;
+  document.getElementById("planOut").textContent = "on it..";
+  try {
+    const response = await fetch("/api/graphs/run", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ graph, goal, session_id: `graph-${graph.id}` }),
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
+    document.getElementById("planOut").textContent = result.answer || JSON.stringify(result, null, 2);
+    toast(`Workflow complete · ${result.stage_count || 0} stages`);
+  } catch (error) {
+    document.getElementById("planOut").textContent = error.message;
+    toast("Workflow failed");
+  } finally {
+    button.disabled = graph.service_id === "auto";
+  }
 };
 
 document.getElementById("btnPlan").onclick = async () => {
@@ -1296,10 +1391,34 @@ function applyStatusEvent(evt) {
 })();
 
 const helpModal = document.getElementById("helpModal");
-document.getElementById("btnHelp").onclick = () => { helpModal.hidden = false; };
-document.getElementById("btnHelpClose").onclick = () => { helpModal.hidden = true; };
-helpModal.addEventListener("click", (e) => { if (e.target === helpModal) helpModal.hidden = true; });
-window.addEventListener("keydown", (e) => { if (e.key === "Escape" && !helpModal.hidden) helpModal.hidden = true; });
+const helpCard = document.getElementById("helpCard");
+const helpBackground = [document.getElementById("toolbar"), document.getElementById("wrap")];
+let helpReturnFocus = null;
+function closeHelp() {
+  helpModal.hidden = true;
+  helpBackground.forEach(element => { element.inert = false; });
+  helpReturnFocus?.focus();
+}
+document.getElementById("btnHelp").onclick = () => {
+  helpReturnFocus = document.activeElement;
+  helpBackground.forEach(element => { element.inert = true; });
+  helpModal.hidden = false;
+  helpCard.focus();
+};
+document.getElementById("btnHelpClose").onclick = closeHelp;
+helpModal.addEventListener("click", (e) => { if (e.target === helpModal) closeHelp(); });
+window.addEventListener("keydown", (e) => {
+  if (helpModal.hidden) return;
+  if (e.key === "Escape") { e.preventDefault(); closeHelp(); return; }
+  if (e.key !== "Tab") return;
+  const focusable = [...helpCard.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+    .filter(element => !element.disabled && !element.hidden);
+  if (!focusable.length) { e.preventDefault(); helpCard.focus(); return; }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
   </script>
 </body>
 </html>

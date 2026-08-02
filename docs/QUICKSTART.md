@@ -24,7 +24,7 @@ cp .env.example .env
 # Set: LITELLM_MASTER_KEY, and provider keys as needed
 ```
 
-Example lab master key: `sk-aether-local` (`LITELLM_MASTER_KEY`).
+On first start, AetherStack generates `LITELLM_MASTER_KEY` in `.env`. There is no shared default key.
 
 ---
 
@@ -77,7 +77,7 @@ Model:     one alias (e.g. local-default, claude-sonnet-4)
 powershell -File scripts/list-models.ps1
 # Linux / macOS
 ./scripts/list-models.sh
-curl http://localhost:4000/v1/models -H "Authorization: Bearer sk-aether-local"
+curl http://localhost:4000/v1/models -H "Authorization: Bearer $LITELLM_MASTER_KEY"
 ```
 
 ---

@@ -48,7 +48,7 @@ Key: `aether:mem:session:{id}` (Redis list, default TTL 7 days).
 ```bash
 curl -s -X POST http://127.0.0.1:8766/api/memory/vectors \
   -H "Content-Type: application/json" \
-  -d '{"namespace":"project-alpha","text":"Auth uses sk-aether-local on localhost only","meta":{"kind":"security"}}'
+  -d '{"namespace":"project-alpha","text":"Auth uses the generated local gateway key","meta":{"kind":"security"}}'
 
 curl -s -X POST http://127.0.0.1:8766/api/memory/search \
   -H "Content-Type: application/json" \

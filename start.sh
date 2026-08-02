@@ -98,6 +98,20 @@ set_env_value() {
   mv "$tmp" .env
 }
 
+configured_master_key="${LITELLM_MASTER_KEY:-$(sed -n 's/^[[:space:]]*LITELLM_MASTER_KEY[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r' | sed "s/^[\"']//;s/[\"']$//")}"
+if [[ -z "$configured_master_key" || "$configured_master_key" == "sk-aether-local" ]]; then
+  if command -v openssl >/dev/null 2>&1; then
+    configured_master_key="sk-$(openssl rand -hex 32)"
+  elif command -v python3 >/dev/null 2>&1; then
+    configured_master_key="$(python3 -c 'import secrets; print("sk-" + secrets.token_hex(32))')"
+  else
+    configured_master_key="sk-$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+  fi
+  set_env_value "LITELLM_MASTER_KEY" "$configured_master_key"
+  yellow "  Generated a private local gateway key."
+fi
+export LITELLM_MASTER_KEY="$configured_master_key"
+
 port_is_available() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
@@ -381,13 +395,45 @@ TOTALS_FILE="$ROOT/.aetherstack/download-totals"
 # quietly if Node isn't installed rather than failing the whole stack start.
 CLI_BRIDGE_PID_FILE="$ROOT/.aetherstack/cli-bridge.pid"
 CLI_BRIDGE_LOG="$ROOT/.aetherstack/cli-bridge.log"
-if [[ -f "$CLI_BRIDGE_PID_FILE" ]]; then
-  old_bridge_pid="$(cat "$CLI_BRIDGE_PID_FILE" 2>/dev/null || true)"
-  if [[ -n "$old_bridge_pid" ]] && kill -0 "$old_bridge_pid" 2>/dev/null; then
-    kill "$old_bridge_pid" 2>/dev/null || true
+CLI_BRIDGE_SESSION_FILE="$ROOT/.aetherstack/cli-bridge.screen"
+stop_managed_cli_bridge() {
+  if [[ -f "$CLI_BRIDGE_SESSION_FILE" ]] && command -v screen >/dev/null 2>&1; then
+    old_session="$(cat "$CLI_BRIDGE_SESSION_FILE" 2>/dev/null || true)"
+    [[ -n "$old_session" ]] && screen -S "$old_session" -X quit >/dev/null 2>&1 || true
   fi
-  rm -f "$CLI_BRIDGE_PID_FILE"
-fi
+  if [[ -f "$CLI_BRIDGE_PID_FILE" ]]; then
+    old_bridge_pid="$(tr -dc '0-9' < "$CLI_BRIDGE_PID_FILE")"
+    if [[ "$old_bridge_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_bridge_pid" 2>/dev/null; then
+      kill "$old_bridge_pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$CLI_BRIDGE_PID_FILE" "$CLI_BRIDGE_SESSION_FILE"
+}
+start_managed_cli_bridge() {
+  : > "$CLI_BRIDGE_LOG"
+  if command -v screen >/dev/null 2>&1; then
+    cli_bridge_session="aether-cli-$AETHER_CLI_BRIDGE_PORT"
+    screen -S "$cli_bridge_session" -X quit >/dev/null 2>&1 || true
+    screen -dmS "$cli_bridge_session" env \
+      AETHER_CLI_BRIDGE_TOKEN="$AETHER_CLI_BRIDGE_TOKEN" \
+      AETHER_CLI_BRIDGE_PORT="$AETHER_CLI_BRIDGE_PORT" \
+      AETHER_STACK_ROOT="$ROOT" \
+      node "$ROOT/scripts/cli-bridge-daemon.js"
+    printf '%s\n' "$cli_bridge_session" > "$CLI_BRIDGE_SESSION_FILE"
+  else
+    AETHER_STACK_ROOT="$ROOT" nohup node "$ROOT/scripts/cli-bridge-daemon.js" \
+      </dev/null >"$CLI_BRIDGE_LOG" 2>&1 &
+    cli_bridge_pid=$!
+    echo "$cli_bridge_pid" > "$CLI_BRIDGE_PID_FILE"
+    disown "$cli_bridge_pid" 2>/dev/null || true
+  fi
+}
+cli_bridge_ready() {
+  curl -fsS --max-time 3 \
+    -H "Authorization: Bearer $AETHER_CLI_BRIDGE_TOKEN" \
+    "http://127.0.0.1:$AETHER_CLI_BRIDGE_PORT/health" >/dev/null 2>&1
+}
+stop_managed_cli_bridge
 if command -v node >/dev/null 2>&1; then
   cyan "  Detecting host CLI subscriptions (Codex, Claude Code, Grok)…"
   cli_bridge_port="$(select_cli_bridge_port)" || { red "  ERROR: no free loopback port for the host CLI bridge (tried 8767-8777)."; exit 1; }
@@ -397,10 +443,7 @@ if command -v node >/dev/null 2>&1; then
   export AETHER_CLI_BRIDGE_TOKEN="${AETHER_CLI_BRIDGE_TOKEN:-$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')}"
   export AETHER_CLI_BRIDGE_PORT="$cli_bridge_port"
   export AETHER_CLI_BRIDGE_URL="http://host.docker.internal:$cli_bridge_port"
-  AETHER_STACK_ROOT="$ROOT" nohup node "$ROOT/scripts/cli-bridge-daemon.js" >"$CLI_BRIDGE_LOG" 2>&1 &
-  cli_bridge_pid=$!
-  echo "$cli_bridge_pid" > "$CLI_BRIDGE_PID_FILE"
-  disown "$cli_bridge_pid" 2>/dev/null || true
+  start_managed_cli_bridge
   sleep 1
   if [[ -s "$CLI_BRIDGE_LOG" ]]; then sed 's/^/  /' "$CLI_BRIDGE_LOG"; fi
 else
@@ -465,17 +508,13 @@ for model in "${startup_models[@]}"; do
     if (( pull_status != 0 )); then red "  ERROR: failed to pull Ollama model $model"; exit 1; fi
   fi
 done
-if [[ -n "${AETHER_CLI_BRIDGE_TOKEN:-}" && -n "${AETHER_CLI_BRIDGE_PORT:-}" && -f "$CLI_BRIDGE_PID_FILE" ]]; then
-  cli_bridge_pid="$(cat "$CLI_BRIDGE_PID_FILE" 2>/dev/null || true)"
-  if [[ -z "$cli_bridge_pid" ]] || ! kill -0 "$cli_bridge_pid" 2>/dev/null; then
+if [[ -n "${AETHER_CLI_BRIDGE_TOKEN:-}" && -n "${AETHER_CLI_BRIDGE_PORT:-}" ]]; then
+  if ! cli_bridge_ready; then
     yellow "  Host CLI bridge stopped during startup; restarting it on port $AETHER_CLI_BRIDGE_PORT."
-    AETHER_STACK_ROOT="$ROOT" nohup node "$ROOT/scripts/cli-bridge-daemon.js" >"$CLI_BRIDGE_LOG" 2>&1 &
-    cli_bridge_pid=$!
-    echo "$cli_bridge_pid" > "$CLI_BRIDGE_PID_FILE"
-    disown "$cli_bridge_pid" 2>/dev/null || true
+    start_managed_cli_bridge
     sleep 1
     if [[ -s "$CLI_BRIDGE_LOG" ]]; then sed 's/^/  /' "$CLI_BRIDGE_LOG"; fi
-    if ! kill -0 "$cli_bridge_pid" 2>/dev/null; then
+    if ! cli_bridge_ready; then
       red "  ERROR: host CLI bridge failed to stay running; see $CLI_BRIDGE_LOG."
       exit 1
     fi
@@ -487,7 +526,7 @@ deadline=$((SECONDS + 120))
 pending=""
 while (( SECONDS < deadline )); do
   pending=""
-  curl -sf --max-time 3 http://127.0.0.1:3000/ >/dev/null || pending="$pending Open-WebUI"
+  curl -sf --max-time 3 http://127.0.0.1:3000/healthz >/dev/null || pending="$pending Open-WebUI"
   curl -sf --max-time 3 http://127.0.0.1:4000/health/liveliness >/dev/null || pending="$pending LiteLLM"
   curl -sf --max-time 3 http://127.0.0.1:8766/api/health >/dev/null || pending="$pending AetherHub"
   [[ -z "$pending" ]] && break

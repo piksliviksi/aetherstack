@@ -141,8 +141,8 @@ code --install-extension AetherStack.aetherstack
 4. Set env for Continue:
 
 ```bash
-# ~/.zshrc (restart Terminal + VS Code after)
-export AETHERSTACK_API_KEY=sk-aether-local
+# ~/.zshrc (restart Terminal + VS Code after); use LITELLM_MASTER_KEY from .env
+export AETHERSTACK_API_KEY='<generated-key>'
 ```
 
 Full guide: [VSCODE-EXTENSION.md](./VSCODE-EXTENSION.md)
@@ -163,7 +163,7 @@ Uses Python 3 on the Mac; install `psutil` if prompted (`pip3 install --user psu
 |-------|-----|
 | `Cannot connect to Docker` | Start Docker Desktop; wait until engine is ready |
 | Port 3000/4000 in use | Stop other apps or change ports in `docker-compose.yml` |
-| LiteLLM 401 | Use Bearer `LITELLM_MASTER_KEY` (default lab: `sk-aether-local`) |
+| LiteLLM 401 | Use the generated `LITELLM_MASTER_KEY` from `.env` as the Bearer token |
 | Ollama not seen from containers | Run Ollama app; check `http://127.0.0.1:11434`; compose uses `host.docker.internal` |
 | `./start.sh: Permission denied` | `chmod +x start.sh stop.sh` |
 | Apple Silicon image pull slow | First pull is large; keep Docker running |

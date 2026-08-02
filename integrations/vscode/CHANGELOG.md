@@ -184,7 +184,7 @@
 - Overview JSON/Markdown omit secrets
 - Recommend `AetherStack.aetherstack` (not old publisher id) in workspace `extensions.json`
 - Activity bar icon uses monochrome `currentColor` so it shows in the VS Code Activity Bar
-- README + package homepage link to the how-to guide: [VSCODE-EXTENSION.md](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)
+- README and package guidance for the VS Code extension.
 
 ## 0.1.0
 

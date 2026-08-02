@@ -6,12 +6,14 @@ import html as html_lib
 import json
 import os
 import queue
+import secrets
 import sys
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
@@ -43,6 +45,7 @@ from combos import (  # noqa: E402
 )
 from services import (  # noqa: E402
     activate_service,
+    build_auto_graph,
     build_service_graph,
     classify_service,
     default_service_id,
@@ -52,12 +55,12 @@ from services import (  # noqa: E402
     list_services,
     plan_service,
     save_service_graph,
+    save_auto_graph,
     set_auto_order,
 )
 from first_run import reset as first_run_reset  # noqa: E402
 from first_run import run as first_run_run  # noqa: E402
 from first_run import status as first_run_status  # noqa: E402
-from activity_words import add_word, delete_word, list_words  # noqa: E402
 from update import stage_update, update_status  # noqa: E402
 from discover import full_discover, print_report_text  # noqa: E402
 from matrix import (  # noqa: E402
@@ -81,7 +84,7 @@ from graph import (  # noqa: E402
     plan_graph,
     save_graph,
 )
-from graph_exec import execute_graph  # noqa: E402
+from graph_exec import GraphExecutionError, execute_graph  # noqa: E402
 from pipelines import (  # noqa: E402
     export_pipeline,
     get_pipeline,
@@ -140,15 +143,52 @@ except ImportError:
 
 HOST = os.environ.get("AETHER_HUB_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AETHER_HUB_PORT", "8766"))
+PUBLIC_BIND_HOST = os.environ.get("AETHER_PUBLIC_BIND_HOST", "127.0.0.1").strip().lower()
+WORKSPACE_WRITE_TOKEN = os.environ.get("LITELLM_MASTER_KEY", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 SYNC_INTERVAL = int(os.environ.get("AETHER_MATRIX_SYNC_SEC", "60"))
 MAX_JSON_BODY = int(os.environ.get("AETHER_MAX_JSON_BODY", str(12 * 1024 * 1024)))
 MAX_INFERENCE_STATUS_BYTES = 64 * 1024
+try:
+    MAX_REQUEST_THREADS = max(8, min(512, int(os.environ.get("AETHER_MAX_REQUEST_THREADS", "64"))))
+except ValueError:
+    MAX_REQUEST_THREADS = 64
 CORS_ORIGINS = {
     item.strip().rstrip("/")
     for item in os.environ.get("AETHER_CORS_ORIGINS", "").split(",")
     if item.strip()
 }
+
+_ERROR_CODES = {
+    400: "invalid_request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    409: "conflict",
+    413: "request_too_large",
+    415: "unsupported_media_type",
+    429: "rate_limited",
+    500: "internal_error",
+    502: "upstream_error",
+    503: "service_unavailable",
+    504: "upstream_timeout",
+}
+
+
+def _public_error_payload(status: int, value: Any, request_id: str) -> Any:
+    """Attach stable recovery metadata and keep internal failures out of clients."""
+    if not isinstance(value, dict) or not isinstance(value.get("error"), str):
+        return value
+    result = dict(value)
+    result.setdefault("code", _ERROR_CODES.get(status, "request_failed"))
+    result.setdefault("request_id", request_id)
+    if status >= 500:
+        result["error"] = {
+            502: "An upstream model or service failed.",
+            503: "A required AetherStack service is unavailable.",
+            504: "An upstream model or service timed out.",
+        }.get(status, "AetherStack could not complete the request.")
+    return result
 
 
 def _request_origin_allowed(origin: str | None, host: str) -> bool:
@@ -161,6 +201,14 @@ def _request_origin_allowed(origin: str | None, host: str) -> bool:
         parsed.scheme in ("http", "https")
         and (parsed.netloc == host or normalized in CORS_ORIGINS)
     )
+
+
+def _validate_public_binding(host: str = PUBLIC_BIND_HOST) -> None:
+    normalized = host.strip().lower().strip("[]")
+    if normalized not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError(
+            "Aether Hub cannot be published beyond loopback until authenticated control-plane APIs are enabled"
+        )
 
 _state_lock = threading.Lock()
 _snapshot: dict = {}
@@ -176,6 +224,26 @@ _memory = MemoryStore(REDIS_URL)
 # the matching node in real time, without a second parallel status mechanism.
 _stage_lock = threading.Lock()
 _stage_subscribers: list["queue.Queue"] = []
+_sync_health_lock = threading.Lock()
+_sync_health: dict[str, Any] = {
+    "last_cycle": None,
+    "last_success": None,
+    "last_error": None,
+    "redis_ok": None,
+}
+
+
+def _update_sync_health(**changes: Any) -> None:
+    with _sync_health_lock:
+        _sync_health.update(changes)
+
+
+def _get_sync_health() -> dict[str, Any]:
+    with _sync_health_lock:
+        value = dict(_sync_health)
+    last_cycle = value.get("last_cycle")
+    value["stale"] = bool(last_cycle and time.time() - float(last_cycle) > max(45, SYNC_INTERVAL * 3))
+    return value
 
 
 def _stage_subscribe() -> "queue.Queue":
@@ -377,8 +445,10 @@ def refresh_snapshot() -> dict:
         try:
             r.set(key, json.dumps(snap, default=str), ex=SYNC_INTERVAL * 5)
             r.set("aether:matrix:ts", str(snap.get("ts")), ex=SYNC_INTERVAL * 5)
-        except Exception:
-            pass
+            _update_sync_health(redis_ok=True)
+        except Exception as exc:
+            _update_sync_health(redis_ok=False, last_error=f"redis snapshot publish failed: {exc}"[:500])
+            sys.stderr.write(f"[hub] redis snapshot publish error: {exc}\n")
     return snap
 
 
@@ -398,22 +468,50 @@ def get_discover() -> dict:
 
 def _bg_sync():
     while True:
+        cycle_error = None
         try:
             refresh_snapshot()
         except Exception as e:
+            cycle_error = f"matrix sync failed: {e}"[:500]
             sys.stderr.write(f"[hub] sync error: {e}\n")
         try:
             run_auto_if_due(_memory)
         except Exception as e:
+            cycle_error = f"backup scheduler failed: {e}"[:500]
             sys.stderr.write(f"[hub] backup auto error: {e}\n")
+        now = time.time()
+        health = _get_sync_health()
+        reported_error = cycle_error
+        if reported_error is None and health.get("redis_ok") is False:
+            reported_error = health.get("last_error") or "redis snapshot publish failed"
+        _update_sync_health(
+            last_cycle=now,
+            last_success=now if reported_error is None else health.get("last_success"),
+            last_error=reported_error,
+        )
         time.sleep(max(15, SYNC_INTERVAL))
 
 
 class Handler(BaseHTTPRequestHandler):
+    def setup(self) -> None:
+        super().setup()
+        self.request_id = uuid.uuid4().hex[:16]
+
     def log_message(self, fmt: str, *args) -> None:
-        sys.stderr.write("[hub] " + (fmt % args) + "\n")
+        sys.stderr.write(f"[hub] request_id={self.request_id} " + (fmt % args) + "\n")
+
+    def _workspace_write_authorized(self) -> bool:
+        supplied = self.headers.get("X-AetherStack-Workspace-Token", "")
+        return bool(WORKSPACE_WRITE_TOKEN and supplied) and secrets.compare_digest(
+            supplied, WORKSPACE_WRITE_TOKEN
+        )
 
     def _send(self, code: int, obj, content_type: str = "application/json; charset=utf-8") -> None:
+        if code >= 500 and isinstance(obj, dict) and isinstance(obj.get("error"), str):
+            sys.stderr.write(
+                f"[hub] request_id={self.request_id} status={code} internal_error={obj['error'][:1000]}\n"
+            )
+        obj = _public_error_payload(code, obj, self.request_id)
         if isinstance(obj, (dict, list)):
             body = json.dumps(obj, default=str, indent=2).encode("utf-8")
         elif isinstance(obj, bytes):
@@ -421,6 +519,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             body = str(obj).encode("utf-8")
         self.send_response(code)
+        self.send_header("X-AetherStack-Request-ID", self.request_id)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         origin = self.headers.get("Origin")
@@ -433,6 +532,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_sse_start(self) -> None:
         self.send_response(200)
+        self.send_header("X-AetherStack-Request-ID", self.request_id)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
@@ -533,6 +633,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/health":
             d = get_discover()
+            models = get_snapshot().get("models") or {}
+            routable_models = [
+                alias
+                for alias, meta in models.items()
+                if meta.get("available") and "chat" in (meta.get("capabilities") or [])
+            ]
             self._send(
                 200,
                 {
@@ -553,7 +659,12 @@ class Handler(BaseHTTPRequestHandler):
                         "local_dir": get_backup_status().get("default_local_dir"),
                     },
                     "matrix_ts": get_snapshot().get("ts"),
+                    "process_up": True,
+                    "inference_ready": bool(routable_models),
+                    "routable_model_count": len(routable_models),
+                    "local_fallback_ready": "local-default" in routable_models,
                     "discover": d.get("summary"),
+                    "background_sync": _get_sync_health(),
                 },
             )
             return
@@ -634,9 +745,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/graph"):
             service_id = path[len("/api/services/") : -len("/graph")].strip("/")
             if service_id == "active":
-                service_id = get_runtime().get("service") or default_service_id()
+                service_id = get_runtime().get("service") or "auto"
             try:
-                self._send(200, build_service_graph(service_id, get_snapshot()))
+                self._send(200, build_auto_graph(get_snapshot()) if service_id == "auto" else build_service_graph(service_id, get_snapshot()))
             except ValueError as e:
                 self._send(404, {"error": str(e)})
             return
@@ -659,9 +770,6 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             finally:
                 _stage_unsubscribe(q)
-            return
-        if path == "/api/activity-words":
-            self._send(200, list_words())
             return
         if path in ("/api/update", "/api/updates"):
             self._send(200, update_status())
@@ -960,9 +1068,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/graph"):
             service_id = path[len("/api/services/") : -len("/graph")].strip("/")
             if service_id == "active":
-                service_id = get_runtime().get("service") or default_service_id()
+                service_id = get_runtime().get("service") or "auto"
             try:
-                self._send(200, save_service_graph(service_id, body or {}))
+                self._send(200, save_auto_graph(body or {}) if service_id == "auto" else save_service_graph(service_id, body or {}))
             except ValueError as e:
                 self._send(400, {"error": str(e)})
             except Exception as e:
@@ -1016,6 +1124,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, {"error": "graph or graph_id is required"})
                 return
             try:
+                body["_workspace_write_authorized"] = self._workspace_write_authorized()
                 self._send(
                     200,
                     execute_graph(
@@ -1028,6 +1137,10 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except ValueError as e:
                 self._send(400, {"error": str(e)})
+            except PermissionError as e:
+                self._send(403, {"error": str(e), "code": "workspace_write_unauthorized"})
+            except GraphExecutionError as e:
+                self._send(502, {"ok": False, "error": str(e), "steps": e.steps})
             except Exception as e:
                 self._send(502, {"error": f"graph execution failed: {str(e)[:500]}"})
             return
@@ -1082,7 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/auto/chain":
             try:
-                set_auto_order((body or {}).get("order") or [])
+                set_auto_order((body or {}).get("order") or [], (body or {}).get("sequence_mode"))
                 self._send(200, describe_auto_mode(get_snapshot()))
             except ValueError as e:
                 self._send(400, {"error": str(e)})
@@ -1208,12 +1321,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, {"error": str(e)})
             return
-        if path == "/api/activity-words":
-            try:
-                self._send(201, {"ok": True, "word": add_word(body or {})})
-            except ValueError as e:
-                self._send(400, {"error": str(e)})
-            return
         if path in ("/api/update/stage", "/api/updates/stage"):
             try:
                 self._send(200, stage_update())
@@ -1268,6 +1375,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/services/") and path.endswith("/run"):
             service_id = path[len("/api/services/") : -len("/run")].strip("/")
             try:
+                body["_workspace_write_authorized"] = self._workspace_write_authorized()
                 sid = body.get("session_id") or body.get("session")
                 if service_id == "auto":
                     result = execute_auto(
@@ -1288,6 +1396,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, result)
             except ValueError as e:
                 self._send(400, {"error": str(e)})
+            except PermissionError as e:
+                self._send(403, {"error": str(e), "code": "workspace_write_unauthorized"})
             except Exception as e:
                 self._send(502, {"error": f"service execution failed: {str(e)[:500]}"})
             return
@@ -1296,6 +1406,7 @@ class Handler(BaseHTTPRequestHandler):
             run_id = str(body.get("run_id") or uuid.uuid4().hex)
             self._send_sse_start()
             try:
+                body["_workspace_write_authorized"] = self._workspace_write_authorized()
                 def on_delta(chunk_text: str) -> None:
                     self._send_sse_event({"type": "delta", "text": chunk_text})
 
@@ -1335,9 +1446,33 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 self._send_sse_event({"type": "done", "result": result})
             except ValueError as e:
-                self._send_sse_event_safe({"type": "error", "error": str(e)})
+                self._send_sse_event_safe(
+                    {
+                        "type": "error",
+                        "error": str(e),
+                        "code": "invalid_request",
+                        "request_id": self.request_id,
+                    }
+                )
+            except PermissionError as e:
+                self._send_sse_event_safe(
+                    {
+                        "type": "error",
+                        "error": str(e),
+                        "code": "workspace_write_unauthorized",
+                        "request_id": self.request_id,
+                    }
+                )
             except Exception as e:
-                self._send_sse_event_safe({"type": "error", "error": f"service execution failed: {str(e)[:500]}"})
+                sys.stderr.write(f"[hub] request_id={self.request_id} stream_error={str(e)[:1000]}\n")
+                self._send_sse_event_safe(
+                    {
+                        "type": "error",
+                        "error": "AetherStack could not complete the streamed request.",
+                        "code": "upstream_error",
+                        "request_id": self.request_id,
+                    }
+                )
             return
         if path.startswith("/api/combos/") and path.endswith("/launch"):
             cid = path[len("/api/combos/") : -len("/launch")].strip("/")
@@ -1636,13 +1771,6 @@ class Handler(BaseHTTPRequestHandler):
             _memory.clear_session(sid)
             self._send(200, {"ok": True, "cleared": sid})
             return
-        if path.startswith("/api/activity-words/"):
-            word_id = path[len("/api/activity-words/") :].strip("/")
-            try:
-                self._send(200, delete_word(word_id))
-            except ValueError as e:
-                self._send(404, {"error": str(e)})
-            return
         self._send(404, {"error": "not found"})
 
 
@@ -1661,7 +1789,6 @@ def _paths() -> list[str]:
         "GET  /api/services/{id|active}/graph ← editable resolved preset tree",
         "POST /api/services/{id|active}/graph ← save node edits back into service_catalog.yaml",
         "GET  /api/events/stream     ← SSE: live lead/worker/review/memory phase updates for any running preset",
-        "GET|POST|DELETE /api/activity-words  ← editable inference activity text",
         "GET  /api/update            ← check upstream",
         "POST /api/update/stage      ← download without applying",
         "POST /api/agents/plan       ← multi-LLM event plan",
@@ -2072,47 +2199,6 @@ function setSaver(v){{ postModes({{token_saver:v}}); }}
 function setPreset(p){{ postModes({{preset:p}}); }}
 refreshModes();
 </script>
-<div class="card" id="activityWordsCard">
- <b>Inference activity wording</b>
- <div class="muted">Local editable database used by AetherStack Chat while models are working. Mild-vulgar entries are labelled and can be removed.</div>
- <div id="activityWords" style="display:grid;gap:.3rem;margin:.6rem 0"></div>
- <div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center">
-  <input id="activityText" type="text" maxlength="160" placeholder="Add an activity line…" style="flex:1;min-width:220px;background:#0b1020;border:1px solid #243056;color:#e8eefc;padding:.3rem .5rem;border-radius:6px" />
-  <select id="activityLanguage"><option value="en">English</option><option value="et">Estonian</option><option value="uk">Ukrainian</option></select>
-  <select id="activityTone"><option value="playful">playful</option><option value="neutral">neutral</option><option value="mild-vulgar">mild-vulgar</option></select>
-  <button type="button" onclick="addActivityWord()">add</button>
- </div>
- <div class="muted" id="activityWordsStatus"></div>
-</div>
-<script>
-async function refreshActivityWords(){{
-  const status=document.getElementById('activityWordsStatus');
-  try{{
-    const j=await fetch('/api/activity-words').then(r=>r.json());
-    const box=document.getElementById('activityWords');
-    box.replaceChildren(...(j.words||[]).map(item=>{{
-      const row=document.createElement('div');row.style.cssText='display:flex;gap:.5rem;align-items:center;border-bottom:1px solid #243056;padding:.25rem 0';
-      const label=document.createElement('span');label.style.flex='1';label.textContent=item.text;
-      const meta=document.createElement('code');meta.textContent=item.language+' · '+item.tone;
-      const remove=document.createElement('button');remove.type='button';remove.textContent='delete';remove.onclick=()=>deleteActivityWord(item.id);
-      row.append(label,meta,remove);return row;
-    }}));
-    status.textContent=(j.words||[]).length+' entries · '+j.path;
-  }}catch(error){{status.textContent=error.message;}}
-}}
-async function addActivityWord(){{
-  const text=document.getElementById('activityText').value.trim();if(!text)return;
-  const response=await fetch('/api/activity-words',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{text,language:document.getElementById('activityLanguage').value,tone:document.getElementById('activityTone').value}})}});
-  const body=await response.json();if(!response.ok){{document.getElementById('activityWordsStatus').textContent=body.error||'add failed';return;}}
-  document.getElementById('activityText').value='';refreshActivityWords();
-}}
-async function deleteActivityWord(id){{
-  const response=await fetch('/api/activity-words/'+encodeURIComponent(id),{{method:'DELETE'}});
-  const body=await response.json();if(!response.ok){{document.getElementById('activityWordsStatus').textContent=body.error||'delete failed';return;}}
-  refreshActivityWords();
-}}
-refreshActivityWords();
-</script>
 <div class="card">
  matrix live: local <b>{esc(summary.get('local_online'))}</b> · cloud <b>{esc(summary.get('cloud_ready'))}</b> · down <b>{esc(summary.get('unavailable'))}</b>
  · memory <b>{esc(_memory.backend)}</b>
@@ -2153,7 +2239,32 @@ async function runSlash(){{
     return html.encode("utf-8")
 
 
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Keep long-lived SSE clients from creating an unbounded number of threads."""
+
+    daemon_threads = True
+
+    def __init__(self, server_address, request_handler_class, max_threads: int = MAX_REQUEST_THREADS):
+        self._request_slots = threading.BoundedSemaphore(max_threads)
+        super().__init__(server_address, request_handler_class)
+
+    def process_request(self, request, client_address) -> None:
+        self._request_slots.acquire()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
+
+
 def main() -> None:
+    _validate_public_binding()
     print("[hub] agent modes + token saver…")
     init_runtime_from_config()
     print(f"[hub] mode={get_runtime().get('mode')} token_saver={get_runtime().get('token_saver')}")
@@ -2161,7 +2272,7 @@ def main() -> None:
     refresh_snapshot()
     t = threading.Thread(target=_bg_sync, daemon=True)
     t.start()
-    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    httpd = BoundedThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Aether Hub -> http://{HOST}:{PORT}/")
     print("  FIRST:  GET /api/discover")
     print("  MODES:  GET|POST /api/modes   (inline|multi_agent, token_saver)")

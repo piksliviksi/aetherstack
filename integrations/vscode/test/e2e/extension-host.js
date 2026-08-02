@@ -58,7 +58,8 @@ function ollamaHostUrl(stackPath) {
 }
 
 async function proveInference(stackPath) {
-  const apiKey = envValue(stackPath, "LITELLM_MASTER_KEY") || "sk-aether-local";
+  const apiKey = envValue(stackPath, "LITELLM_MASTER_KEY");
+  if (!apiKey) throw new Error("LITELLM_MASTER_KEY is missing from the test stack .env");
   const payload = JSON.stringify({
     model: "local-default",
     messages: [{ role: "user", content: "Reply with exactly AETHERSTACK_ONE_CLICK_OK" }],

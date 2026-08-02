@@ -7,6 +7,15 @@ server {
     listen 3000;
     server_name 127.0.0.1 localhost;
 
+    # Keep health probes out of trusted-header authentication. Repeated probes
+    # of `/` otherwise create repeated login events in the live browser UI.
+    location = /healthz {
+        access_log off;
+        add_header Cache-Control "no-store" always;
+        default_type application/json;
+        return 200 '{"ok":true}';
+    }
+
     location / {
         proxy_pass http://open-webui:8080;
         proxy_http_version 1.1;

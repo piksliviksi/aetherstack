@@ -65,30 +65,51 @@ def expand_multi_key_models(matrix: dict[str, Any]) -> dict[str, Any]:
     return matrix
 
 
-def _http_json(url: str, timeout: float = 3.0, headers: dict | None = None) -> Any | None:
+def _http_json_result(
+    url: str, timeout: float = 3.0, headers: dict | None = None
+) -> tuple[Any | None, str | None]:
     req = urllib.request.Request(url, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        return None
+            return json.loads(r.read().decode("utf-8", errors="replace")), None
+    except urllib.error.HTTPError as exc:
+        return None, f"HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return None, f"connection failed: {exc.reason}"
+    except TimeoutError:
+        return None, f"timed out after {timeout:g}s"
+    except json.JSONDecodeError:
+        return None, "invalid JSON response"
+    except OSError as exc:
+        return None, f"connection failed: {exc}"
+
+
+def _http_json(url: str, timeout: float = 3.0, headers: dict | None = None) -> Any | None:
+    value, _ = _http_json_result(url, timeout=timeout, headers=headers)
+    return value
 
 
 def probe_ollama(base: str | None = None) -> dict[str, Any]:
     base = (base or os.environ.get("OLLAMA_BASE_URL") or "http://host.docker.internal:11434").rstrip(
         "/"
     )
-    tags = _http_json(f"{base}/api/tags", timeout=4.0)
+    tags, error = _http_json_result(f"{base}/api/tags", timeout=4.0)
     names: set[str] = set()
     if tags and isinstance(tags.get("models"), list):
         for m in tags["models"]:
             n = m.get("name") or m.get("model")
             if n:
                 names.add(n)
-                # also bare name without tag
-                if ":" in n:
+                # A bare backend name means Ollama's `latest` tag only. Do not
+                # collapse version/size tags (`:1.5b` vs `:0.5b`) into one name.
+                if n.endswith(":latest"):
                     names.add(n.split(":", 1)[0])
-    return {"base": base, "ok": tags is not None, "models": sorted(names)}
+    return {
+        "base": base,
+        "ok": tags is not None,
+        "models": sorted(names),
+        "reason": "Ollama ready" if tags is not None else error or "Ollama probe failed",
+    }
 
 
 def probe_host_cli_bridge(base: str | None = None, token: str | None = None) -> dict[str, Any]:
@@ -205,7 +226,7 @@ def annotate_availability(matrix: dict[str, Any], ollama: dict[str, Any] | None 
             bn = backend_local_name(m.get("backend") or "")
             pulled = False
             if bn and ollama.get("ok"):
-                if bn in ollama["models"] or bn.split(":")[0] in ollama["models"]:
+                if bn in ollama["models"]:
                     pulled = True
             if not ollama.get("ok"):
                 reason = "ollama unreachable"

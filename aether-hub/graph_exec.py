@@ -20,11 +20,19 @@ from typing import Any, Callable
 from graph import graph_to_pipeline
 from memory import MemoryStore
 from pipelines import _pick_for_stage
-from services import _chat_completion
+from services import _chat_completion, worker_output_needs_correction
 
 MAX_STAGE_OUTPUT_CHARS = 20_000
 MAX_CONTEXT_CHARS = 12_000
 MAX_STAGES = 40
+
+
+class GraphExecutionError(RuntimeError):
+    """A failed workflow with node-level diagnostics safe to return to the UI."""
+
+    def __init__(self, message: str, steps: list[dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.steps = steps
 
 
 def _emit(on_status: Callable[[dict[str, Any]], None] | None, phase: str, **fields: Any) -> None:
@@ -107,6 +115,18 @@ def _stage_messages(
         f"You are the {stage.get('role') or 'worker'} stage of a multi-model pipeline. "
         f"{stage.get('purpose') or ''} Answer only your part of the task, concretely."
     )
+    role = str(stage.get("role") or "worker").lower()
+    quality = (
+        "Complete this stage now. Do not return intent-to-work text. Ground material claims in file paths, symbols, "
+        "commands and observed output, source links, or clearly labelled assumptions. Preserve useful upstream evidence "
+        "and identify any contradiction you find."
+    )
+    if role in {"critic", "reviewer", "analyser", "supervisor"}:
+        quality += (
+            " Be skeptical: identify unsupported claims, weak decisions, regressions, and missing verification; rank them "
+            "and provide exact corrections for the next stage."
+        )
+    system = f"{system}\n\n{quality}"
     user = [f"Goal:\n{goal}"]
     if context:
         user.append(f"Relevant prior work from shared memory:\n{context}")
@@ -141,6 +161,8 @@ def execute_graph(
         raise ValueError("graph has no runnable stages")
     if len(stages) > MAX_STAGES:
         raise ValueError(f"graph has {len(stages)} stages; limit is {MAX_STAGES}")
+    if any(stage.get("workspace_write") for stage in stages) and not event.get("_workspace_write_authorized"):
+        raise PermissionError("workspace-write execution requires trusted local authorization")
 
     memory_ops = pipe.get("memory_ops") or []
     completion = completion or _chat_completion
@@ -152,6 +174,7 @@ def execute_graph(
     outputs: dict[str, str] = {}
     steps: list[dict[str, Any]] = []
     usage_items: list[dict[str, Any]] = []
+    stage_ids = {str(stage.get("id")) for stage in stages if stage.get("id")}
 
     for index, stage in enumerate(stages):
         resolved = _pick_for_stage(snapshot, stage)
@@ -165,6 +188,20 @@ def execute_graph(
                     "role": stage.get("role"),
                     "model": model,
                     "error": "no available model for this stage",
+                }
+            )
+            continue
+        required_stage_inputs = [
+            source for source in (stage.get("inputs_from") or []) if source in stage_ids
+        ]
+        if required_stage_inputs and not any(source in outputs for source in required_stage_inputs):
+            steps.append(
+                {
+                    "stage_id": stage.get("id"),
+                    "label": label,
+                    "role": stage.get("role"),
+                    "model": model,
+                    "error": "no successful upstream stage output",
                 }
             )
             continue
@@ -186,9 +223,31 @@ def execute_graph(
             "model": model,
             "max_tokens": int(event.get("max_tokens") or 2000),
             "role": stage.get("role") or "worker",
+            "workspace_write": bool(stage.get("workspace_write")),
         }
         try:
             result = completion(call, messages)
+            first_usage = result.get("usage") or {}
+            if worker_output_needs_correction(result.get("content")):
+                retry_messages = [
+                    *messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            "The stage response was intent-only or unsupported. Perform the bounded work now and replace "
+                            "it with concrete evidence-backed findings. If this is an implementation stage, make the "
+                            "allowed workspace edits and report changed paths plus verification output."
+                        ),
+                    },
+                ]
+                result = completion(call, retry_messages)
+                retry_usage = result.get("usage") or {}
+                result["usage"] = {
+                    key: int(first_usage.get(key) or 0) + int(retry_usage.get(key) or 0)
+                    for key in set(first_usage) | set(retry_usage)
+                }
+                if worker_output_needs_correction(result.get("content")):
+                    raise RuntimeError("stage output rejected after two intent-only or unsupported responses")
             text = str(result.get("content") or "").strip()
             outputs[stage.get("id")] = text[:MAX_STAGE_OUTPUT_CHARS]
             usage_items.append(result.get("usage") or {})
@@ -214,8 +273,21 @@ def execute_graph(
 
     answered = [step for step in steps if step.get("content")]
     if not answered:
-        raise RuntimeError("every stage failed; see steps for detail")
-    answer = answered[-1]["content"]
+        raise GraphExecutionError("every stage failed; see steps for detail", steps)
+    node_types = {str(node.get("id")): node.get("type") for node in (graph.get("nodes") or []) if node.get("id")}
+    output_sources = {
+        str(edge.get("from"))
+        for edge in (graph.get("edges") or [])
+        if edge.get("kind", "data") == "data" and node_types.get(str(edge.get("to"))) == "output"
+    }
+    if output_sources:
+        terminal_answers = [step for step in answered if str(step.get("stage_id")) in output_sources]
+        if not terminal_answers:
+            raise GraphExecutionError("workflow output stage failed; see steps for detail", steps)
+        answer_step = terminal_answers[-1]
+    else:
+        answer_step = answered[-1]
+    answer = answer_step["content"]
 
     _emit(on_status, "memory_write", label="Writing shared memory…")
     written = _memory_writes(memory, memory_ops, goal, answer)
@@ -227,7 +299,7 @@ def execute_graph(
                 session_id,
                 "assistant",
                 answer,
-                meta={"graph": pipe.get("id"), "model": answered[-1].get("model")},
+                meta={"graph": pipe.get("id"), "model": answer_step.get("model")},
             )
         except Exception:
             pass
@@ -242,7 +314,7 @@ def execute_graph(
         "pipeline_id": pipe.get("id"),
         "goal": goal,
         "answer": answer,
-        "model": answered[-1].get("model"),
+        "model": answer_step.get("model"),
         "steps": steps,
         "stage_count": len(stages),
         "memory_context_chars": len(context),

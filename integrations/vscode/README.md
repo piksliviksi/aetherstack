@@ -2,10 +2,10 @@
 
 **One chat window. Many models underneath.**
 
-After AetherStack is set up once, you use its permanent **Chat** view in VS Code like a normal coding assistant. AetherStack analyzes each request, activates the matching service preset, and resolves the smallest useful team from models and authenticated host CLIs available on this system. Continue and Open WebUI remain optional clients.
+After AetherStack is set up once, you use its permanent **Chat** view in VS Code like a normal coding assistant. **Auto** is the default: one model keeps working until it reaches a limit, then the next configured model continues from shared memory, with local Ollama last. Named service presets run evidence workers and a critic when you want multi-model collaboration. Continue and Open WebUI remain optional clients.
 
 How the system operates (full story):  
-**[What you get](https://github.com/piksliviksi/aetherstack/blob/main/README.md)** · **[Operating model](https://github.com/piksliviksi/aetherstack/blob/main/docs/OPERATING-MODEL.md)** · **[Docs index](https://github.com/piksliviksi/aetherstack/blob/main/docs/README.md)**
+The extension includes the AetherStack runtime and local operating documentation.
 
 Install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=AetherStack.aetherstack):
 
@@ -17,12 +17,12 @@ code --install-extension AetherStack.aetherstack
 
 Full help guide (install, find the UI, commands, Continue, troubleshooting):
 
-**[How to use the VS Code extension](https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md)**
+Use **AetherStack: Open Control Center** from the Command Palette for setup and runtime controls.
 
 1. Install Docker Desktop / Docker Engine, open AetherStack **Control & Services**, and press **Start all services**. The extension installs the checksum-verified runtime bundled in the VSIX automatically, starts the platform bootstrap, prefers an existing accelerated host Ollama, and falls back to its container runtime when Ollama is absent. On macOS it can download the official signed Ollama app into the user's AetherStack tools directory and launch its host CLI so Apple Silicon inference stays on Metal.
 2. The extension checks `:3000`, `:4000`, and `:8766`, verifies capability-matrix candidates through LiteLLM provider health, then wires only responding models into a new Continue config.
-3. Open **AetherStack → Chat** from the Secondary Side Bar, open it in an editor, or use `@aetherstack` in VS Code's built-in Chat. Leave routing on **Auto** and ask naturally; intent analysis activates Research, Planning, Design, Build, Test, Bug-fix, Security, Polish, or Writing. Use `/help`, `/presets`, `/research`, `/plan`, `/code`, `/test`, `/bugfix`, or `/preset <name>` when you want explicit control.
-4. In Hub, expand the complete **Advanced active-preset node graph** below the presets to edit the selected capability-resolved tree, or open `/graph` full-page. Use the separate **Advanced setup** button for technical configuration and the local multilingual inference-activity wording database. Open WebUI (`:3000`) only when you want that separate client.
+3. Open **AetherStack → Chat** from the Secondary Side Bar, open it in an editor, or use `@aetherstack` in VS Code's built-in Chat. Leave routing on **Auto** for sequential model continuation. Use `/research`, `/plan`, `/code`, `/test`, `/bugfix`, or `/preset <name>` when a request should run a collaborating specialist tree.
+4. In Hub, select **Auto** to edit model order and continuation mode, or select a specialist preset to edit its lead, evidence workers, critic, and synthesis tree. The full `/graph` editor also builds and runs custom sequences such as Research → Plan → UX/UI → Critic → Plan → Coding → Testing → Bug fixing → Security → Coding, with an independent model and behavior profile on every node.
 5. Scan project AI history when you want repo context recovery.
 
 Open a project folder, scan prior AI chat artifacts, and continue building through the gateway — not by juggling separate vendor apps.
@@ -91,6 +91,6 @@ needed.
 
 ## License
 
-Source-available under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
+Source-available under the PolyForm Noncommercial License 1.0.0 included with the extension.
 Commercial use, including resale, is not permitted. Redistributions must retain
 the license and the required notice crediting the original author.

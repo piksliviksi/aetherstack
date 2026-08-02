@@ -7,13 +7,14 @@
   <title>AetherStack Chat</title>
   <style>
     * { box-sizing: border-box; }
-    :root { --ae-radius: 10px; --ae-radius-sm: 6px; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    {{UI_TOKENS}}
     body, textarea, input, button, select {
       font-family: var(--vscode-editor-font-family, 'SF Mono', Consolas, monospace);
       font-size: var(--vscode-editor-font-size, 13px);
     }
     body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); line-height: 1.5; }
-    main { width: min(980px, 100%); margin: 0 auto; padding: 14px 16px; display: flex; flex-direction: column; min-height: 100vh; }
+    main { width: min(980px, 100%); height: 100%; min-width: 0; min-height: 0; margin: 0 auto; padding: 14px 16px; display: flex; flex-direction: column; overflow: hidden; }
     header { margin-bottom: 8px; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 7px; }
     .brandmark { display: flex; align-items: center; gap: 7px; color: var(--vscode-descriptionForeground); }
     .ae { font-weight: 700; font-size: 11px; }
@@ -23,16 +24,17 @@
     select, textarea { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); font: inherit; }
     #route { margin: 0 0 8px; min-height: 18px; color: var(--vscode-descriptionForeground); font-size: 11px; }
     #route:empty { display: none; }
-    #messages { flex: 1; display: grid; gap: 12px; align-content: start; margin: 4px 0 12px; }
-    .message { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #messages { flex: 1 1 auto; min-width: 0; min-height: 0; width: 100%; display: grid; gap: 12px; align-content: start; margin: 4px 0 12px; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+    .message { min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+    .message > * { max-width: 100%; }
     .message .role { color: var(--vscode-descriptionForeground); }
     .message.user .role::before { content: '› '; }
     .message.assistant .role::before { content: 'AE '; font-weight: 700; }
-    .message pre { position: relative; overflow: auto; margin: 6px 0 0; padding: 9px; border-radius: var(--ae-radius-sm); background: var(--vscode-textCodeBlock-background); }
+    .message pre { position: relative; max-width: 100%; overflow: auto; margin: 6px 0 0; padding: 9px; border-radius: var(--ae-radius-sm); background: var(--vscode-textCodeBlock-background); white-space: pre; }
     .message pre .lang-label { position: absolute; top: 4px; right: 34px; font-size: 10px; color: var(--vscode-descriptionForeground); }
     .message pre .copy-code { position: absolute; top: 2px; right: 4px; padding: 2px 6px; font-size: 10px; }
     .tok-kw, .tok-str, .tok-num { color: inherit; }
-    table { border-collapse: collapse; margin: 6px 0; }
+    table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 6px 0; }
     th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 8px; text-align: left; }
     blockquote { margin: 6px 0; padding: 2px 10px; border-left: 3px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
     .message code { font-family: inherit; }
@@ -47,11 +49,13 @@
     .icon-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     .composer {
       position: relative;
+      flex: 0 0 auto;
+      width: 100%;
       min-width: 0;
       border: 1px solid var(--vscode-panel-border);
       border-radius: var(--ae-radius);
       padding: 2px 10px 8px;
-      margin-top: auto;
+      margin: 0;
     }
     .model-picker {
       position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px;
@@ -67,7 +71,7 @@
     .model-picker-item.active, .model-picker-item:hover { background: var(--vscode-list-hoverBackground); }
     .model-picker-help { padding: 4px 10px 7px; font-size: 10px; color: var(--vscode-descriptionForeground); }
     .prompt-row { display: flex; align-items: flex-start; gap: 6px; }
-    textarea { flex: 1; width: 100%; min-height: 44px; max-height: 220px; resize: vertical; border: 0; border-radius: var(--ae-radius-sm); background: transparent; padding: 7px 2px; outline: none; }
+    textarea { flex: 1; width: 100%; min-width: 0; min-height: 44px; max-height: min(220px, 35vh); resize: vertical; border: 0; border-radius: var(--ae-radius-sm); background: transparent; padding: 7px 2px; outline: none; }
     textarea:disabled { opacity: .55; cursor: wait; }
     #inference { min-width: 0; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 6px; overflow: hidden; }
     #inference.busy::before { content: '·'; animation: pulse 1s ease-in-out infinite; }
@@ -97,7 +101,7 @@
     #status, #attachList { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .statusline { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 10px; }
     @keyframes pulse { 50% { opacity: .2; } }
-    .idle-art { display: none; flex: 1 1 55vh; min-height: 280px; width: 100%; align-items: stretch; justify-content: stretch; overflow: hidden; }
+    .idle-art { display: none; flex: 1 1 auto; min-height: 0; width: 100%; align-items: stretch; justify-content: stretch; overflow: hidden; }
     .idle-art pre { width: 100%; height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: clamp(5px, .85vw, 10px); line-height: .9; letter-spacing: 0; text-align: center; opacity: .58; user-select: none; }
     .action-menu { position: absolute; left: 0; bottom: calc(100% + 6px); width: min(520px, calc(100vw - 32px)); max-height: min(610px, 76vh); padding: 0; background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); border-radius: var(--ae-radius); box-shadow: 0 8px 22px var(--vscode-widget-shadow); z-index: 20; overflow: hidden; }
     .action-menu[hidden] { display: none; }
@@ -120,7 +124,7 @@
     .history-item .edit, .history-item .del { opacity: .55; }
     .history-item .edit:hover, .history-item .del:hover { opacity: 1; }
     .history-item:focus-visible, .history-item button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-    @media (max-width: 520px) { main { padding: 10px; } #activeModels { max-width: 34vw; } .statusline { display: none; } }
+    @media (max-width: 520px) { main { padding: 10px; } #activeModels { max-width: 34vw; } .statusline { display: none; } .composer-footer { flex-wrap: wrap; } .composer-right { margin-left: auto; } }
     @media (prefers-reduced-motion: reduce) { .idle-art pre { opacity: .42; } }
     #readinessBanner { display: none; flex-direction: column; gap: 8px; margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--vscode-panel-border); border-radius: var(--ae-radius); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
     #readinessBanner.show { display: flex; }
@@ -160,18 +164,18 @@
       <span id="stepRuntime" class="readiness-step"><span class="dot"></span>Runtime</span>
       <span id="stepAi" class="readiness-step"><span class="dot"></span>AI ready</span>
     </div>
-    <div id="readinessMessage" class="readiness-message"></div>
+    <div id="readinessMessage" class="readiness-message" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="readiness-actions">
       <button type="button" id="readinessStart" class="readiness-btn">Start all services</button>
       <button type="button" id="readinessLogs" class="readiness-btn secondary">Open Output</button>
     </div>
   </div>
   <div id="readinessTip">
-    <span>Ready. Ask naturally — Auto picks the right preset for you. <code>/help</code> for shortcuts.</span>
+    <span>Ready. Auto continues through your model sequence and shared memory. <code>/help</code> for shortcuts.</span>
     <button type="button" id="readinessTipDismiss" aria-label="Dismiss">✕</button>
   </div>
-  <div id="route"></div>
-  <div id="messages"></div>
+  <div id="route" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="messages" aria-live="polite"></div>
   <div id="idleArt" class="idle-art"><pre id="idleArtPre"></pre></div>
   <fieldset class="composer">
     <div class="action-menu" id="actionMenu" hidden>
@@ -203,7 +207,7 @@
       <div id="modelPickerList" class="model-picker-list" role="listbox"></div>
       <div class="model-picker-help">↑↓ · Enter · Esc</div>
     </div>
-    <div class="prompt-row"><textarea id="prompt" placeholder="Ask anything…"></textarea></div>
+    <div class="prompt-row"><textarea id="prompt" aria-label="Message AetherStack" placeholder="Ask anything…"></textarea></div>
     <div class="composer-footer">
       <div class="composer-left">
         <button type="button" id="actionMenuButton" class="icon-button" aria-haspopup="true" aria-expanded="false" title="Menu">/</button>
@@ -211,7 +215,7 @@
         <button type="button" id="modeLabel" class="icon-button" title="Switch preset">auto</button>
         <button type="button" id="cancel" class="icon-button" title="Stop generation" aria-label="Stop generation" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8"/></svg></button>
         <div id="inference"><span id="activityText"></span></div>
-        <span id="status" class="muted"></span>
+        <span id="status" class="muted" role="status" aria-live="polite" aria-atomic="true"></span>
         <span id="attachList" class="muted"></span>
       </div>
       <div class="composer-right">
@@ -220,15 +224,14 @@
       </div>
       <input type="file" id="attachInput" accept="image/*,.pdf" multiple hidden>
     </div>
+    <div class="statusline"><span id="cwdLine"></span><span id="tokenLine"></span></div>
   </fieldset>
-  <div class="statusline"><span id="cwdLine"></span><span id="tokenLine"></span></div>
 </main>
 <script nonce="{{NONCE}}">{{CHAT_RENDER_JS}}</script>
 <script nonce="{{NONCE}}">
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   let services = [];
-  let activityWords = [];
   let activeServiceId = '';
   let activityTimer = null;
   let elapsedTimer = null;
@@ -239,6 +242,7 @@
   const MEMORY_CONTEXT_OPTIONS = [256, 512, 1024, 2048];
   let historyBusy = false;
   let runMeta = { busy: false, phase: '', label: '', model: '', models: [], startedAt: 0 };
+  const ACTIVITY_TEXT = 'on it..';
   const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
   let pendingAttachments = [];
   const restored = vscode.getState() || {};
@@ -427,23 +431,21 @@
     $('tokenLine').hidden = !showTokens;
   }
   function rotateActivity() {
-    const enabled = activityWords.filter((item) => item && item.enabled !== false && item.text);
-    const phrase = enabled.length ? enabled[Math.floor(Math.random() * enabled.length)].text : "I'm on it…";
     const model = runMeta.model || (runMeta.models || [])[0] || '';
-    $('activityText').textContent = model ? `${phrase} · ${model}` : phrase;
+    $('activityText').textContent = model ? `${ACTIVITY_TEXT} · ${model}` : ACTIVITY_TEXT;
   }
   function paintRunChrome() {
     if (!runMeta.busy) return;
     const secs = Math.max(0, Math.floor((Date.now() - (runMeta.startedAt || Date.now())) / 1000));
     const model = runMeta.model || (runMeta.models || []).filter(Boolean).join(', ');
-    const phase = runMeta.label || runMeta.phase || "I'm on it…";
+    const phase = runMeta.label || runMeta.phase || ACTIVITY_TEXT;
     $('status').textContent = model ? `${phase} · ${model} · ${secs}s` : `${phase} · ${secs}s`;
     $('status').className = 'muted';
     if (model) {
       $('activeModels').textContent = `Answering: ${model}`;
       $('activeModels').classList.add('live');
     } else if (showActiveModel) {
-      $('activeModels').textContent = 'Answering…';
+      $('activeModels').textContent = 'Answering';
       $('activeModels').classList.add('live');
     }
   }
@@ -457,7 +459,7 @@
     runMeta.busy = Boolean(value);
     if (value) {
       runMeta.startedAt = Date.now();
-      if (!runMeta.label) runMeta.label = "I'm on it…";
+      if (!runMeta.label) runMeta.label = ACTIVITY_TEXT;
       rotateActivity();
       paintRunChrome();
       activityTimer = setInterval(rotateActivity, 1900);
@@ -503,6 +505,13 @@
     const id = explicitId != null ? explicitId : (messageSeq += 1);
     const box = text('article', '', `message ${role}`);
     box.tabIndex = 0;
+    box.setAttribute('aria-label', `${role === 'user' ? 'Your' : 'AetherStack'} message. Press Enter for actions.`);
+    box.addEventListener('keydown', (event) => {
+      if (event.target === box && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        box.querySelector('.msg-actions button')?.focus();
+      }
+    });
     box.dataset.msgId = String(id);
     box.append(text('span', role === 'user' ? 'You' : 'AetherStack', 'role'));
     appendRichText(box, value);
@@ -577,9 +586,20 @@
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   let idleFrame = 0;
   let idleLastPaint = 0;
+  function syncIdleAnimation() {
+    if (idleFrame) cancelAnimationFrame(idleFrame);
+    idleFrame = 0;
+    if (!document.hidden && $('idleArt').style.display !== 'none') {
+      idleFrame = requestAnimationFrame(renderIdleLogo);
+    }
+  }
   function renderIdleLogo(time = 0) {
-    idleFrame = requestAnimationFrame(renderIdleLogo);
-    if ($('idleArt').style.display === 'none' || document.hidden || time - idleLastPaint < 45) return;
+    idleFrame = 0;
+    if ($('idleArt').style.display === 'none' || document.hidden) return;
+    if (time - idleLastPaint < 45) {
+      idleFrame = requestAnimationFrame(renderIdleLogo);
+      return;
+    }
     idleLastPaint = time;
     const width = Math.max(36, Math.min(132, Math.floor($('idleArt').clientWidth / 6.2)));
     const height = Math.max(18, Math.min(54, Math.floor($('idleArt').clientHeight / 10)));
@@ -616,8 +636,13 @@
     const lines = [];
     for (let row = 0; row < height; row += 1) lines.push(cells.slice(row * width, (row + 1) * width).join('').replace(/\s+$/, ''));
     $('idleArtPre').textContent = lines.join('\n');
+    if (!reducedMotion.matches) idleFrame = requestAnimationFrame(renderIdleLogo);
   }
-  idleFrame = requestAnimationFrame(renderIdleLogo);
+  new MutationObserver(syncIdleAnimation).observe($('idleArt'), { attributes: true, attributeFilter: ['style'] });
+  document.addEventListener('visibilitychange', syncIdleAnimation);
+  reducedMotion.addEventListener?.('change', syncIdleAnimation);
+  window.addEventListener('pagehide', () => { if (idleFrame) cancelAnimationFrame(idleFrame); });
+  syncIdleAnimation();
   (function backfillTranscriptIds() {
     // Legacy transcripts saved before id tracking (commit 5574691) have no id field at all.
     // Mint real ids and persist them into the transcript array itself, not just the DOM.
@@ -719,7 +744,11 @@
       requestAnimationFrame(() => $('menuFilter').focus());
     }
   }
-  $('menuFilter').addEventListener('input', applyMenuFilter);
+  let menuFilterTimer = 0;
+  $('menuFilter').addEventListener('input', () => {
+    clearTimeout(menuFilterTimer);
+    menuFilterTimer = setTimeout(applyMenuFilter, 75);
+  });
   $('menuFilter').addEventListener('keydown', (event) => {
     if (event.key === 'ArrowDown') {
       const first = [...$('menuScroll').querySelectorAll('.menu-row:not([hidden]), .history-item:not([hidden])')][0];
@@ -736,6 +765,15 @@
       event.preventDefault(); closeActionMenu(); vscode.postMessage({ type: 'newConversation' }); return;
     }
     if (event.key === 'Escape' && !$('actionMenu').hidden) { event.preventDefault(); setActionMenuOpen(false); $('actionMenuButton').focus(); }
+    if (event.key === 'Tab' && !$('actionMenu').hidden) {
+      const focusable = [...$('actionMenu').querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), [tabindex="0"]:not([hidden])')]
+        .filter((item) => item.offsetParent !== null);
+      if (focusable.length) {
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    }
   });
   vscode.postMessage({ type: 'listConversations' });
   function sendPrompt() {
@@ -757,7 +795,6 @@
     if (message.type === 'state') {
       const current = $('service').value;
       services = Array.isArray(message.services) ? message.services : [];
-      activityWords = Array.isArray(message.activityWords) ? message.activityWords : [];
       showActiveModel = message.showActiveModel !== false;
       showThoughtProcess = Boolean(message.showThoughtProcess);
       showTokens = message.showTokens !== false;
@@ -781,15 +818,15 @@
       $('actionMenu').classList.toggle('busy', historyBusy);
       $('newConversation').disabled = historyBusy;
       if (message.value) {
-        runMeta.label = runMeta.label || "I'm on it…";
-        $('status').textContent = "I'm on it…";
+        runMeta.label = runMeta.label || ACTIVITY_TEXT;
+        $('status').textContent = ACTIVITY_TEXT;
       } else {
         $('status').textContent = '';
       }
       setBusy(Boolean(message.value));
     } else if (message.type === 'progress') {
       runMeta.phase = message.phase || runMeta.phase;
-      runMeta.label = message.label || runMeta.label || message.phase || "I'm on it…";
+      runMeta.label = ACTIVITY_TEXT;
       if (message.model) runMeta.model = message.model;
       if (Array.isArray(message.models) && message.models.length) runMeta.models = message.models;
       if (runMeta.busy) paintRunChrome();
@@ -901,13 +938,16 @@
         $('activeModels').classList.remove('live');
       }
       const selection = result.selection ? `${result.selection.source === 'intent-analysis' ? 'Auto-selected' : 'Selected'} ${result.selection.label} · ` : '';
-      const detail = `${selection}${team || 'dynamic team'}${tokens}`;
+      const degraded = result.degraded ? ' · reduced independent verification; retry or inspect Agent trace' : '';
+      const detail = `${selection}${team || 'dynamic team'}${tokens}${degraded}`;
       const thoughtHtml = showThoughtProcess ? formatThoughtProcess(result) : '';
       addMessage('assistant', result.answer || result.output || 'Completed without a text answer.', detail, true, undefined, [], thoughtHtml);
     } else if (message.type === 'error') {
       finishStreamingMessage();
       setBusy(false);
-      $('status').textContent = message.message || 'Request failed'; $('status').className = 'error';
+      const reference = message.requestId ? ` · request ${message.requestId}` : '';
+      const code = message.code && message.code !== 'request_failed' ? ` (${message.code})` : '';
+      $('status').textContent = `${message.message || 'Request failed'}${code}${reference}`; $('status').className = 'error';
     }
   });
   vscode.postMessage({

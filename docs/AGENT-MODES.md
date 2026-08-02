@@ -141,7 +141,7 @@ Execute a planned call:
 ```bash
 # Example: take first litellm_calls entry from the plan
 curl -s http://127.0.0.1:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-aether-local" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"local-default","messages":[{"role":"user","content":"hi"}],"max_tokens":256}'
 ```

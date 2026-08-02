@@ -98,8 +98,16 @@ def main() -> int:
     args = parser.parse_args()
 
     configured_ollama = args.ollama_url or os.getenv("OLLAMA_BASE_URL") or env_file_value("OLLAMA_BASE_URL") or "http://127.0.0.1:11434"
-    ollama = configured_ollama.replace("host.docker.internal", "127.0.0.1").replace("gateway.docker.internal", "127.0.0.1").rstrip("/")
-    api_key = os.getenv("LITELLM_MASTER_KEY") or env_file_value("LITELLM_MASTER_KEY") or "sk-aether-local"
+    ollama = (
+        configured_ollama
+        .replace("host.docker.internal", "127.0.0.1")
+        .replace("gateway.docker.internal", "127.0.0.1")
+        .replace("//ollama:", "//127.0.0.1:")
+        .rstrip("/")
+    )
+    api_key = os.getenv("LITELLM_MASTER_KEY") or env_file_value("LITELLM_MASTER_KEY")
+    if not api_key:
+        raise RuntimeError("LITELLM_MASTER_KEY is missing; run start.sh to generate .env")
     auth = {"Authorization": f"Bearer {api_key}"}
     results: dict[str, object] = {"ok": False, "ollama": ollama, "checks": []}
 
@@ -130,10 +138,6 @@ def main() -> int:
     available = sorted(alias for alias, meta in matrix.get("models", {}).items() if meta.get("available"))
     check("local-default" in available and "local-embed" in available, f"required local aliases are unavailable: {available}")
     passed("capability-matrix", available)
-
-    status, activity, _ = json_request(f"{args.hub}/api/activity-words")
-    check(len(activity.get("words", [])) >= 3, "activity-word database is empty")
-    passed("activity-words", len(activity["words"]))
 
     for endpoint, name in (("/api/graphs/node-types", "graph-node-types"), ("/api/combos/guide", "combo-guide"), ("/api/bootstrap", "bootstrap-plan")):
         status, payload, _ = json_request(f"{args.hub}{endpoint}")

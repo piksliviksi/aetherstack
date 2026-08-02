@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const test = require("node:test");
 
-const { execFileResult, findStackRoot, normalizeLocalUiUrl, request, requestStream, selectAvailableModels, startCompose } = require("../stack-control");
+const { execFileResult, findStackRoot, normalizeLocalUiUrl, request, requestStream, responseError, selectAvailableModels, startCompose } = require("../stack-control");
 
 test("command execution streams output without killing a cold pull at the capture limit", async () => {
   let streamedBytes = 0;
@@ -154,12 +154,24 @@ test("requestStream rejects on a non-2xx status", async () => {
   server.close();
 });
 
+test("responseError preserves stable recovery metadata", () => {
+  const error = responseError(
+    503,
+    { error: "A required service is unavailable.", code: "service_unavailable", request_id: "req-123" },
+  );
+  assert.equal(error.name, "AetherStackHttpError");
+  assert.equal(error.status, 503);
+  assert.equal(error.code, "service_unavailable");
+  assert.equal(error.requestId, "req-123");
+});
+
 test("requestStream skips a malformed chunk without aborting the stream", async () => {
   const http = require("http");
   const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     res.write('data: not valid json\n\n');
     res.write('data: {"type":"delta","text":"ok"}\n\n');
+    res.write('data: {"type":"done","result":{"answer":"ok"}}\n\n');
     res.end();
   });
   await new Promise((resolve) => server.listen(0, resolve));
@@ -167,7 +179,23 @@ test("requestStream skips a malformed chunk without aborting the stream", async 
   const events = [];
   await requestStream(`http://127.0.0.1:${port}/x`, { method: "POST", body: {} }, (event) => events.push(event));
   server.close();
-  assert.deepEqual(events, [{ type: "delta", text: "ok" }]);
+  assert.deepEqual(events, [{ type: "delta", text: "ok" }, { type: "done", result: { answer: "ok" } }]);
+});
+
+test("requestStream rejects EOF without a terminal event", async () => {
+  const http = require("http");
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream", "X-AetherStack-Request-ID": "req-stream" });
+    res.write('data: {"type":"delta","text":"partial"}\n\n');
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+  await assert.rejects(
+    () => requestStream(`http://127.0.0.1:${port}/x`, { method: "POST", body: {} }, () => {}),
+    (error) => error.code === "stream_incomplete" && error.requestId === "req-stream"
+  );
+  server.close();
 });
 
 test("request sends bounded JSON POST bodies for Hub service runs", async () => {

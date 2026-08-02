@@ -13,7 +13,7 @@ from typing import Any, Callable
 from services import _chat_completion
 
 LITELLM_BASE_URL = os.environ.get("LITELLM_INTERNAL_URL", "http://litellm:4000").rstrip("/")
-MASTER_KEY = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+MASTER_KEY = os.environ.get("LITELLM_MASTER_KEY", "")
 TOOL_FIELDS = ("tools", "tool_choice", "parallel_tool_calls", "functions", "function_call")
 
 
@@ -25,7 +25,10 @@ class GatewayError(RuntimeError):
 
 
 def authorized(value: str | None, key: str | None = None) -> bool:
-    expected = f"Bearer {key if key is not None else MASTER_KEY}"
+    secret = key if key is not None else MASTER_KEY
+    if not secret:
+        return False
+    expected = f"Bearer {secret}"
     return hmac.compare_digest(str(value or ""), expected)
 
 

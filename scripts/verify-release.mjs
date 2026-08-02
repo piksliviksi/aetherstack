@@ -69,6 +69,12 @@ if (composeVersions.length !== 1) {
   fail(`Compose version ${composeVersions[0]} does not match VERSION ${version}`);
 }
 
+const envExample = read(".env.example");
+const envVersion = /^AETHERSTACK_VERSION=(.+)$/m.exec(envExample)?.[1]?.trim();
+if (envVersion !== version) {
+  fail(`.env.example version ${JSON.stringify(envVersion)} does not match VERSION ${version}`);
+}
+
 const changelog = read("integrations/vscode/CHANGELOG.md");
 const escapedVersion = version.replaceAll(".", "\\.");
 const headings = changelog.match(new RegExp(`^## ${escapedVersion}(?:\\s|$)`, "gm")) ?? [];

@@ -10,18 +10,35 @@ test("chat exposes a minimal action menu, modes, and model activity state", () =
   assert.match(html, /id="actionMenu"/);
   assert.match(html, /Active preset node graph/);
   assert.match(html, /activeModels/);
-  assert.match(html, /activityWords/);
+  assert.match(html, /on it\.\./);
+  assert.doesNotMatch(html, /activityWords/);
   assert.match(html, /Ask anything…/);
+  assert.match(html, /html, body \{ width: 100%; height: 100%; overflow: hidden; \}/);
+  assert.match(html, /#messages \{[^}]*overflow-y: auto/);
+  assert.match(html, /\.composer \{[^}]*flex: 0 0 auto;[^}]*width: 100%/);
   assert.match(html, /message.type === 'route'/);
   assert.match(html, /Docker setup guide/);
   assert.match(html, /dataset\.action = 'installDocker'/);
   const graphHtml = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "aether-hub", "static", "graph.html"), "utf8");
   assert.match(graphHtml, /answering_done/);
   assert.match(graphHtml, /activeRunId/);
+  assert.match(graphHtml, /id="btnRun"/);
+  assert.match(graphHtml, /BEHAVIOR_PRESETS/);
   assert.match(html, /vscode\.getState/);
   assert.doesNotMatch(html, /history-rail|historyToggle|historyRail/);
   assert.doesNotMatch(html, /class="header-actions"|id="historyMenuButton"|id="historyMenu"/);
   assert.doesNotMatch(html, /id="showActiveModel"|id="showThoughtProcess"|id="showTokens"|id="memoryContextMenu"|id="leanModeMenu"|id="tokenSaverMenu"|id="setApiKey"|id="refreshHostClis"|id="configureWorkspace"|id="advanced"|id="clearConversation"/);
+  const controlHtml = fs.readFileSync(path.resolve(__dirname, "..", "control-center.html"), "utf8");
+  const uiTokens = fs.readFileSync(path.resolve(__dirname, "..", "ui-tokens.css"), "utf8");
+  assert.match(controlHtml, /id="notice"[^>]*aria-live="polite"/);
+  assert.match(controlHtml, /No services reported/);
+  assert.match(controlHtml, /AetherStack did not respond/);
+  assert.match(controlHtml, /clearTimeout\(initialStateTimer\)/);
+  assert.match(html, /\{\{UI_TOKENS\}\}/);
+  assert.match(controlHtml, /\{\{UI_TOKENS\}\}/);
+  assert.match(uiTokens, /--ae-radius: 8px/);
+  assert.doesNotMatch(html, /--ae-radius:/);
+  assert.doesNotMatch(controlHtml, /--ae-radius:/);
   assert.equal(
     (manifest.contributes.menus["view/title"] || []).some((item) => item.when === "view == aetherstack.chatView"),
     false,
@@ -39,7 +56,10 @@ test("chat exposes a minimal action menu, modes, and model activity state", () =
   assert.match(html, /ICON_PATHS/);
   assert.doesNotMatch(html, /rgba\(|#[0-9a-f]{3,8}/i);
   assert.match(html, /function renderIdleLogo/);
-  assert.match(html, /requestAnimationFrame\(renderIdleLogo\)/);
+  assert.match(html, /function syncIdleAnimation/);
+  assert.match(html, /cancelAnimationFrame\(idleFrame\)/);
+  assert.match(html, /setTimeout\(applyMenuFilter, 75\)/);
+  assert.match(html, /event\.key === 'Tab'/);
   assert.match(html, /prefers-reduced-motion/);
   const inlineScripts = [...html.matchAll(/<script nonce="\{\{NONCE\}\}">([\s\S]*?)<\/script>/g)];
   assert.ok(inlineScripts.length >= 2);
@@ -161,7 +181,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
     checkedAt: new Date().toISOString(),
     up: false,
     services: [
-      { id: "webui", name: "Open WebUI", url: "http://127.0.0.1:3000/", healthUrl: "http://127.0.0.1:3000/", ok: false, error: "connection refused" },
+      { id: "webui", name: "Open WebUI", url: "http://127.0.0.1:3000/", healthUrl: "http://127.0.0.1:3000/healthz", ok: false, error: "connection refused" },
       { id: "litellm", name: "LiteLLM", url: "http://127.0.0.1:4000/", healthUrl: "http://127.0.0.1:4000/health/liveliness", ok: false, error: "connection refused" },
       { id: "hub", name: "Aether Hub", url: "http://127.0.0.1:8766/", healthUrl: "http://127.0.0.1:8766/api/health", ok: false, error: "connection refused" },
     ],

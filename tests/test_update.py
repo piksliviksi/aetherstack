@@ -45,9 +45,9 @@ class UpdateSafetyTests(unittest.TestCase):
             url = request.full_url
             if url == update.API_URL:
                 return Response(b'{"sha":"abcdef1234567890","commit":{"committer":{"date":"2026-01-01"},"message":"test"}}')
-            if url == update.VERSION_URL:
+            if url == update.VERSION_URL.format(revision="abcdef1234567890"):
                 return Response(b"0.3.1\n")
-            if url == update.ARCHIVE_URL:
+            if url == update.ARCHIVE_URL.format(revision="abcdef1234567890"):
                 return Response(archive)
             raise AssertionError(url)
 
@@ -64,6 +64,11 @@ class UpdateSafetyTests(unittest.TestCase):
             finally:
                 update.urllib.request.urlopen = old_urlopen
                 update.UPDATE_DIR = old_dir
+
+    def test_staging_urls_are_bound_to_the_discovered_revision(self) -> None:
+        self.assertIn("{revision}", update.ARCHIVE_URL)
+        self.assertIn("{revision}", update.VERSION_URL)
+        self.assertNotIn("refs/heads/main", update.ARCHIVE_URL)
 
 
 if __name__ == "__main__":

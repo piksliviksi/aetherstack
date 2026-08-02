@@ -114,19 +114,23 @@ function createChatRequestHandler(hubChat) {
       }
       if (token.isCancellationRequested) return;
 
-      if (serviceId !== "auto") stream.progress("I'm on it…");
+      if (serviceId !== "auto") stream.progress("on it..");
       const result = await hubChat.hubRequest(`/api/services/${encodeURIComponent(serviceId)}/run`, {
         method: "POST",
         signal: controller.signal,
-        body: {
+        body: hubChat.buildRunBody({
           goal: prompt,
-          lean_mode: "balanced",
-          token_saver: false,
           history: historyFromContext(context),
-          session_id: "vscode-participant",
-        },
+          sessionId: "vscode-participant",
+        }),
       });
       stream.markdown(result.answer || result.output || "Completed without a text answer.");
+
+      if (result.degraded) {
+        stream.markdown(
+          "\n\n> Some evidence or review stages did not complete, so this answer has reduced independent verification. Retry the preset or inspect Agent trace in the AetherStack view."
+        );
+      }
 
       if (result.auto_mode && result.model) {
         const failed = (result.failover_attempts || []).map((a) => a.model).filter(Boolean);

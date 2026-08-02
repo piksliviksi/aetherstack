@@ -53,7 +53,7 @@ Guides: [docs/CROSS-MEMORY.md](../docs/CROSS-MEMORY.md) · [docs/PRIVATE-MODE.md
 curl -s "http://127.0.0.1:8766/api/route?need=code&prefer=local" | jq .
 # → primary.model e.g. local-default → use with LiteLLM
 curl -s http://127.0.0.1:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-aether-local" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"local-default","messages":[{"role":"user","content":"hi"}]}'
 ```

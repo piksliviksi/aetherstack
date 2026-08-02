@@ -150,13 +150,13 @@ If missing:
 4. (Optional fallback) If Continue was configured before startup, set the same existing gateway key manually:
 
 ```powershell
-# Windows PowerShell (user or session)
-$env:AETHERSTACK_API_KEY = "sk-aether-local"
+# Windows PowerShell (use LITELLM_MASTER_KEY from .env)
+$env:AETHERSTACK_API_KEY = "<generated-key>"
 ```
 
 ```bash
 # macOS / Linux (add to ~/.zshrc or ~/.bashrc, then restart VS Code)
-export AETHERSTACK_API_KEY=sk-aether-local
+export AETHERSTACK_API_KEY='<generated-key>'
 ```
 
 For the AetherStack extension itself, run **AetherStack: Set API Key Securely**.
@@ -216,7 +216,7 @@ Chat defaults to **Auto**. The `/` menu is minimal: **New chat**, **Mode**, **Se
 
 Already authenticated Codex, Claude, and Grok host CLIs are discovered by the extension and exposed to the Hub through a Docker-reachable host bridge protected by a random bearer token stored in VS Code SecretStorage. The bridge reuses the CLI login session; it accepts only a fixed CLI alias allowlist and does not reveal the CLI path, copy credentials, create an API key, or enable browser CORS. Probing runs after commands and views are registered. Normal refresh re-probes the live Hub without a restart; only a stale or missing bridge environment causes `aether-hub` alone to be recreated. Continue configuration remains limited to LiteLLM-backed models.
 
-Hub embeds the complete editable advanced canvas below its presets, and `/graph` opens the same selected or active tree full-page. Positions and camera state persist across both views, empty-canvas dragging pans the tree, and an agent node can carry a local Markdown behavior profile. **Advanced setup** contains technical configuration and the activity-word editor; runtime wording edits persist in `.aetherstack/activity_words.json`.
+Hub embeds the complete editable advanced canvas below its presets, and `/graph` opens the same selected or active tree full-page. Positions and camera state persist across both views, empty-canvas dragging pans the tree, and an agent node can carry a local Markdown behavior profile. **Advanced setup** contains technical configuration; inference activity wording is fixed to `on it..`.
 
 **Write .vscode Settings** stores base URL / chat UI / model in the workspace. It never writes an API key; legacy plaintext settings are migrated to SecretStorage.
 
@@ -271,9 +271,9 @@ Hub embeds the complete editable advanced canvas below its presets, and `/graph`
 ### List Models → 401
 
 - Stack not running, or wrong key.  
-- Run **AetherStack: Set API Key Securely** and enter your `LITELLM_MASTER_KEY` (default lab: `sk-aether-local`).
+- Run **AetherStack: Set API Key Securely** and enter the random `LITELLM_MASTER_KEY` generated in the installation's `.env` on first startup.
 - Confirm:  
-  `curl http://127.0.0.1:4000/v1/models -H "Authorization: Bearer sk-aether-local"`
+  `scripts/list-models.sh` on macOS/Linux or `scripts/list-models.ps1` on Windows.
 
 ### Continue does not see models
 
@@ -295,7 +295,7 @@ Start `project-engine` separately; compose stack alone does not start `:8765`.
 
 1. Never commit real API keys in `.vscode/settings.json` or `.continue/config.yaml`.  
 2. Prefer `AETHERSTACK_API_KEY` in the environment for Continue.  
-3. Change `LITELLM_MASTER_KEY` if anything is reachable beyond localhost.  
+3. AetherStack refuses to publish the unauthenticated Hub control plane beyond loopback. Do not bypass that guard; remote Hub access requires an authenticated deployment design.
 4. Project Engine path scans are limited to safe roots; optional `AETHERSTACK_ENGINE_TOKEN` for shared machines.
 
 ---

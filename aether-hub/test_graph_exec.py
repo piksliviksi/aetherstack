@@ -84,10 +84,10 @@ def _graph(with_memory=True) -> dict:
 
 def _completion(calls):
     def run(call, messages):
-        calls.append({"model": call["model"], "messages": messages})
+        calls.append({"model": call["model"], "messages": messages, "workspace_write": call.get("workspace_write", False)})
         return {
             "model": call["model"],
-            "content": f"output from {call['model']}",
+            "content": f"Observed output from {call['model']}: repository path src/example.py was checked and verification passed. The result includes concrete evidence and a reproducible test command for the next stage.",
             "usage": {"total_tokens": 10},
         }
 
@@ -106,10 +106,11 @@ def test_stages_run_in_order_and_thread_their_output() -> None:
     assert [c["model"] for c in calls] == ["claude-cli", "local-default"]
     # the worker sees the master's output threaded in
     worker_user = calls[1]["messages"][-1]["content"]
-    assert "output from claude-cli" in worker_user
-    assert result["answer"] == "output from local-default"
+    assert "Observed output from claude-cli" in worker_user
+    assert result["answer"].startswith("Observed output from local-default")
     assert result["usage"]["total_tokens"] == 20
     assert result["stage_count"] == 2
+    assert "Do not return intent-to-work text" in calls[0]["messages"][0]["content"]
 
 
 def test_memory_nodes_actually_read_and_write() -> None:
@@ -130,7 +131,7 @@ def test_memory_nodes_actually_read_and_write() -> None:
     assert result["memory_context_chars"] > 0
     # store node ran
     assert memory.written, "expected the Memory store node to write"
-    assert "output from local-default" in memory.written[0]["text"]
+    assert "Observed output from local-default" in memory.written[0]["text"]
     assert result["memory_written"][0]["namespace"] == memory.written[0]["namespace"]
     # and the turn landed in the shared session pool Auto mode reads
     assert [m["role"] for m in memory.messages] == ["user", "assistant"]
@@ -152,19 +153,69 @@ def test_graph_without_memory_nodes_still_runs() -> None:
     assert result["memory_context_chars"] == 0
 
 
-def test_a_failing_stage_does_not_abort_the_run() -> None:
+def test_a_failing_upstream_stage_blocks_dependent_work() -> None:
     def flaky(call, messages):
         if call["model"] == "claude-cli":
             raise RuntimeError("rate limited")
-        return {"model": call["model"], "content": "recovered", "usage": {}}
+        return {"model": call["model"], "content": "Observed recovery with concrete test output and a referenced path.", "usage": {}}
 
-    result = execute_graph(
-        _graph(with_memory=False), _snapshot(), {"goal": "x"}, completion=flaky
+    with pytest.raises(RuntimeError, match="every stage failed"):
+        execute_graph(_graph(with_memory=False), _snapshot(), {"goal": "x"}, completion=flaky)
+
+
+def test_graph_retries_and_rejects_intent_only_stage_output() -> None:
+    calls = []
+
+    def intent_only(call, messages):
+        calls.append(call)
+        return {"model": call["model"], "content": "I will inspect this and report back.", "usage": {}}
+
+    with pytest.raises(RuntimeError, match="every stage failed"):
+        execute_graph(_graph(with_memory=False), _snapshot(), {"goal": "x"}, completion=intent_only)
+    assert len(calls) == 2
+
+
+def test_graph_does_not_return_an_earlier_stage_when_output_path_fails() -> None:
+    attempts = {"claude-cli": 0, "local-default": 0}
+    graph = _graph(with_memory=False)
+    graph["nodes"].append({"id": "out", "type": "output", "data": {"label": "Output"}})
+    graph["edges"].append({"id": "e-out", "from": "w1", "to": "out", "kind": "data"})
+
+    def partial(call, messages):
+        attempts[call["model"]] += 1
+        if call["model"] == "claude-cli":
+            return {
+                "model": call["model"],
+                "content": "Observed repository evidence in src/example.py. The check ran successfully and produced a reproducible result for downstream review.",
+                "usage": {},
+            }
+        return {"model": call["model"], "content": "I will implement this after reviewing it.", "usage": {}}
+
+    with pytest.raises(RuntimeError, match="workflow output stage failed"):
+        execute_graph(graph, _snapshot(), {"goal": "x"}, completion=partial)
+    assert attempts["local-default"] == 2
+
+
+def test_graph_passes_workspace_write_only_for_opted_in_stage() -> None:
+    graph = _graph(with_memory=False)
+    graph["nodes"][1]["data"]["workspace_write"] = False
+    graph["nodes"][2]["data"]["workspace_write"] = True
+    calls = []
+    execute_graph(
+        graph,
+        _snapshot(),
+        {"goal": "build", "_workspace_write_authorized": True},
+        completion=_completion(calls),
     )
-    assert result["answer"] == "recovered"
-    errors = [s for s in result["steps"] if s.get("error")]
-    assert len(errors) == 1
-    assert "rate limited" in errors[0]["error"]
+    assert calls[0]["workspace_write"] is False
+    assert calls[1]["workspace_write"] is True
+
+
+def test_graph_rejects_unauthorized_workspace_write() -> None:
+    graph = _graph(with_memory=False)
+    graph["nodes"][1]["data"]["workspace_write"] = True
+    with pytest.raises(PermissionError, match="trusted local authorization"):
+        execute_graph(graph, _snapshot(), {"goal": "build"}, completion=_completion([]))
 
 
 def test_every_stage_failing_raises() -> None:

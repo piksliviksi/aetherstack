@@ -193,6 +193,16 @@
           "enum": [256, 512, 1024, 2048],
           "default": 512,
           "description": "Unified memory context budget for Auto mode (KiB of text injected from session + vector memory). Default 512 KiB — enough for multi-turn coding without saturating typical local Ollama windows. Cycle from the Chat / menu."
+        },
+        "aetherstack.autoSequenceMode": {
+          "type": "string",
+          "enum": ["sequential_exhaustion", "per_request"],
+          "enumDescriptions": [
+            "Keep using the current model across requests until it reaches a limit, then continue with the next model and finally Ollama.",
+            "Begin each new request with the first available model; still fail over when that request hits a limit."
+          ],
+          "default": "sequential_exhaustion",
+          "description": "How Auto advances through the editable model sequence."
         }
       }
     },
@@ -283,13 +293,5 @@
       ]
     }
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/piksliviksi/aetherstack"
-  },
-  "bugs": {
-    "url": "https://github.com/piksliviksi/aetherstack/issues"
-  },
-  "homepage": "https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md",
-  "qna": "https://github.com/piksliviksi/aetherstack/blob/main/docs/VSCODE-EXTENSION.md"
+  "qna": false
 }

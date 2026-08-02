@@ -10,7 +10,7 @@ const SERVICES = [
     id: "webui",
     name: "Open WebUI",
     url: "http://127.0.0.1:3000/",
-    healthUrl: "http://127.0.0.1:3000/",
+    healthUrl: "http://127.0.0.1:3000/healthz",
   },
   {
     id: "litellm",
@@ -99,7 +99,12 @@ function request(urlStr, { headers = {}, timeoutMs = 4000, method = "GET", body 
           } catch {
             // Some health endpoints intentionally return text or HTML.
           }
-          resolve({ status: res.statusCode || 0, body });
+          resolve({
+            status: res.statusCode || 0,
+            body,
+            headers: res.headers,
+            requestId: res.headers["x-aetherstack-request-id"] || null,
+          });
         });
       }
     );
@@ -141,11 +146,16 @@ function requestStream(urlStr, { headers = {}, timeoutMs = 190_000, method = "PO
           let data = "";
           res.setEncoding("utf8");
           res.on("data", (chunk) => { data += chunk; });
-          res.on("end", () => reject(new Error(data || `HTTP ${res.statusCode}`)));
+          res.on("end", () => {
+            let body = data;
+            try { body = data ? JSON.parse(data) : null; } catch { /* retain text */ }
+            reject(responseError(res.statusCode || 0, body, res.headers));
+          });
           return;
         }
         res.setEncoding("utf8");
         let buffer = "";
+        let terminal = false;
         res.on("data", (chunk) => {
           buffer += chunk;
           let index;
@@ -160,11 +170,21 @@ function requestStream(urlStr, { headers = {}, timeoutMs = 190_000, method = "PO
             } catch {
               continue; // malformed chunk — skip it, don't let a parse failure abort the stream
             }
+            if (parsed && (parsed.type === "done" || parsed.type === "error")) terminal = true;
             onEvent(parsed); // deliberately outside the try/catch above — a bug in the caller's
                               // handler should surface normally, not be silently swallowed as "malformed JSON"
           }
         });
-        res.on("end", () => resolve());
+        res.on("end", () => {
+          if (terminal) resolve();
+          else {
+            const error = new Error("AetherStack stream ended before a terminal event.");
+            error.name = "AetherStackStreamError";
+            error.code = "stream_incomplete";
+            error.requestId = res.headers["x-aetherstack-request-id"] || null;
+            reject(error);
+          }
+        });
       }
     );
     req.on("error", reject);
@@ -185,6 +205,23 @@ function requestStream(urlStr, { headers = {}, timeoutMs = 190_000, method = "PO
   });
 }
 
+function responseError(status, body, headers = {}) {
+  const detail = body && typeof body === "object" ? body.error || body.detail : body;
+  const error = new Error(String(detail || `HTTP ${status}`));
+  error.name = "AetherStackHttpError";
+  error.status = status;
+  error.code = body && typeof body === "object" && body.code
+    ? String(body.code)
+    : status === 401 ? "unauthorized"
+      : status === 404 ? "not_found"
+        : status === 504 ? "upstream_timeout"
+          : status >= 500 ? "service_unavailable" : "request_failed";
+  error.requestId = (body && typeof body === "object" && body.request_id)
+    || headers["x-aetherstack-request-id"]
+    || null;
+  return error;
+}
+
 function conciseError(error) {
   if (!error) return "unknown error";
   if (error.code === "ECONNREFUSED") return "connection refused";
@@ -202,6 +239,8 @@ async function checkServices() {
         return {
           ...service,
           ok,
+          inferenceReady: service.id === "hub" ? response.body?.inference_ready !== false : undefined,
+          routableModelCount: service.id === "hub" ? Number(response.body?.routable_model_count || 0) : undefined,
           error: ok ? null : `HTTP ${response.status}`,
         };
       } catch (error) {
@@ -212,6 +251,7 @@ async function checkServices() {
   return {
     checkedAt: new Date().toISOString(),
     up: services.every((service) => service.ok),
+    inferenceReady: services.find((service) => service.id === "hub")?.inferenceReady !== false,
     services,
   };
 }
@@ -481,6 +521,7 @@ module.exports = {
   normalizeLocalUiUrl,
   request,
   requestStream,
+  responseError,
   composeDetails,
   composeLogs,
   execFileResult,

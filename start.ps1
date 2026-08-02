@@ -57,6 +57,33 @@ function Ensure-EnvFile {
   }
 }
 
+function Set-DotEnvValue([string]$Name, [string]$Value) {
+  $path = Join-Path $Root ".env"
+  $lines = if (Test-Path $path) { @(Get-Content -LiteralPath $path) } else { @() }
+  $replaced = $false
+  $updated = foreach ($line in $lines) {
+    if ($line -match "^\s*$([regex]::Escape($Name))\s*=") {
+      if (-not $replaced) { "$Name=$Value" }
+      $replaced = $true
+    } else { $line }
+  }
+  if (-not $replaced) { $updated += "$Name=$Value" }
+  [IO.File]::WriteAllLines($path, [string[]]$updated, (New-Object Text.UTF8Encoding($false)))
+}
+
+function Ensure-MasterKey {
+  $key = if ($env:LITELLM_MASTER_KEY) { $env:LITELLM_MASTER_KEY } else { Get-DotEnvValue "LITELLM_MASTER_KEY" }
+  if (-not $key -or $key -eq "sk-aether-local") {
+    $bytes = New-Object byte[] 32
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    $key = "sk-" + (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
+    Set-DotEnvValue "LITELLM_MASTER_KEY" $key
+    Write-Host "  Generated a private local gateway key." -ForegroundColor Yellow
+  }
+  $env:LITELLM_MASTER_KEY = $key
+}
+
 function Install-DockerDesktop {
   if ($env:AETHER_AUTO_INSTALL_DOCKER -eq "0") { return $false }
   $winget = Get-Command winget -ErrorAction SilentlyContinue
@@ -250,6 +277,7 @@ function Wait-CoreServices {
 
 Write-Banner
 Ensure-EnvFile
+Ensure-MasterKey
 $script:HostOllamaUrl = Get-HostOllamaUrl
 Ensure-Docker
 Invoke-SystemScan

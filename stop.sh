@@ -13,6 +13,20 @@ else
   exit 1
 fi
 
+bridge_session_file="$ROOT/.aetherstack/cli-bridge.screen"
+bridge_pid_file="$ROOT/.aetherstack/cli-bridge.pid"
+if [[ -f "$bridge_session_file" ]] && command -v screen >/dev/null 2>&1; then
+  bridge_session="$(cat "$bridge_session_file" 2>/dev/null || true)"
+  [[ -n "$bridge_session" ]] && screen -S "$bridge_session" -X quit >/dev/null 2>&1 || true
+fi
+if [[ -f "$bridge_pid_file" ]]; then
+  bridge_pid="$(tr -dc '0-9' < "$bridge_pid_file")"
+  if [[ "$bridge_pid" =~ ^[0-9]+$ ]] && kill -0 "$bridge_pid" 2>/dev/null; then
+    kill "$bridge_pid" 2>/dev/null || true
+  fi
+fi
+rm -f "$bridge_session_file" "$bridge_pid_file"
+
 
 pid_file="$ROOT/.aetherstack/managed-ollama.pid"
 command_file="$ROOT/.aetherstack/managed-ollama.command"

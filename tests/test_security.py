@@ -20,6 +20,7 @@ sys.path.insert(0, str(HUB))
 import backup  # noqa: E402
 import graph  # noqa: E402
 import inference_runtime  # noqa: E402
+import openai_gateway  # noqa: E402
 import pipelines  # noqa: E402
 import server as hub_server  # noqa: E402
 
@@ -97,6 +98,55 @@ class SecurityBoundaryTests(unittest.TestCase):
             hub_server._request_origin_allowed("https://attacker.example", "127.0.0.1:8766")
         )
 
+    def test_hub_refuses_a_non_loopback_published_bind(self) -> None:
+        for host in ("127.0.0.1", "localhost", "::1", "[::1]"):
+            hub_server._validate_public_binding(host)
+        with self.assertRaisesRegex(RuntimeError, "cannot be published beyond loopback"):
+            hub_server._validate_public_binding("0.0.0.0")
+
+    def test_release_has_no_low_entropy_gateway_key_default(self) -> None:
+        compose = (REPO / "docker-compose.yml").read_text(encoding="utf-8")
+        example = (REPO / ".env.example").read_text(encoding="utf-8")
+        self.assertNotIn("LITELLM_MASTER_KEY:-sk-aether-local", compose)
+        self.assertIn("LITELLM_MASTER_KEY=\n", example)
+        self.assertIn("openssl rand -hex 32", (REPO / "start.sh").read_text(encoding="utf-8"))
+        self.assertIn("start_managed_cli_bridge", (REPO / "start.sh").read_text(encoding="utf-8"))
+        self.assertIn("cli_bridge_ready", (REPO / "start.sh").read_text(encoding="utf-8"))
+        self.assertIn("cli-bridge.screen", (REPO / "stop.sh").read_text(encoding="utf-8"))
+
+        package = json.loads((REPO / "integrations" / "vscode" / "package.json").read_text(encoding="utf-8"))
+        self.assertNotIn("repository", package)
+        self.assertNotIn("bugs", package)
+        self.assertNotIn("homepage", package)
+        self.assertIs(package.get("qna"), False)
+        marketplace_readme = (REPO / "integrations" / "vscode" / "README.md").read_text(encoding="utf-8")
+        self.assertNotIn("github.com/piksliviksi/aetherstack", marketplace_readme)
+
+    def test_gateway_never_authorizes_an_empty_key(self) -> None:
+        self.assertFalse(openai_gateway.authorized("Bearer ", key=""))
+        self.assertTrue(openai_gateway.authorized("Bearer generated-secret", key="generated-secret"))
+
+    def test_hub_errors_have_stable_codes_and_hide_internal_failures(self) -> None:
+        public = hub_server._public_error_payload(400, {"error": "goal is required"}, "req-1")
+        self.assertEqual(public["error"], "goal is required")
+        self.assertEqual(public["code"], "invalid_request")
+        self.assertEqual(public["request_id"], "req-1")
+
+        internal = hub_server._public_error_payload(
+            500,
+            {"error": "database password leaked from /private/path"},
+            "req-2",
+        )
+        self.assertEqual(internal["error"], "AetherStack could not complete the request.")
+        self.assertEqual(internal["code"], "internal_error")
+        self.assertNotIn("password", json.dumps(internal))
+
+    def test_hub_health_separates_process_and_inference_readiness(self) -> None:
+        source = (HUB / "server.py").read_text(encoding="utf-8")
+        self.assertIn('"process_up": True', source)
+        self.assertIn('"inference_ready": bool(routable_models)', source)
+        self.assertIn('"local_fallback_ready": "local-default" in routable_models', source)
+
     def test_hub_json_body_is_bounded_and_object_only(self) -> None:
         fake = SimpleNamespace(
             headers={"Content-Length": "2", "Content-Type": "application/json"},
@@ -160,6 +210,11 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertLess(html.index(">Simple</a>"), html.index(">Advanced</a>"))
         self.assertLess(html.index(">Advanced</a>"), html.index(">WebUI</a>"))
         self.assertIn("How to restore the Host CLI bridge", html)
+        self.assertIn("No presets are available.", html)
+        self.assertIn('aria-live="polite"', html)
+        self.assertIn("X-AetherStack-Workspace-Token", html)
+        self.assertIn("aetherstack.workspaceToken", html)
+        self.assertIn("graphHash", html)
 
     def test_advanced_graph_loads_capability_resolved_service_trees(self) -> None:
         html = (HUB / "static" / "graph.html").read_text(encoding="utf-8")
@@ -183,6 +238,12 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertRegex(html, r'id="palette"[^>]*>.*id="paletteTypes".*id="btnDel"')
         toolbar = html.split('<div id="toolbar">', 1)[1].split('<div id="wrap">', 1)[0]
         self.assertNotIn('id="btnDel"', toolbar)
+        self.assertIn("X-AetherStack-Workspace-Token", html)
+        self.assertIn("aetherstack.workspaceToken", html)
+        self.assertIn('role="dialog"', html)
+        self.assertIn('aria-modal="true"', html)
+        self.assertIn("serviceGraphRequest", html)
+        self.assertIn('d.addEventListener("keydown"', html)
 
     def test_agent_markdown_survives_graph_pipeline_and_reaches_prompt(self) -> None:
         profile = "# Evidence critic\n\nSTOP if evidence cannot be sourced."
@@ -256,6 +317,9 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIn("OPENAI_API_BASE_URL=http://aether-hub:8766/v1", compose)
         self.assertIn("ENABLE_OLLAMA_API=false", compose)
         self.assertIn("seed_openwebui.py", compose)
+        self.assertIn("http://127.0.0.1:3000/healthz", compose)
+        proxy = (REPO / "open-webui-proxy" / "default.conf.template").read_text(encoding="utf-8")
+        self.assertIn("location = /healthz", proxy)
 
     def test_open_webui_seed_preserves_unrelated_configuration_and_creates_backup(self) -> None:
         seed_path = REPO / "open-webui-config" / "seed.py"

@@ -11,6 +11,7 @@ import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +24,22 @@ from inference_runtime import begin as begin_inference
 from inference_runtime import finish as finish_inference
 from matrix import _score_model, normalize_prefer, tiers_match
 from memory import MemoryStore
+from work_packet import (
+    claims_table,
+    coverage_gaps,
+    ensure_partitions,
+    final_work_packet_instruction,
+    force_open_claims_for_gaps,
+    format_packet_compact,
+    honest_incomplete_answer,
+    lead_work_packet_instruction,
+    merge_packets,
+    parse_work_packet,
+    partition_for_worker,
+    review_work_packet_instruction,
+    worker_failure_claim,
+    worker_work_packet_instruction,
+)
 
 ROOT = Path(__file__).resolve().parent
 CATALOG_PATH = Path(os.environ.get("AETHER_SERVICE_CATALOG", str(ROOT / "service_catalog.yaml")))
@@ -33,10 +50,28 @@ CLI_BRIDGE_URL = os.environ.get("AETHER_CLI_BRIDGE_URL", "http://host.docker.int
 CLI_BRIDGE_TOKEN = os.environ.get("AETHER_CLI_BRIDGE_TOKEN", "")
 VERIFY_TTL_SECONDS = 5 * 60
 _verify_cache: dict[str, tuple[float, bool]] = {}
+_verify_cache_lock = threading.Lock()
+_preset_model_cooldown: dict[str, float] = {}
+_preset_model_cooldown_lock = threading.Lock()
+try:
+    _preset_cooldown_raw = int(os.environ.get("AETHER_PRESET_MODEL_COOLDOWN_SECONDS", "1800"))
+except ValueError:
+    _preset_cooldown_raw = 1800
+PRESET_MODEL_COOLDOWN_SECONDS = max(30, min(3600, _preset_cooldown_raw))
 # Auto mode: sticky preferred model per session (host CLI → next CLI → local GPU)
 _auto_session_model: dict[str, str] = {}
+_auto_session_exhausted: dict[str, set[str]] = {}
+_auto_session_lru: OrderedDict[str, None] = OrderedDict()
+_auto_session_lock = threading.RLock()
+try:
+    _auto_session_max_raw = int(os.environ.get("AETHER_AUTO_SESSION_MAX", "2048"))
+except ValueError:
+    _auto_session_max_raw = 2048
+_AUTO_SESSION_MAX = max(16, min(100_000, _auto_session_max_raw))
 # Default host-CLI order, used until the user saves their own priority.
 HOST_CLI_AUTO_ORDER = ("grok-cli", "claude-cli", "codex-cli")
+AUTO_SEQUENCE_MODES = ("sequential_exhaustion", "per_request")
+DEFAULT_AUTO_SEQUENCE_MODE = "sequential_exhaustion"
 LOCAL_CODING_AUTO_ORDER = (
     "local-default",
     "local-llama",
@@ -61,8 +96,21 @@ def get_auto_order() -> list[str]:
     return list(HOST_CLI_AUTO_ORDER)
 
 
-def set_auto_order(order: Any) -> list[str]:
-    """Persist the fallback priority. Empty list restores the default."""
+def get_auto_sequence_mode() -> str:
+    """Saved Auto continuation policy; sequential exhaustion is the product default."""
+    try:
+        if AUTO_CHAIN_FILE.is_file():
+            data = json.loads(AUTO_CHAIN_FILE.read_text(encoding="utf-8"))
+            mode = str(data.get("sequence_mode") or "").strip()
+            if mode in AUTO_SEQUENCE_MODES:
+                return mode
+    except (OSError, json.JSONDecodeError):
+        pass
+    return DEFAULT_AUTO_SEQUENCE_MODE
+
+
+def set_auto_order(order: Any, sequence_mode: Any = None) -> list[str]:
+    """Persist model priority and continuation policy. Empty order restores defaults."""
     if not isinstance(order, (list, tuple)):
         raise ValueError("order must be a list of model aliases")
     cleaned: list[str] = []
@@ -72,12 +120,31 @@ def set_auto_order(order: Any) -> list[str]:
             raise ValueError(f"model alias too long: {alias[:32]}…")
         if alias and alias not in cleaned:
             cleaned.append(alias)
+    mode = str(sequence_mode or get_auto_sequence_mode()).strip()
+    if mode not in AUTO_SEQUENCE_MODES:
+        raise ValueError(f"sequence_mode must be one of: {', '.join(AUTO_SEQUENCE_MODES)}")
     AUTO_CHAIN_FILE.parent.mkdir(parents=True, exist_ok=True)
     AUTO_CHAIN_FILE.write_text(
-        json.dumps({"order": cleaned, "updated_at": time.time()}, indent=2) + "\n",
+        json.dumps({"order": cleaned, "sequence_mode": mode, "updated_at": time.time()}, indent=2) + "\n",
         encoding="utf-8",
     )
+    with _auto_session_lock:
+        _auto_session_model.clear()
+        _auto_session_exhausted.clear()
+        _auto_session_lru.clear()
     return cleaned or list(HOST_CLI_AUTO_ORDER)
+
+
+def _touch_auto_session(session_id: str) -> None:
+    """Update bounded process-local Auto state; caller must hold the state lock."""
+    if not session_id:
+        return
+    _auto_session_lru.pop(session_id, None)
+    _auto_session_lru[session_id] = None
+    while len(_auto_session_lru) > _AUTO_SESSION_MAX:
+        expired, _ = _auto_session_lru.popitem(last=False)
+        _auto_session_model.pop(expired, None)
+        _auto_session_exhausted.pop(expired, None)
 _FAILOVER_ERROR_RE = re.compile(
     r"rate.?limit|quota|usage.?limit|weekly|daily.?limit|session.?limit|"
     r"too many requests|\b429\b|insufficient.?quota|exceeded|out of credits|"
@@ -86,6 +153,18 @@ _FAILOVER_ERROR_RE = re.compile(
     r"context.?length|maximum context|token limit|exhausted|no credits|"
     r"resource.?exhausted|throttl|temporarily unavailable|connection refused|"
     r"host CLI bridge|not configured|failed to|ECONNREFUSED",
+    re.I,
+)
+_EXHAUSTION_ERROR_RE = re.compile(
+    r"rate.?limit|quota|usage.?limit|weekly|daily.?limit|session.?limit|"
+    r"too many requests|\b429\b|insufficient.?quota|out of credits|billing|"
+    r"subscription limit|limit reached|context.?length|maximum context|token limit|"
+    r"resource.?exhausted|no credits|payment required",
+    re.I,
+)
+_TRANSIENT_ERROR_RE = re.compile(
+    r"temporar(?:y|ily) unavailable|overloaded|connection (?:reset|refused)|"
+    r"ECONNRESET|ECONNREFUSED|EAI_AGAIN|bad gateway|service unavailable|gateway timeout|\b50[234]\b",
     re.I,
 )
 _MATCH_STOP_WORDS = {
@@ -133,6 +212,8 @@ def load_service_catalog(path: Path | None = None) -> dict[str, Any]:
         value = yaml.safe_load(handle)
     if not isinstance(value, dict) or not isinstance(value.get("services"), dict):
         raise ValueError("invalid service_catalog.yaml")
+    if value.get("schema") != "aetherstack.services.v1":
+        raise ValueError("unsupported service catalog schema")
     return value
 
 
@@ -186,8 +267,11 @@ def _candidate_models(
             score += 45 - 15 * _cost_rank(meta.get("cost"))
             if meta.get("tier") == "local":
                 score += 15
+        # Presets exist to gain independent judgment from multiple models. Once
+        # capability and cost constraints are satisfied, strongly prefer a model
+        # that has not already filled another role in this preset.
         if alias not in used_models:
-            score += 6
+            score += 100
         if meta.get("provider") and meta.get("provider") not in used_providers:
             score += 4
         ranked.append((score, alias, meta))
@@ -483,6 +567,7 @@ def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]
         "id": service_id,
         "label": service.get("label") or service_id,
         "summary": service.get("summary") or "",
+        "task_template": service.get("task_template") or service.get("summary") or "",
         "activities": list(service.get("activities") or []),
         "accent": service.get("accent") or "blue",
         "instructions": service.get("instructions") or "",
@@ -508,7 +593,8 @@ def resolve_service(service_id: str, snapshot: dict[str, Any]) -> dict[str, Any]
 
 _ASSURANCE_SERVICES = {"research", "testing", "bugfixing", "whitehat-pentesting"}
 _ASSURANCE_WORDS = re.compile(
-    r"\b(auth|security|privacy|release|production|migration|payment|permission|destructive|regression|audit|legal)\b",
+    r"\b(auth|security|privacy|release|production|migration|payment|permission|destructive|regression|audit|legal|"
+    r"analy[sz]e|analysis|review|critic|critique|assess|evaluate|inspect|weak spots?|risks?|codebase)\b",
     re.IGNORECASE,
 )
 _COMPLEX_WORDS = re.compile(
@@ -584,10 +670,11 @@ def minimize_service_agents(
 
 
 def _verify_model(alias: str) -> bool:
-    cached = _verify_cache.get(alias)
+    with _verify_cache_lock:
+        cached = _verify_cache.get(alias)
     if cached and time.time() - cached[0] < VERIFY_TTL_SECONDS:
         return cached[1]
-    key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    key = os.environ.get("LITELLM_MASTER_KEY", "")
     url = f"{LITELLM_BASE_URL}/health?model={urllib.parse.quote(alias)}"
     request = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
     ok = False
@@ -601,7 +688,8 @@ def _verify_model(alias: str) -> bool:
         )
     except Exception:
         ok = False
-    _verify_cache[alias] = (time.time(), ok)
+    with _verify_cache_lock:
+        _verify_cache[alias] = (time.time(), ok)
     return ok
 
 
@@ -662,7 +750,8 @@ def resolve_verified_service(
 
 def list_services(snapshot: dict[str, Any], discover: dict[str, Any] | None = None) -> dict[str, Any]:
     catalog = load_service_catalog()
-    services = [minimize_service_agents(resolve_service(service_id, snapshot)) for service_id in catalog["services"]]
+    services = [describe_auto_service(snapshot)]
+    services.extend(minimize_service_agents(resolve_service(service_id, snapshot)) for service_id in catalog["services"])
     return {
         "schema": catalog.get("schema"),
         "services": services,
@@ -675,7 +764,8 @@ def list_services(snapshot: dict[str, Any], discover: dict[str, Any] | None = No
         }),
         "runtime": (discover or {}).get("services") or {},
         "cloud": (discover or {}).get("cloud_keys") or {},
-        "note": "Agents are resolved from live capabilities. The catalog contains no model or provider pins.",
+        "default_service": "auto",
+        "note": "Auto is the default sequential model chain; task presets resolve teams from live capabilities.",
     }
 
 
@@ -948,6 +1038,23 @@ def plan_service(
         plan["models_in_event"] = sorted(
             {agent.get("model") for agent in plan["agents"] if agent.get("model")}
         )
+    resolved_agents = [agent for agent in (resolved.get("agents") or []) if agent.get("available")]
+    role_offsets: dict[str, int] = {}
+    for call in plan.get("litellm_calls") or []:
+        role = str(call.get("role") or "")
+        role_agents = [agent for agent in resolved_agents if agent.get("role") == role]
+        task_id = str(call.get("task_id") or "")
+        agent = next((item for item in role_agents if str(item.get("id") or "") == task_id), None)
+        if agent is None and role_agents:
+            offset = role_offsets.get(role, 0)
+            agent = role_agents[min(offset, len(role_agents) - 1)]
+            role_offsets[role] = offset + 1
+        if agent:
+            call["fallback_chain"] = [
+                str(item.get("model") if isinstance(item, dict) else item)
+                for item in (agent.get("fallback_chain") or [])
+                if (item.get("model") if isinstance(item, dict) else item)
+            ]
     plan["service"] = resolved
     return plan
 
@@ -955,13 +1062,14 @@ def plan_service(
 def _chat_completion(call: dict[str, Any], messages: list[dict[str, str]] | None = None) -> dict[str, Any]:
     model = str(call.get("model") or "")
     host_cli = model in {"codex-cli", "claude-cli", "grok-cli"}
-    key = CLI_BRIDGE_TOKEN if host_cli else os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    key = CLI_BRIDGE_TOKEN if host_cli else os.environ.get("LITELLM_MASTER_KEY", "")
     if host_cli and not key:
         raise RuntimeError("host CLI bridge is not configured")
     payload = {
         "model": model,
         "messages": messages or call.get("messages") or [],
         "max_tokens": call.get("max_tokens") or 1600,
+        "workspace_write": bool(call.get("workspace_write")),
     }
     request = urllib.request.Request(
         f"{CLI_BRIDGE_URL if host_cli else LITELLM_BASE_URL}/v1/chat/completions",
@@ -1002,7 +1110,7 @@ def _chat_completion_stream(
         "stream": True,
         "stream_options": {"include_usage": True},
     }
-    key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    key = os.environ.get("LITELLM_MASTER_KEY", "")
     request = urllib.request.Request(
         f"{LITELLM_BASE_URL}/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
@@ -1242,6 +1350,71 @@ def _emit_status(
         pass
 
 
+def _complete_with_retry(
+    completion: Callable[[dict[str, Any], list[dict[str, Any]] | None], dict[str, Any]],
+    call: dict[str, Any],
+    messages: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Retry one clearly transient transport/backend failure, never auth, quota, or timeouts."""
+    try:
+        return completion(call, messages)
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        if code not in (502, 503, 504) and not _TRANSIENT_ERROR_RE.search(str(exc or "")):
+            raise
+        time.sleep(0.15)
+        return completion(call, messages)
+
+
+def _complete_with_preset_failover(
+    completion: Callable[[dict[str, Any], list[dict[str, Any]] | None], dict[str, Any]],
+    call: dict[str, Any],
+    messages: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Continue a preset role on its next resolved model after a provider limit."""
+    models: list[str] = []
+    for candidate in [call.get("model"), *(call.get("fallback_chain") or [])]:
+        model = str(candidate or "")
+        if model and model not in models:
+            models.append(model)
+    errors: list[dict[str, str]] = []
+    now = time.monotonic()
+    with _preset_model_cooldown_lock:
+        expired = [model for model, until in _preset_model_cooldown.items() if until <= now]
+        for model in expired:
+            _preset_model_cooldown.pop(model, None)
+        cooled = {model for model in models if _preset_model_cooldown.get(model, 0) > now}
+    eligible = [model for model in models if model not in cooled]
+    if eligible:
+        for model in models:
+            if model in cooled:
+                errors.append({"model": model, "error": "temporarily skipped after a recent provider failure"})
+        models = eligible
+    for index, model in enumerate(models):
+        attempt = {**call, "model": model}
+        try:
+            result = _complete_with_retry(completion, attempt, messages)
+            with _preset_model_cooldown_lock:
+                _preset_model_cooldown.pop(model, None)
+            if errors:
+                result = {
+                    **result,
+                    "failover_from": errors[0]["model"],
+                    "failover_errors": errors,
+                    "attempted_models": [item["model"] for item in errors] + [model],
+                }
+            return result
+        except Exception as exc:
+            failover_error = is_failover_error(exc)
+            if failover_error:
+                with _preset_model_cooldown_lock:
+                    _preset_model_cooldown[model] = time.monotonic() + PRESET_MODEL_COOLDOWN_SECONDS
+            if not failover_error or index == len(models) - 1:
+                raise
+            errors.append({"model": model, "error": str(exc)[:500]})
+    raise RuntimeError("preset role has no available model")
+
+
 def is_failover_error(exc: BaseException | str) -> bool:
     """True when the failure looks like quota/limit/unavailability (try next model)."""
     text = str(exc or "")
@@ -1256,11 +1429,19 @@ def is_failover_error(exc: BaseException | str) -> bool:
     return False
 
 
+def is_exhaustion_error(exc: BaseException | str) -> bool:
+    """True only for limits that should advance a sequential session permanently."""
+    text = str(exc or "")
+    code = getattr(exc, "code", None)
+    return bool(_EXHAUSTION_ERROR_RE.search(text)) or code in (402, 429)
+
+
 def list_auto_failover_chain(
     snapshot: dict[str, Any],
     *,
     session_id: str | None = None,
     prefer_local: bool = False,
+    sequence_mode: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Ordered models for Auto mode.
@@ -1294,16 +1475,27 @@ def list_auto_failover_chain(
             }
         )
 
-    sticky = _auto_session_model.get(str(session_id or "").strip() or "")
-    if sticky and not prefer_local:
+    mode = sequence_mode or get_auto_sequence_mode()
+    session_key = str(session_id or "").strip()
+    with _auto_session_lock:
+        if mode == "sequential_exhaustion" and session_key:
+            exhausted = set(_auto_session_exhausted.get(session_key, set()))
+            sticky = _auto_session_model.get(session_key)
+            if sticky or exhausted:
+                _touch_auto_session(session_key)
+        else:
+            exhausted = set()
+            sticky = None
+    if sticky and sticky not in exhausted and not prefer_local:
         add(sticky, "sticky session model")
 
     if not prefer_local:
         for alias in get_auto_order():
-            add(alias, "authenticated host CLI (user priority order)")
+            if alias not in exhausted:
+                add(alias, "authenticated host CLI (user priority order)")
         # Any other host_cli aliases the bridge exposed
         for alias, meta in models.items():
-            if meta.get("executor") == "host_cli" and meta.get("available"):
+            if alias not in exhausted and meta.get("executor") == "host_cli" and meta.get("available"):
                 add(str(alias), "authenticated host CLI")
 
     for alias in LOCAL_CODING_AUTO_ORDER:
@@ -1342,8 +1534,161 @@ def describe_auto_mode(
         "host_cli_count": sum(1 for item in chain if item.get("executor") == "host_cli"),
         "local_count": sum(1 for item in chain if item.get("tier") == "local"),
         "priority_order": get_auto_order(),
+        "order": get_auto_order(),
         "priority_default": list(HOST_CLI_AUTO_ORDER),
+        "sequence_mode": get_auto_sequence_mode(),
+        "sequence_modes": list(AUTO_SEQUENCE_MODES),
     }
+
+
+def describe_auto_service(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Service-list shape for Auto so every UI treats it as a first-class preset."""
+    description = describe_auto_mode(snapshot)
+    chain = description["model_chain"]
+    agents = [
+        {
+            "id": f"route-{index + 1}",
+            "role": "route",
+            "label": f"{index + 1}. {item['model']}",
+            "model": item["model"],
+            "available": True,
+            "provider": item.get("provider"),
+            "backend": item.get("backend"),
+            "tier": item.get("tier"),
+            "needs": ["chat"],
+            "missing_capabilities": [],
+        }
+        for index, item in enumerate(chain)
+    ]
+    return {
+        "id": "auto",
+        "label": "Auto",
+        "summary": "Continue with one model until its limit, then hand off to the next model and finally local Ollama.",
+        "activities": ["continue work", "preserve context", "switch on limits", "finish locally"],
+        "accent": "blue",
+        "mode": "auto",
+        "lean_mode": "balanced",
+        "token_saver": False,
+        "behavior_source": "",
+        "agents": agents,
+        "ready": bool(agents),
+        "degraded": not bool(agents),
+        "available_agents": len(agents),
+        "agent_count": len(agents),
+        "models": [item["model"] for item in chain],
+        "providers": sorted({item.get("provider") for item in chain if item.get("provider")}),
+        "backends": sorted({item.get("backend") for item in chain if item.get("backend")}),
+        "missing": [],
+        "partial": [],
+        "verification": "live",
+        "sequence_mode": description["sequence_mode"],
+        "priority_order": description["priority_order"],
+    }
+
+
+def build_auto_graph(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Editable route graph for Auto's saved model order."""
+    description = describe_auto_mode(snapshot)
+    aliases = list(description["priority_order"])
+    available = snapshot.get("models") or {}
+    for item in description["model_chain"]:
+        alias = item.get("model")
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    graph_id = "service-auto"
+    goal_id = f"{graph_id}-goal"
+    output_id = f"{graph_id}-output"
+    nodes: list[dict[str, Any]] = [
+        {
+            "id": goal_id,
+            "type": "goal",
+            "x": 30,
+            "y": 150,
+            "data": {"label": "Incoming request", "text": "Auto continuation", "service_id": "auto"},
+        }
+    ]
+    edges: list[dict[str, Any]] = []
+    previous = goal_id
+    for index, alias in enumerate(aliases):
+        meta = available.get(alias) or {}
+        node_id = f"{graph_id}-route-{index + 1}"
+        nodes.append(
+            {
+                "id": node_id,
+                "type": "route",
+                "x": 180 + index * 150,
+                "y": 150,
+                "data": {
+                    "label": f"{index + 1}. {alias}",
+                    "model": alias,
+                    "tier": meta.get("tier"),
+                    "provider": meta.get("provider"),
+                    "available": bool(meta.get("available")),
+                    "service_id": "auto",
+                    "synthetic": False,
+                },
+            }
+        )
+        edges.append({"id": f"e-{previous}-{node_id}", "from": previous, "to": node_id, "kind": "data"})
+        previous = node_id
+    nodes.append(
+        {
+            "id": output_id,
+            "type": "output",
+            "x": 210 + len(aliases) * 150,
+            "y": 150,
+            "data": {"label": "Answer", "service_id": "auto"},
+        }
+    )
+    edges.append({"id": f"e-{previous}-{output_id}", "from": previous, "to": output_id, "kind": "data"})
+    return {
+        "schema": "aetherstack.graph.v1",
+        "id": graph_id,
+        "title": "Auto model sequence",
+        "service_id": "auto",
+        "sequence_mode": description["sequence_mode"],
+        "sequence_modes": description["sequence_modes"],
+        "nodes": nodes,
+        "edges": edges,
+        "recursive": False,
+        "max_iterations": 1,
+        "resolved_models": [item.get("model") for item in description["model_chain"]],
+    }
+
+
+def save_auto_graph(graph: dict[str, Any]) -> dict[str, Any]:
+    """Persist the connected Goal -> route nodes -> Output ordering."""
+    nodes = {str(node.get("id")): node for node in (graph.get("nodes") or []) if node.get("id")}
+    goal = next((node for node in nodes.values() if node.get("type") == "goal"), None)
+    if not goal:
+        raise ValueError("Auto graph requires a Goal node")
+    outgoing: dict[str, list[str]] = {}
+    for edge in graph.get("edges") or []:
+        if edge.get("kind", "data") == "data" and edge.get("from") in nodes and edge.get("to") in nodes:
+            outgoing.setdefault(str(edge["from"]), []).append(str(edge["to"]))
+    order: list[str] = []
+    cursor = str(goal["id"])
+    seen = {cursor}
+    while True:
+        targets = [target for target in outgoing.get(cursor, []) if target not in seen]
+        if len(targets) != 1:
+            raise ValueError("Auto sequence must be one unambiguous Goal -> models -> Output path")
+        cursor = targets[0]
+        seen.add(cursor)
+        node = nodes[cursor]
+        if node.get("type") == "output":
+            break
+        if node.get("type") != "route":
+            raise ValueError("Auto sequence accepts only model route nodes between Goal and Output")
+        alias = str((node.get("data") or {}).get("model") or "").strip()
+        if not alias:
+            raise ValueError("Every Auto route node needs a model")
+        if alias not in order:
+            order.append(alias)
+    if not order:
+        raise ValueError("Auto sequence requires at least one model")
+    set_auto_order(order, graph.get("sequence_mode"))
+    return {"ok": True, "id": "auto", "order": order, "sequence_mode": get_auto_sequence_mode()}
 
 
 def _auto_memory_block(
@@ -1450,7 +1795,15 @@ def execute_auto(
         if event.get("memory_context_kb") is not None
         else event.get("context_kb")
     )
-    chain = list_auto_failover_chain(snapshot, session_id=sid, prefer_local=prefer_local)
+    sequence_mode = str(event.get("sequence_mode") or get_auto_sequence_mode())
+    if sequence_mode not in AUTO_SEQUENCE_MODES:
+        raise ValueError(f"sequence_mode must be one of: {', '.join(AUTO_SEQUENCE_MODES)}")
+    chain = list_auto_failover_chain(
+        snapshot,
+        session_id=sid,
+        prefer_local=prefer_local,
+        sequence_mode=sequence_mode,
+    )
     if not chain:
         raise ValueError(
             "no models available for Auto mode — authenticate a host CLI (Grok/Claude/Codex) "
@@ -1504,18 +1857,42 @@ def execute_auto(
         _emit_status(on_status, "answering", model=model, models=chain_models, label=f"Using {model}…")
         call = {"model": model, "max_tokens": int(event.get("max_tokens") or 2000), "role": "auto"}
         try:
+            streamed_chunks: list[str] = []
+            streamed_result = None
             if on_delta is not None and not host:
-                result = _chat_completion_stream(call, messages, on_delta)
+                streamed_result = _chat_completion_stream(call, messages, streamed_chunks.append)
+                result = streamed_result
             else:
                 result = completion(call, messages)
+            text = str(result.get("content") or "")
+            if final_output_needs_correction(text):
+                correction_messages = [
+                    *messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            "Do the bounded work now. Replace intent or promises with the actual answer, concrete "
+                            "findings, evidence, and verification requested by the user. Do not expose internal drafts."
+                        ),
+                    },
+                ]
+                result = completion(call, correction_messages)
                 text = str(result.get("content") or "")
-                if on_delta is not None and text:
+            if final_output_needs_correction(text):
+                raise RuntimeError(f"{model} returned intent-to-work instead of a completed answer")
+            if on_delta is not None:
+                if result is streamed_result:
+                    for chunk in streamed_chunks:
+                        on_delta(chunk)
+                elif text:
                     on_delta(text)
             answer = str(result.get("content") or "").strip()
             if not answer:
                 raise RuntimeError(f"{model} returned an empty answer")
-            if sid:
-                _auto_session_model[sid] = model
+            if sid and sequence_mode == "sequential_exhaustion":
+                with _auto_session_lock:
+                    _auto_session_model[sid] = model
+                    _touch_auto_session(sid)
             if memory is not None and sid:
                 try:
                     memory.append_message(sid, "user", goal, meta={"auto": True})
@@ -1540,6 +1917,7 @@ def execute_auto(
                 "failover_attempts": attempts,
                 "attempt_index": index,
                 "memory": "unified",
+                "sequence_mode": sequence_mode,
                 "memory_context_kb": context_kb,
                 "memory_chars_used": len(mem_block) if mem_block else 0,
                 "selection": {
@@ -1567,6 +1945,12 @@ def execute_auto(
         except Exception as exc:
             last_error = str(exc)[:500]
             fail_kind = "limit_or_unavailable" if is_failover_error(exc) else "error"
+            if sid and sequence_mode == "sequential_exhaustion" and is_exhaustion_error(exc):
+                with _auto_session_lock:
+                    _auto_session_exhausted.setdefault(sid, set()).add(model)
+                    if _auto_session_model.get(sid) == model:
+                        _auto_session_model.pop(sid, None)
+                    _touch_auto_session(sid)
             attempts.append(
                 {
                     "model": model,
@@ -1595,6 +1979,52 @@ def execute_auto(
     )
 
 
+_INTENT_ONLY_RE = re.compile(
+    r"\b(i(?:'ll| will| am going to)|let me|next i|i can|will inspect|will verify|will investigate|will check)\b",
+    re.IGNORECASE,
+)
+_EVIDENCE_RE = re.compile(
+    r"(?:[/\\][\w.-]+|\b[\w.-]+\.(?:py|js|ts|html|css|yaml|yml|json|md|sh|go|rs|java|cpp|h)\b|"
+    r"\b(?:observed|evidence|result|output|source|assumption|inference|reproduced|tested|line|symbol|function|class)\b)",
+    re.IGNORECASE,
+)
+_COMPLETED_WORK_RE = re.compile(
+    r"\b(?:observed|found|checked|verified|ran|tested|reproduced|shows?|contains?|fails?|passes?|line\s+\d+)\b",
+    re.IGNORECASE,
+)
+_FUTURE_WORK_OPENING_RE = re.compile(
+    r"^\s*(?:#{1,6}[^\n]*\n+\s*)*(?:to\s+(?:begin|start)|i(?:'ve| have)\s+(?:begun|started)|"
+    r"i(?:'ll| will| am going to)|let me)\b",
+    re.IGNORECASE,
+)
+_INTERNAL_PROCESS_RE = re.compile(
+    r"\b(?:internal draft|internal supporting material|internal quality notes)\s*:",
+    re.IGNORECASE,
+)
+
+
+def final_output_needs_correction(content: Any) -> bool:
+    """Keep plans and internal orchestration transcripts out of final answers."""
+    text = str(content or "").strip()
+    if not text:
+        return True
+    if _FUTURE_WORK_OPENING_RE.search(text) or _INTERNAL_PROCESS_RE.search(text):
+        return True
+    return bool(_INTENT_ONLY_RE.search(text)) and not bool(_COMPLETED_WORK_RE.search(text))
+
+
+def worker_output_needs_correction(content: Any) -> bool:
+    """Reject worker placeholders before they can masquerade as useful team work."""
+    text = str(content or "").strip()
+    if len(text) < 120:
+        return True
+    if not _EVIDENCE_RE.search(text):
+        return True
+    if _INTENT_ONLY_RE.search(text) and "\n" not in text:
+        return True
+    return bool(_INTENT_ONLY_RE.search(text)) and not bool(_COMPLETED_WORK_RE.search(text))
+
+
 def execute_service(
     service_id: str,
     snapshot: dict[str, Any],
@@ -1618,6 +2048,8 @@ def execute_service(
     `on_status` reports short phase/model updates so clients can show progress before
     the final answer tokens stream (lead/workers/review can take a long time).
     """
+    run_started = time.perf_counter()
+    timings_ms: dict[str, int] = {}
     event = dict(event or {})
     goal = str(event.get("goal") or event.get("prompt") or "").strip()
     if not goal:
@@ -1629,6 +2061,8 @@ def execute_service(
     plan = plan_service(service_id, snapshot, event)
     activation = _activate_resolved_service(plan["service"], event)
     calls = plan.get("litellm_calls") or []
+    if any(call.get("workspace_write") for call in calls) and not event.get("_workspace_write_authorized"):
+        raise PermissionError("workspace-write execution requires trusted local authorization")
     lead_call = next((call for call in calls if call.get("role") == "mastermind"), None)
     supervisor_call = next((call for call in calls if call.get("role") == "supervisor"), None)
     worker_calls = [call for call in calls if call.get("role") == "worker"][:6]
@@ -1678,31 +2112,152 @@ def execute_service(
         lead_messages.append({"role": "user", "content": xref_block})
     if memory_block:
         lead_messages.append({"role": "user", "content": memory_block})
+    lead_messages.append(
+        {
+            "role": "user",
+            "content": (
+                "Quality contract: inspect the available implementation or supplied material before concluding. "
+                "Use concrete evidence such as file paths, symbols, commands, observed output, source links, or explicit "
+                "assumptions. Delegate checks that can falsify the draft. For analysis/review requests, identify weak "
+                "spots, behavioral risks, and missing verification rather than returning a component inventory. "
+                + lead_work_packet_instruction()
+            ),
+        }
+    )
+    lead_started = time.perf_counter()
     _emit_status(on_status, "lead", model=lead_call.get("model"), label="Lead…")
     try:
-        lead = completion(lead_call, lead_messages)
+        lead = _complete_with_preset_failover(completion, lead_call, lead_messages)
     except Exception:
         _emit_status(on_status, "lead_error", model=lead_call.get("model"), label="Lead failed")
         raise
     _emit_status(on_status, "lead_done", model=lead.get("model") or lead_call.get("model"), label="Lead done…")
+    timings_ms["lead"] = round((time.perf_counter() - lead_started) * 1000)
 
-    def run_worker(call: dict[str, Any]) -> dict[str, Any]:
+    lead_packet = parse_work_packet(lead.get("content") or "", goal=goal, default_owner="lead")
+    lead_packet = ensure_partitions(lead_packet, worker_calls, goal=goal)
+    team_packet = copy.deepcopy(lead_packet)
+
+    def run_worker(index_call: tuple[int, dict[str, Any]]) -> dict[str, Any]:
+        index, call = index_call
+        task_id = str(call.get("task_id") or f"worker-{index + 1}")
+        partition = partition_for_worker(lead_packet, task_id, index)
         messages = copy.deepcopy(call.get("messages") or [])
-        messages.append({"role": "user", "content": f"Lead plan:\n{lead['content'][:12000]}"})
+        # Partition-scoped brief: avoid replaying the full lead essay (token overlap).
+        messages.append(
+            {
+                "role": "user",
+                "content": worker_work_packet_instruction(partition, lead_packet),
+            }
+        )
         try:
-            result = completion(call, messages)
-            return {"ok": True, "role": "worker", "task_id": call.get("task_id"), **result}
+            result = _complete_with_preset_failover(completion, call, messages)
+            if worker_output_needs_correction(result.get("content")):
+                first_usage = result.get("usage") or {}
+                first_failover = {
+                    key: copy.deepcopy(result.get(key))
+                    for key in ("failover_from", "failover_errors", "attempted_models")
+                    if result.get(key) is not None
+                }
+                attempted = set(result.get("attempted_models") or [])
+                retry_call = {
+                    **call,
+                    "model": result.get("model") or call.get("model"),
+                    "fallback_chain": [
+                        model for model in (call.get("fallback_chain") or []) if model not in attempted
+                    ],
+                }
+                retry_messages = copy.deepcopy(messages)
+                retry_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "That response described intended work without sufficient evidence. Perform the bounded check "
+                            "now and replace it with findings for your partition only. Include concrete references or observed "
+                            "results; clearly mark anything that remains an inference. Prefer a Work Packet JSON claims list."
+                        ),
+                    }
+                )
+                result = _complete_with_preset_failover(completion, retry_call, retry_messages)
+                for key, value in first_failover.items():
+                    result.setdefault(key, value)
+                retry_usage = result.get("usage") or {}
+                result["usage"] = {
+                    key: int(first_usage.get(key) or 0) + int(retry_usage.get(key) or 0)
+                    for key in set(first_usage) | set(retry_usage)
+                }
+                if worker_output_needs_correction(result.get("content")):
+                    attempted_models = set(result.get("attempted_models") or [])
+                    attempted_models.add(str(result.get("model") or call.get("model") or ""))
+                    alternatives = [
+                        model for model in (call.get("fallback_chain") or []) if model not in attempted_models
+                    ]
+                    if alternatives:
+                        quality_call = {
+                            **call,
+                            "model": alternatives[0],
+                            "fallback_chain": alternatives,
+                        }
+                        replacement = _complete_with_preset_failover(
+                            completion,
+                            quality_call,
+                            retry_messages,
+                        )
+                        replacement_usage = replacement.get("usage") or {}
+                        prior_usage = result.get("usage") or {}
+                        replacement["usage"] = {
+                            key: int(prior_usage.get(key) or 0) + int(replacement_usage.get(key) or 0)
+                            for key in set(prior_usage) | set(replacement_usage)
+                        }
+                        result["usage"] = replacement["usage"]
+                        if not worker_output_needs_correction(replacement.get("content")):
+                            replacement.setdefault("failover_from", result.get("model") or call.get("model"))
+                            replacement.setdefault(
+                                "failover_errors",
+                                [{"model": str(result.get("model") or call.get("model")), "error": "insufficient evidence after correction"}],
+                            )
+                            replacement.setdefault(
+                                "attempted_models",
+                                [*attempted_models, replacement.get("model")],
+                            )
+                            result = replacement
+                    if worker_output_needs_correction(result.get("content")):
+                        # Keep an explicit open claim so the gap is visible (not silence).
+                        fail_packet = worker_failure_claim(
+                            task_id,
+                            "worker output rejected after fallback produced insufficient evidence",
+                            goal=goal,
+                        )
+                        result = {
+                            **result,
+                            "content": format_packet_compact(fail_packet, max_chars=2000),
+                            "work_packet": fail_packet,
+                            "error": "worker output rejected after fallback produced insufficient evidence",
+                            "quality_warning": "worker returned insufficient evidence after correction and fallback",
+                        }
+            if "work_packet" not in result:
+                result["work_packet"] = parse_work_packet(
+                    result.get("content") or "",
+                    goal=goal,
+                    default_owner=task_id,
+                )
+            return {"ok": True, "role": "worker", "task_id": task_id, "partition": partition, **result}
         except Exception as exc:
+            fail_packet = worker_failure_claim(task_id, str(exc)[:300], goal=goal)
             return {
                 "ok": False,
                 "role": "worker",
-                "task_id": call.get("task_id"),
+                "task_id": task_id,
                 "model": call.get("model"),
                 "error": str(exc)[:500],
+                "content": format_packet_compact(fail_packet, max_chars=2000),
+                "work_packet": fail_packet,
+                "partition": partition,
             }
 
     workers = []
     if worker_calls:
+        workers_started = time.perf_counter()
         worker_models = [c.get("model") for c in worker_calls if c.get("model")]
         _emit_status(
             on_status,
@@ -1712,7 +2267,7 @@ def execute_service(
             label="Team…",
         )
         with ThreadPoolExecutor(max_workers=len(worker_calls)) as pool:
-            workers = list(pool.map(run_worker, worker_calls))
+            workers = list(pool.map(run_worker, list(enumerate(worker_calls))))
         _emit_status(
             on_status,
             "workers_done",
@@ -1720,27 +2275,41 @@ def execute_service(
             models=worker_models,
             label="Team done…",
         )
-    worker_text = "\n\n".join(
-        f"[{item.get('task_id') or 'worker'} / {item.get('model')}]\n{item.get('content') or item.get('error') or ''}"
-        for item in workers
-    )[-40000:]
+        timings_ms["workers"] = round((time.perf_counter() - workers_started) * 1000)
+
+    worker_packets = [item.get("work_packet") for item in workers if item.get("work_packet")]
+    team_packet = merge_packets(lead_packet, *worker_packets, goal=goal)
+    gaps = coverage_gaps(team_packet)
+    if gaps:
+        team_packet = force_open_claims_for_gaps(team_packet, gaps)
+    worker_text = claims_table(team_packet, max_chars=12000)
+    if not worker_text.strip() or worker_text.startswith("Claim id |"):
+        # claims_table always has header; append raw worker prose tails for residual context.
+        prose_bits = "\n\n".join(
+            f"[{item.get('task_id') or 'worker'} / {item.get('model')}]\n{(item.get('content') or item.get('error') or '')[:4000]}"
+            for item in workers
+        )[-16000:]
+        if prose_bits.strip():
+            worker_text = f"{worker_text}\n\n### Worker notes\n{prose_bits}"
 
     review = None
     if supervisor_call and supervisor_call.get("model"):
+        review_started = time.perf_counter()
         _emit_status(on_status, "review", model=supervisor_call.get("model"), label="Review…")
         review_messages = copy.deepcopy(supervisor_call.get("messages") or [])
         review_messages.append(
             {
                 "role": "user",
-                "content": f"Goal:\n{goal}\n\nLead plan:\n{lead['content'][:10000]}\n\nWorker results:\n{worker_text}",
+                "content": review_work_packet_instruction(team_packet, gaps),
             }
         )
         try:
-            review = completion(supervisor_call, review_messages)
+            review = _complete_with_preset_failover(completion, supervisor_call, review_messages)
         except Exception as exc:
             review = {"model": supervisor_call.get("model"), "content": "", "error": str(exc)[:500], "usage": {}}
         review_phase = "review_error" if review.get("error") else "review_done"
         _emit_status(on_status, review_phase, model=(review or {}).get("model") or supervisor_call.get("model"), label="Review failed" if review.get("error") else "Review done…")
+        timings_ms["review"] = round((time.perf_counter() - review_started) * 1000)
 
     final_call = dict(lead_call)
     final_call["max_tokens"] = lead_call.get("max_tokens") or 2000
@@ -1756,31 +2325,103 @@ def execute_service(
                 "placeholder logic. Answer the original goal directly with the requested explanation, code, design, decision, "
                 "or concrete action. Ask one focused question only when missing information truly blocks a useful answer. Resolve "
                 "conflicts and state only uncertainty that matters to the user."
+                " Apply valid reviewer corrections and omit unsupported worker claims. Prefer evidence-backed findings "
+                "over inventories or generic best practices. Cite claim ids like [C1] when you rely on the Work Packet."
             ),
         },
         {
             "role": "user",
-            "content": (
-                f"Original user goal:\n{goal}\n\nInternal draft:\n{lead['content'][:10000]}\n\n"
-                f"Internal supporting material:\n{worker_text}\n\nInternal quality notes:\n{(review or {}).get('content', '')[:10000]}\n\n"
-                "Produce the answer now. Include no process commentary."
+            "content": final_work_packet_instruction(
+                goal,
+                team_packet,
+                (review or {}).get("content", "") or "",
             ),
         },
     ]
     attachments = [item for item in (event.get("attachments") or []) if isinstance(item, dict)]
     _augment_final_message_with_attachments(final_messages, attachments, snapshot, final_call)
-    _emit_status(on_status, "answering", model=final_call.get("model"), label="Answering…")
+    final_started = time.perf_counter()
+    _emit_status(on_status, "answering", model=final_call.get("model"), label="on it..")
+    honest_incomplete = False
     try:
+        streamed_chunks: list[str] = []
+        streamed_final = None
         if on_delta is not None and not _is_host_cli(snapshot, final_call.get("model")):
-            final = _chat_completion_stream(final_call, final_messages, on_delta)
+            try:
+                streamed_final = _chat_completion_stream(final_call, final_messages, streamed_chunks.append)
+                final = streamed_final
+            except Exception as exc:
+                if not is_failover_error(exc):
+                    raise
+                final = _complete_with_preset_failover(completion, final_call, final_messages)
         else:
-            final = completion(final_call, final_messages)
-            if on_delta is not None:
+            final = _complete_with_preset_failover(completion, final_call, final_messages)
+        final_text = str(final.get("content") or "")
+        if final_output_needs_correction(final_text):
+            correction_messages = [
+                *final_messages,
+                {
+                    "role": "user",
+                    "content": (
+                        "Your response only promised future work. Perform the bounded synthesis now and return the actual "
+                        "answer with concrete findings and verification. Cite claim ids. If evidence is insufficient, return "
+                        "an honest incomplete report of open claims instead of promising more inspection."
+                    ),
+                },
+            ]
+            corrected_call = {**final_call, "model": final.get("model") or final_call.get("model")}
+            corrected = _complete_with_retry(completion, corrected_call, correction_messages)
+            corrected_text = str(corrected.get("content") or "")
+            if final_output_needs_correction(corrected_text):
+                alternatives = [
+                    model for model in (final_call.get("fallback_chain") or [])
+                    if model != corrected_call["model"]
+                ]
+                if alternatives:
+                    corrected = _complete_with_preset_failover(
+                        completion,
+                        {**final_call, "model": alternatives[0], "fallback_chain": alternatives},
+                        correction_messages,
+                    )
+                    corrected_text = str(corrected.get("content") or "")
+                if final_output_needs_correction(corrected_text):
+                    # Honest incomplete instead of opaque hard-fail / intent loop.
+                    incomplete = honest_incomplete_answer(
+                        goal,
+                        team_packet,
+                        extra_reasons=["final synthesis remained intent-only after correction and fallback"],
+                    )
+                    corrected = {
+                        **(corrected if isinstance(corrected, dict) else {}),
+                        "model": (corrected or {}).get("model") or final.get("model") or final_call.get("model"),
+                        "content": incomplete,
+                        "usage": (corrected or {}).get("usage") or {},
+                    }
+                    honest_incomplete = True
+                    corrected_text = incomplete
+            corrected.setdefault("failover_from", final.get("model") or final_call.get("model"))
+            corrected.setdefault(
+                "failover_errors",
+                [{"model": str(final.get("model") or final_call.get("model")), "error": "intent-only final synthesis"}],
+            )
+            corrected.setdefault(
+                "attempted_models",
+                [final.get("model") or final_call.get("model"), corrected.get("model")],
+            )
+            final = corrected
+        # Do not overwrite a final answer that already passed quality gates just
+        # because workers were degraded — that is reported via degraded_reasons.
+        if on_delta is not None:
+            if final is streamed_final and not honest_incomplete:
+                for chunk in streamed_chunks:
+                    on_delta(chunk)
+            else:
                 on_delta(final.get("content") or "")
     except Exception:
         _emit_status(on_status, "answering_error", model=final_call.get("model"), label="Answer failed")
         raise
     _emit_status(on_status, "answering_done", model=final.get("model") or final_call.get("model"), label="Answer ready")
+    timings_ms["answering"] = round((time.perf_counter() - final_started) * 1000)
     if any(op.get("action") == "store" for op in memory_ops):
         from graph_exec import _memory_writes
 
@@ -1788,18 +2429,21 @@ def execute_service(
         _memory_writes(memory, memory_ops, goal, final.get("content") or "")
         _emit_status(on_status, "memory_store_done", label="Memory stored…")
     steps = [
-        {"role": "lead-plan", "model": lead.get("model"), "content": lead.get("content")},
+        {"role": "lead-plan", **lead, "work_packet": lead_packet},
         *workers,
     ]
     if review:
         steps.append({"role": "review", **review})
+    handoff_blob = (
+        f"{(lead.get('content') or '')[:4000]}\n\nWork Packet:\n{format_packet_compact(team_packet, max_chars=3500)}"
+    )
     _store_handoff_context(
         memory,
         session_id,
         service_id,
         lead_call.get("model"),
         goal,
-        lead.get("content") or "",
+        handoff_blob,
         (review or {}).get("content"),
     )
     usage_items = [lead.get("usage") or {}, final.get("usage") or {}]
@@ -1810,6 +2454,28 @@ def execute_service(
         key: sum(int(item.get(key) or 0) for item in usage_items)
         for key in ("prompt_tokens", "completion_tokens", "total_tokens")
     }
+    degraded_reasons = [
+        f"{item.get('task_id') or 'worker'}: {item.get('error') or item.get('quality_warning')}"
+        for item in workers
+        if not item.get("ok") or item.get("error") or item.get("quality_warning")
+    ]
+    degraded_reasons.extend(gaps)
+    if review and review.get("error"):
+        degraded_reasons.append(f"review: {review['error']}")
+    if honest_incomplete:
+        degraded_reasons.append("final: honest incomplete (insufficient supported claims)")
+    failovers = [
+        {
+            "role": item.get("role"),
+            "model": item.get("model"),
+            "failover_from": item.get("failover_from"),
+            "attempted_models": item.get("attempted_models"),
+            "errors": item.get("failover_errors") or [],
+        }
+        for item in [steps[0], *workers, *([review] if review else []), {"role": "answering", **final}]
+        if item.get("failover_from")
+    ]
+    timings_ms["total"] = round((time.perf_counter() - run_started) * 1000)
     return {
         "ok": True,
         "service_id": service_id,
@@ -1821,4 +2487,10 @@ def execute_service(
         "lean_mode": plan.get("lean_mode"),
         "token_saver": plan.get("token_saver"),
         "activation": activation,
+        "degraded": bool(degraded_reasons),
+        "degraded_reasons": degraded_reasons,
+        "failovers": failovers,
+        "timings_ms": timings_ms,
+        "work_packet": team_packet,
+        "honest_incomplete": honest_incomplete,
     }

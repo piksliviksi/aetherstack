@@ -69,9 +69,20 @@ const trackedEntries = tracked.stdout.split("\0").filter(Boolean).map((record) =
   if (!match) fail(`cannot parse tracked file record: ${record}`);
   return { mode: match[1], name: match[2] };
 });
+const deleted = spawnSync("git", ["ls-files", "--deleted", "-z"], {
+  cwd: repoRoot,
+  encoding: "utf8",
+});
+if (deleted.error || deleted.status !== 0) {
+  fail(deleted.error?.message ?? deleted.stderr.trim());
+}
+const deletedFiles = new Set(deleted.stdout.split("\0").filter(Boolean));
 const entries = trackedEntries.filter(({ name }) => (
-  rootFiles.has(name)
-  || (runtimePrefixes.some((prefix) => name.startsWith(prefix)) && !releaseOnlyScripts.test(name))
+  !deletedFiles.has(name)
+  && (
+    rootFiles.has(name)
+    || (runtimePrefixes.some((prefix) => name.startsWith(prefix)) && !releaseOnlyScripts.test(name))
+  )
 )).sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
 const files = entries.map(({ name }) => name);
 for (const required of ["VERSION", "docker-compose.yml", "aether-hub/server.py", "aether-hub/inference_runtime.py"]) {

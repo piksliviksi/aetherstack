@@ -62,7 +62,7 @@ ollama pull llama3.1:8b
 | API gateway (LiteLLM) | http://localhost:4000/v1 |
 | Ollama (host) | http://localhost:11434 |
 
-LiteLLM API key for clients: value of `LITELLM_MASTER_KEY` in `.env` (default `sk-aether-local`).
+LiteLLM API key for clients: the generated value of `LITELLM_MASTER_KEY` in `.env`.
 
 ---
 

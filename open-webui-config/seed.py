@@ -15,7 +15,7 @@ from pathlib import Path
 DB_PATH = Path(os.environ.get("DATA_DIR", "/app/backend/data")) / "webui.db"
 BACKUP_PATH = DB_PATH.with_name("webui.db.aetherstack-before-gateway.bak")
 BASE_URL = os.environ.get("AETHER_OPENAI_BASE_URL", "http://aether-hub:8766/v1").rstrip("/")
-API_KEY = os.environ.get("OPENAI_API_KEY", "sk-aether-local")
+API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 
 def _read_json(connection: sqlite3.Connection, key: str, default):

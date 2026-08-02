@@ -143,7 +143,7 @@ Procedure: [docs/QUICKSTART.md](./docs/QUICKSTART.md)
 
 ### Task-first services and lean delivery
 
-The default Hub page offers Research, Planning, Service design, UI design,
+The default Hub page starts with Auto, followed by Research, Planning, Service design, UI design,
 Frontend, Backend, Coding, Testing, Bug fixing, White-hat pentesting,
 Polishing, and Technical writing. These are capability blueprints, not fixed
 model lists: Hub resolves every role from the models and provider keys that are
@@ -162,6 +162,9 @@ capability-resolved team: a lead by default, with workers and review retained fo
 distinct backends, parallel complexity, or assurance-sensitive work. Lean
 Delivery and the token saver can reduce unnecessary context and output without
 removing validation, security controls, accessibility, tests, or observability.
+Independent workers execute concurrently; lead, review, and synthesis remain
+ordered because each consumes the preceding evidence. Service results expose
+`timings_ms`, `degraded`, and `degraded_reasons` for stage-level diagnosis.
 The lean policy is an independent implementation inspired by
 [Ponytail](https://github.com/DietrichGebert/ponytail); no Ponytail source code
 is copied.
@@ -173,15 +176,12 @@ the service to a model provider.
 
 Open WebUI is connected through AetherHub rather than directly to Ollama. Its
 Base Model selector therefore tracks only live capability-resolved aliases and
-authenticated host CLIs. Models without tool-call support, including the
+authenticated host CLIs. Auto's editable sequence keeps one model active until its limit, then hands the session to the next model and finally local Ollama. Named presets use evidence-backed workers and a critic; the node canvas can run custom multi-stage product workflows with a separate model and behavior profile on each stage. Models without tool-call support, including the
 default TinyLlama backend, are marked correctly and receive no unsupported tool
 payload.
 
 When active-model display is enabled, VS Code Chat shows the aliases currently
-inferring alongside short English activity lines (e.g. "I'm on it…", "We're thinking…").
-The tracked defaults live in `aether-hub/activity_words.json`; the running
-container seeds a persistent `.aetherstack/activity_words.json`, which can be
-added to or deleted from Advanced Hub.
+inferring alongside the fixed activity text `on it..`.
 
 The Simple Hub also includes **Update AetherStack**. It checks the official
 repository and stages a checksummed archive under `.aetherstack/updates`; it

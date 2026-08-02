@@ -39,9 +39,8 @@
   <div class="card">
     <strong>Auth for LiteLLM</strong>
     <p class="muted">If you set <code>LITELLM_MASTER_KEY</code>, browsers need a header. Example:</p>
-    <pre style="overflow:auto;background:#0f172a;padding:0.75rem;border-radius:8px;font-size:0.8rem">curl http://localhost:4000/v1/models \
-  -H "Authorization: Bearer sk-aether-local"</pre>
-    <p class="muted">Leave the key empty in <code>.env</code> for open local lab access (not for the public internet).</p>
+    <pre style="overflow:auto;background:#0f172a;padding:0.75rem;border-radius:8px;font-size:0.8rem">./scripts/list-models.sh</pre>
+    <p class="muted">AetherStack generates a private key in <code>.env</code> on first start. Keep that file private.</p>
   </div>
 
   <div class="card">

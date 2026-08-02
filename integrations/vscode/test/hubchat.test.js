@@ -8,6 +8,7 @@ const test = require("node:test");
 // deleteConversation, so stale context leaked across conversations and
 // saveConversationSnapshot silently corrupted the wrong conversation's transcript.
 test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete actions", async () => {
+  let releaseDeferredRun = null;
   class Disposable {
     constructor(dispose = () => {}) {
       this.dispose = dispose;
@@ -79,6 +80,9 @@ test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete acti
     request: async (url, options) => {
       if (/\/run$/.test(url)) {
         const goal = (options && options.body && options.body.goal) || "";
+        if (goal === "late response") {
+          return new Promise((resolve) => { releaseDeferredRun = () => resolve({ status: 200, body: { answer: "must not land" } }); });
+        }
         return { status: 200, body: { answer: `reply:${goal}` } };
       }
       return { status: 503, body: {} };
@@ -238,6 +242,21 @@ test("HubChat keeps webview surfaces isolated and resyncs new/switch/delete acti
     surface = chatViewProvider.stateFor(webview);
     const cEntry = chatViewProvider.conversations.find((item) => item.id === surface.activeConversationId);
     assert.equal(cEntry.transcript.length, 2);
+
+    // A late transport response must not land after the user changes conversation.
+    const lateRun = run("late response");
+    while (!releaseDeferredRun) await new Promise((resolve) => setImmediate(resolve));
+    await handler({ type: "newConversation" });
+    releaseDeferredRun();
+    await lateRun;
+    surface = chatViewProvider.stateFor(webview);
+    assert.equal(surface.activeConversationId, null);
+    assert.deepEqual(surface.history, []);
+    assert.equal(
+      chatViewProvider.conversations.some((item) => item.transcript.some((entry) => entry.value === "must not land")),
+      false,
+      "a response from the previous conversation landed after the switch",
+    );
   } finally {
     Module._load = originalLoad;
     for (const disposable of subscriptions.reverse()) disposable.dispose?.();

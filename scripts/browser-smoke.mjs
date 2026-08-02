@@ -4,15 +4,19 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const edgeCandidates = [
+const browserCandidates = [
+  process.env.AETHER_BROWSER_BIN,
+  process.platform === "darwin" && "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  process.platform === "darwin" && "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
   process.env.PROGRAMFILES_X86 && path.join(process.env.PROGRAMFILES_X86, "Microsoft", "Edge", "Application", "msedge.exe"),
   process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Microsoft", "Edge", "Application", "msedge.exe"),
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
 ].filter(Boolean);
-const edge = edgeCandidates.find(fs.existsSync);
-if (!edge) throw new Error("Microsoft Edge is required for this browser smoke test");
+const browserBinary = browserCandidates.find(fs.existsSync);
+if (!browserBinary) throw new Error("Chrome or Microsoft Edge is required for this browser smoke test");
 
 const port = await new Promise((resolve, reject) => {
   const server = net.createServer();
@@ -23,7 +27,7 @@ const port = await new Promise((resolve, reject) => {
   });
 });
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-browser-smoke-"));
-const browser = spawn(edge, [
+const browser = spawn(browserBinary, [
   "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
   `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
   "http://127.0.0.1:8766/",
@@ -150,6 +154,55 @@ try {
     .filter(([, model]) => model.available && (model.capabilities || []).includes("chat"))
     .map(([alias]) => alias);
   assert.ok(expectedWebuiAliases.length, "capability matrix has no available chat aliases for WebUI verification");
+
+  // The VS Code webview host provides the viewport; loading the same HTML as a
+  // local document lets us verify its flex sizing without mocking VS Code APIs.
+  const vscodeRoot = path.join(process.cwd(), "integrations", "vscode");
+  const renderedChat = fs.readFileSync(path.join(vscodeRoot, "chat.html"), "utf8")
+    .replaceAll("{{NONCE}}", "browser-smoke")
+    .replaceAll("{{CSP_SOURCE}}", "file:")
+    .replace("{{UI_TOKENS}}", fs.readFileSync(path.join(vscodeRoot, "ui-tokens.css"), "utf8"))
+    .replace("{{CHAT_RENDER_JS}}", fs.readFileSync(path.join(vscodeRoot, "chat-render.js"), "utf8"));
+  const renderedChatPath = path.join(profile, "aetherstack-chat.html");
+  fs.writeFileSync(renderedChatPath, renderedChat);
+  const chatUrl = pathToFileURL(renderedChatPath).href;
+  const checkChatLayout = async (width, height) => {
+    await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 500 });
+    await navigate(chatUrl);
+    return evaluate(`(() => {
+      const messages = document.getElementById('messages');
+      messages.innerHTML = '<div class="message">' + 'UNBROKEN_TEXT_'.repeat(300) + '</div><div class="message"><pre>' + 'wide-code '.repeat(300) + '</pre></div>';
+      const main = document.querySelector('main').getBoundingClientRect();
+      const mainStyle = getComputedStyle(document.querySelector('main'));
+      const composer = document.querySelector('.composer').getBoundingClientRect();
+      const textarea = document.querySelector('textarea').getBoundingClientRect();
+      const message = messages.firstElementChild.getBoundingClientRect();
+      return {
+        viewport: [innerWidth, innerHeight],
+        mainBox: [main.top, main.bottom, main.height, mainStyle.paddingBottom],
+        composerBox: [composer.top, composer.bottom, composer.height, getComputedStyle(document.querySelector('.composer')).marginBottom],
+        bodyFits: document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight,
+        transcriptFits: messages.getBoundingClientRect().right <= main.right + 1 && message.right <= messages.getBoundingClientRect().right + 1,
+        composerGap: (main.bottom - parseFloat(mainStyle.paddingBottom)) - composer.bottom,
+        composerAtBottom: Math.abs((main.bottom - parseFloat(mainStyle.paddingBottom)) - composer.bottom) <= 1,
+        composerFits: composer.left >= main.left - 1 && composer.right <= main.right + 1,
+        textareaFits: textarea.right <= composer.right + 1,
+        transcriptScrolls: messages.scrollHeight > messages.clientHeight,
+      };
+    })()`);
+  };
+  const chatDesktop = await checkChatLayout(900, 650);
+  const chatMobile = await checkChatLayout(340, 520);
+  for (const [name, layout] of Object.entries({ chatDesktop, chatMobile })) {
+    assert.equal(layout.bodyFits, true, `${name} overflows the webview`);
+    assert.equal(layout.transcriptFits, true, `${name} clips chat text horizontally`);
+    assert.equal(layout.composerAtBottom, true, `${name} composer is not attached to the bottom: ${JSON.stringify(layout)}`);
+    assert.equal(layout.composerFits, true, `${name} composer exceeds the chat width`);
+    assert.equal(layout.textareaFits, true, `${name} textarea exceeds the composer`);
+    assert.equal(layout.transcriptScrolls, true, `${name} transcript is not the scrolling region`);
+  }
+  await send("Emulation.clearDeviceMetricsOverride");
+
   await navigate("http://127.0.0.1:3000/");
   mainFrameNavigations = 0;
   const webuiModels = await waitFor(() => evaluate(`(async () => {
@@ -180,7 +233,7 @@ try {
   assert.equal(webuiStability.href, "http://127.0.0.1:3000/", "Open WebUI redirected away from its stable root route");
   assert.ok(webuiStability.bodyChildren > 0, "Open WebUI body was unexpectedly replaced with an empty document");
   assert.ok(webuiStability.fixedFullViewportLayers <= 3, `Open WebUI stacked ${webuiStability.fixedFullViewportLayers} full-viewport layers`);
-  console.log(JSON.stringify({ ok: true, inspector, layout, webuiModels, webuiStability }));
+  console.log(JSON.stringify({ ok: true, inspector, layout, chatDesktop, chatMobile, webuiModels, webuiStability }));
   await send("Browser.close").catch(() => {});
   socket.close();
 } catch (error) {

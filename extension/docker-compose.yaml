@@ -19,6 +19,12 @@ services:
     volumes:
       - open_webui_data:/app/backend/data
     command: ["bash", "-lc", "umask 077; chmod -R go-rwx /app/backend/data 2>/dev/null || true; exec bash start.sh"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
 
   open-webui-proxy:
@@ -54,7 +60,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - XAI_API_KEY=${XAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:?Start AetherStack once to generate LITELLM_MASTER_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     extra_hosts:
       - "host.docker.internal:host-gateway"

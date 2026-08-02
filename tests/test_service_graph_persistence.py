@@ -6,6 +6,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import yaml
@@ -246,6 +247,42 @@ class ServiceGraphPersistenceTests(unittest.TestCase):
         finally:
             server._stage_unsubscribe(first)
             server._stage_unsubscribe(second)
+
+    def test_service_graph_http_routes_return_expected_statuses(self) -> None:
+        sent: list[tuple[int, dict]] = []
+        get_request = SimpleNamespace(
+            path="/api/services/one/graph",
+            _send=lambda code, value, *args: sent.append((code, value)),
+        )
+        with mock.patch.object(server, "get_snapshot", return_value=snapshot()), mock.patch.object(
+            server, "build_service_graph", return_value={"id": "one", "nodes": [], "edges": []}
+        ):
+            server.Handler.do_GET(get_request)
+        self.assertEqual(sent[-1], (200, {"id": "one", "nodes": [], "edges": []}))
+
+        invalid: list[tuple[int, dict]] = []
+        post_request = SimpleNamespace(
+            path="/api/services/one/graph",
+            _origin_allowed=lambda: True,
+            _workspace_write_authorized=lambda: True,
+            _read_json=lambda: {"nodes": "invalid"},
+            _send=lambda code, value, *args: invalid.append((code, value)),
+        )
+        with mock.patch.object(server, "save_service_graph", side_effect=ValueError("nodes must be a list")):
+            server.Handler.do_POST(post_request)
+        self.assertEqual(invalid[-1][0], 400)
+        self.assertIn("nodes must be a list", invalid[-1][1]["error"])
+
+        unknown: list[tuple[int, dict]] = []
+        unknown_request = SimpleNamespace(
+            path="/api/services/missing/graph",
+            _send=lambda code, value, *args: unknown.append((code, value)),
+        )
+        with mock.patch.object(server, "get_snapshot", return_value=snapshot()), mock.patch.object(
+            server, "build_service_graph", side_effect=ValueError("unknown service: missing")
+        ):
+            server.Handler.do_GET(unknown_request)
+        self.assertEqual(unknown[-1][0], 404)
 
 
 if __name__ == "__main__":

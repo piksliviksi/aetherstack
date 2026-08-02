@@ -10,7 +10,8 @@ services:
   # Local OpenAI-compatible API + model manager
   # Prefer host Ollama (port 11434). Use GPU overlays when running in-container.
   ollama:
-    image: ${OLLAMA_IMAGE:-ollama/ollama:0.32.4}
+    # 0.32.4 shipped an incompatible llama-server in the Linux ARM64 image.
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.32.5}
     profiles: ["with-ollama-container"]
     ports:
       - "${AETHER_BIND_HOST:-127.0.0.1}:${AETHER_OLLAMA_PORT:-11434}:11434"
@@ -35,7 +36,7 @@ services:
       - RAG_OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       # AetherHub filters this to live capability-resolved aliases and bridges authenticated host CLIs.
       - OPENAI_API_BASE_URL=http://aether-hub:8766/v1
-      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:?Run start.sh or start.ps1 to generate LITELLM_MASTER_KEY}
       - AETHER_OPENAI_BASE_URL=http://aether-hub:8766/v1
       - MODELS_CACHE_TTL=5
       - WEBUI_AUTH=true
@@ -81,7 +82,7 @@ services:
       open-webui:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 8
@@ -127,13 +128,14 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - AETHER_HUB_HOST=0.0.0.0
+      - AETHER_PUBLIC_BIND_HOST=${AETHER_BIND_HOST:-127.0.0.1}
       - AETHER_HUB_PORT=8766
       - AETHERSTACK_VERSION=${AETHERSTACK_VERSION:-0.3.18}
       - AETHERSTACK_REVISION=${AETHERSTACK_REVISION:-}
       - AETHER_UPDATE_DIR=/host-aetherstack/updates
       - AETHER_MATRIX_SYNC_SEC=${AETHER_MATRIX_SYNC_SEC:-60}
       - AETHER_EMBED_MODEL=${AETHER_EMBED_MODEL:-nomic-embed-text}
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:?Run start.sh or start.ps1 to generate LITELLM_MASTER_KEY}
       - AETHER_CLI_BRIDGE_URL=${AETHER_CLI_BRIDGE_URL:-http://host.docker.internal:8767}
       - AETHER_CLI_BRIDGE_TOKEN=${AETHER_CLI_BRIDGE_TOKEN:-}
       - AETHER_DISABLED_MODELS=${AETHER_DISABLED_MODELS:-}
@@ -157,6 +159,7 @@ services:
       - AETHER_BACKUP_S3_BUCKET=${AETHER_BACKUP_S3_BUCKET:-}
       - AETHER_BACKUP_S3_PREFIX=${AETHER_BACKUP_S3_PREFIX:-}
       - AETHER_BACKUP_AZURE_CONTAINER=${AETHER_BACKUP_AZURE_CONTAINER:-}
+      - AETHER_GITHUB_TOKEN=${AETHER_GITHUB_TOKEN:-}
       - AETHER_BACKUP_AUTO=${AETHER_BACKUP_AUTO:-}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
@@ -170,7 +173,6 @@ services:
       - AETHER_PIPELINES_USER=/pipelines/user
       - AETHER_PIPELINES_VOTES=/pipelines/votes.json
       - AETHER_GRAPHS_DIR=/pipelines/graphs
-      - AETHER_ACTIVITY_WORDS_PATH=/host-aetherstack/activity_words.json
     volumes:
       - ./aether-hub/capability_matrix.yaml:/app/capability_matrix.yaml:ro
       - ./aether-hub/agent_modes.yaml:/app/agent_modes.yaml:ro
@@ -222,7 +224,7 @@ services:
       - MISTRAL_API_KEY_ENTERPRISE=${MISTRAL_API_KEY_ENTERPRISE:-}
       # Required by current LiteLLM for /v1/* — browsers must send Authorization header.
       # Default is for local lab only; change if you expose the port.
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-aether-local}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:?Run start.sh or start.ps1 to generate LITELLM_MASTER_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - REDIS_HOST=redis
       - REDIS_PORT=6379

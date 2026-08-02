@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { createChatRequestHandler, historyFromContext, selectedServiceFromContext } = require("../chat-participant");
+const { buildServiceRunBody } = require("../service-request");
 
 function fakeStream() {
   const markdown = [];
@@ -20,6 +21,11 @@ function fakeHubChat({ services = [{ id: "coding", label: "Coding", summary: "Im
     services,
     history: [],
     loadServices: async () => {},
+    buildRunBody: (options) => buildServiceRunBody({
+      ...options,
+      memoryContextKb: 1024,
+      sequenceMode: "per_request",
+    }),
     hubRequest: run || (async () => ({ answer: "done" })),
   };
 }
@@ -59,6 +65,22 @@ test("slash command runs the named preset without classification", async () => {
   await handler({ prompt: "review the diff", command: "code" }, {}, stream, token);
 
   assert.deepEqual(calls, ["/api/services/coding/run"]);
+});
+
+test("native Chat visibly marks degraded preset answers", async () => {
+  const hubChat = fakeHubChat({
+    run: async () => ({ answer: "Partial answer.", degraded: true, degraded_reasons: ["secret raw error"] }),
+  });
+  const stream = fakeStream();
+  await createChatRequestHandler(hubChat)(
+    { prompt: "review", command: "code" },
+    {},
+    stream,
+    token,
+  );
+  const text = stream.get().markdown.join("\n");
+  assert.match(text, /reduced independent verification/i);
+  assert.doesNotMatch(text, /secret raw error/i);
 });
 
 test("unknown slash command fails closed with a message, not a crash", async () => {
@@ -116,6 +138,8 @@ test("native Chat context is thread-local and remembers an explicit preset", asy
   await handler({ prompt: "investigate this", command: undefined }, { history: [] }, fakeStream(), token);
   assert.equal(calls[1].pathname, "/api/services/auto/run");
   assert.deepEqual(calls[1].body.history, []);
+  assert.equal(calls[1].body.memory_context_kb, 1024);
+  assert.equal(calls[1].body.sequence_mode, "per_request");
   assert.equal(selectedServiceFromContext(codingContext, ["coding", "research"]), "coding");
   assert.deepEqual(historyFromContext({ history: [] }), []);
 });

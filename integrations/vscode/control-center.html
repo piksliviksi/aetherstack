@@ -6,7 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src 'nonce-{{NONCE}}';">
   <title>AetherStack Control Center</title>
   <style>
-    :root { --ae-radius: 10px; --ae-radius-sm: 6px; }
+    {{UI_TOKENS}}
     body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 24px; }
     header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
     h1, h2 { margin: 0 0 8px; }
@@ -31,6 +31,10 @@
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); text-align: left; vertical-align: top; }
     label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    input, select { min-width: 0; padding: 7px 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+    .sequence { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(190px, auto) auto; gap: 8px; align-items: end; }
+    .sequence label { display: grid; gap: 5px; align-items: initial; }
+    @media (max-width: 720px) { .sequence { grid-template-columns: 1fr; } }
     #notice { min-height: 20px; margin: 8px 0; }
   </style>
 </head>
@@ -38,7 +42,7 @@
   <header>
     <div>
       <h1>AetherStack Control Center</h1>
-      <div id="summary" class="muted">Checking local services…</div>
+      <div id="summary" class="muted" role="status" aria-live="polite" aria-atomic="true">Checking local services…</div>
     </div>
     <button class="secondary" data-action="choosePath">Choose installation</button>
   </header>
@@ -52,19 +56,21 @@
     <button data-action="installRuntime" class="secondary">Install verified runtime</button>
     <button data-action="logs" class="secondary">Show logs</button>
   </div>
-  <div id="notice" class="muted"></div>
+  <div id="notice" class="muted" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <h2>Services</h2>
   <div id="services" class="grid"></div>
 
-  <h2>Inference activity</h2>
-  <div class="card">
-    <label><input id="showModel" type="checkbox"> Show the currently running model in the AetherStack VS Code view</label>
-    <div id="inference" class="muted" style="margin-top:10px">Activity display is off.</div>
-  </div>
-
   <h2 style="margin-top:24px">Available models from capability matrix</h2>
   <div id="models" class="grid"></div>
+
+  <h2>Auto model sequence</h2>
+  <div class="card sequence">
+    <label>Model order<input id="autoOrder" type="text" placeholder="grok-cli, claude-cli, codex-cli, local-default"></label>
+    <label>Continuation<select id="autoSequenceMode"><option value="sequential_exhaustion">Sequential until limit</option><option value="per_request">Restart order each request</option></select></label>
+    <button id="saveAutoSequence">Save sequence</button>
+  </div>
+  <div class="muted" style="margin:6px 0 24px">Auto is the default. In sequential mode one LLM keeps the session until its limit, then the next LLM continues from shared memory; local Ollama is the final fallback when installed.</div>
 
   <h2>Backend technical details</h2>
   <div class="card">
@@ -89,15 +95,27 @@
     document.querySelectorAll('[data-action]').forEach((button) => {
       button.addEventListener('click', () => vscode.postMessage({ type: button.dataset.action }));
     });
-    $('showModel').addEventListener('change', () => vscode.postMessage({ type: 'showActiveModel', value: $('showModel').checked }));
+    $('saveAutoSequence').addEventListener('click', () => vscode.postMessage({
+      type: 'saveAutoSequence',
+      order: $('autoOrder').value.split(',').map(value => value.trim()).filter(Boolean),
+      sequenceMode: $('autoSequenceMode').value,
+    }));
+
+    let initialStateTimer = setTimeout(() => {
+      $('summary').textContent = 'AetherStack did not respond';
+      $('summary').className = 'error';
+      $('notice').textContent = 'Refresh this view. If the problem continues, reload the VS Code window.';
+    }, 8000);
 
     function render(state) {
+      clearTimeout(initialStateTimer);
+      initialStateTimer = 0;
       const runtime = state.runtime || {};
-      $('summary').textContent = runtime.up ? 'AetherStack is up' : runtime.checking ? 'Checking local services…' : 'AetherStack has service errors';
-      $('summary').className = runtime.up ? 'ok' : runtime.checking ? 'muted' : 'error';
+      const ready = runtime.up && runtime.inferenceReady !== false;
+      $('summary').textContent = ready ? 'AetherStack is ready' : runtime.up ? 'Services are up; no model is ready' : runtime.checking ? 'Checking local services…' : 'AetherStack has service errors';
+      $('summary').className = ready ? 'ok' : runtime.checking ? 'muted' : 'error';
       $('notice').textContent = state.notice || '';
       $('stackPath').textContent = state.stackPath || 'not selected';
-      $('showModel').checked = Boolean(state.showActiveModel);
       document.querySelectorAll('[data-action]').forEach((button) => {
         button.disabled = Boolean(state.busy);
       });
@@ -114,16 +132,7 @@
         if (!service.ok) card.append(text('div', service.error || 'not running', 'error'));
         return card;
       }));
-
-      const inference = state.inference || {};
-      const active = Array.isArray(inference.active) ? inference.active : [];
-      $('inference').textContent = !state.showActiveModel
-        ? 'Activity display is off.'
-        : active.length
-          ? `Running now: ${active.map((entry) => entry.model).join(', ')}`
-          : inference.last
-            ? `Idle. Last model: ${inference.last.model} (${inference.last.state}).`
-            : 'Idle. No inference observed yet.';
+      if (!(runtime.services || []).length) $('services').append(text('div', 'No services reported. Start AetherStack or refresh this view.', 'muted'));
 
       $('models').replaceChildren(...(state.models || []).map((model) => {
         const card = text('div', '', 'card');
@@ -131,6 +140,9 @@
         return card;
       }));
       if (!(state.models || []).length) $('models').append(text('div', 'No available chat/code models reported.', 'muted'));
+      const auto = state.autoChain || {};
+      $('autoOrder').value = (auto.priority_order || []).join(', ');
+      $('autoSequenceMode').value = auto.sequence_mode || state.autoSequenceMode || 'sequential_exhaustion';
 
       $('containers').replaceChildren(...(state.containers || []).map((container) => {
         const row = document.createElement('tr');
@@ -139,6 +151,13 @@
         }
         return row;
       }));
+      if (!(state.containers || []).length) {
+        const row = document.createElement('tr');
+        const cell = text('td', 'No containers reported.');
+        cell.colSpan = 5;
+        row.append(cell);
+        $('containers').append(row);
+      }
       $('technicalError').hidden = !state.technicalError;
       $('technicalError').textContent = state.technicalError || '';
     }
@@ -146,6 +165,7 @@
     window.addEventListener('message', (event) => {
       if (event.data && event.data.type === 'state') render(event.data.state || {});
     });
+    window.addEventListener('pagehide', () => clearTimeout(initialStateTimer));
     vscode.postMessage({ type: 'ready' });
   </script>
 </body>

@@ -25,9 +25,8 @@ const TERMINAL_FAILURE_COOLDOWN_MS = 15 * 60_000;
 //   claude  --append-system-prompt <text>      (claude --help)
 //   grok    --rules <text>                     (grok --help; appends to system prompt)
 //   codex   -c developer_instructions=<text>   (codex has no such flag; -c overrides
-//           config.toml. Key confirmed accepted via `codex exec --strict-config`,
-//           which rejects unknown fields. Runtime effect not yet exercised — the
-//           account's codex quota was exhausted at the time of writing.)
+//           config.toml. Key acceptance and runtime effect were verified with an
+//           authenticated read-only `codex exec` run on 2026-08-02.)
 const CLI_DEFINITIONS = {
   "codex-cli": {
     command: "codex",
@@ -92,14 +91,33 @@ async function resolveCommand(command) {
   return shim;
 }
 
-async function findBundledCodex() {
-  const roots = [
+async function trustedBundledExecutable(extensionRoot, candidate, identity) {
+  try {
+    const manifest = JSON.parse(await fs.promises.readFile(path.join(extensionRoot, "package.json"), "utf8"));
+    if (String(manifest.publisher || "").toLowerCase() !== identity.publisher) return null;
+    if (String(manifest.name || "").toLowerCase() !== identity.name) return null;
+    const candidateInfo = await fs.promises.lstat(candidate);
+    if (!candidateInfo.isFile() || candidateInfo.isSymbolicLink()) return null;
+    const [realRoot, realCandidate] = await Promise.all([
+      fs.promises.realpath(extensionRoot),
+      fs.promises.realpath(candidate),
+    ]);
+    const relative = path.relative(realRoot, realCandidate);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+    return realCandidate;
+  } catch {
+    return null;
+  }
+}
+
+async function findBundledCodex(rootOverrides) {
+  const roots = rootOverrides || [
     process.env.VSCODE_EXTENSIONS,
     path.join(os.homedir(), ".vscode", "extensions"),
     path.join(os.homedir(), ".vscode-insiders", "extensions"),
   ].filter(Boolean);
-  const platformPrefix = process.platform === "win32" ? "windows-"
-    : process.platform === "darwin" ? "darwin-" : "linux-";
+  const platformPrefixes = process.platform === "win32" ? ["windows-"]
+    : process.platform === "darwin" ? ["darwin-", "macos-"] : ["linux-"];
   const executable = process.platform === "win32" ? "codex.exe" : "codex";
   for (const root of roots) {
     let extensions;
@@ -108,19 +126,27 @@ async function findBundledCodex() {
     for (const extension of extensions) {
       const binRoot = path.join(root, extension, "bin");
       let platforms;
-      try { platforms = (await fs.promises.readdir(binRoot)).filter((name) => name.startsWith(platformPrefix)); }
+      try {
+        platforms = (await fs.promises.readdir(binRoot))
+          .filter((name) => platformPrefixes.some((prefix) => name.startsWith(prefix)));
+      }
       catch { continue; }
       for (const platform of platforms) {
         const candidate = path.join(binRoot, platform, executable);
-        if (fs.existsSync(candidate)) return candidate;
+        const trusted = await trustedBundledExecutable(
+          path.join(root, extension),
+          candidate,
+          { publisher: "openai", name: "chatgpt" },
+        );
+        if (trusted) return trusted;
       }
     }
   }
   return null;
 }
 
-async function findBundledClaude() {
-  const roots = [
+async function findBundledClaude(rootOverrides) {
+  const roots = rootOverrides || [
     process.env.VSCODE_EXTENSIONS,
     path.join(os.homedir(), ".vscode", "extensions"),
     path.join(os.homedir(), ".vscode-insiders", "extensions"),
@@ -132,7 +158,12 @@ async function findBundledClaude() {
     catch { continue; }
     for (const extension of extensions) {
       const candidate = path.join(root, extension, "resources", "native-binary", executable);
-      if (fs.existsSync(candidate)) return candidate;
+      const trusted = await trustedBundledExecutable(
+        path.join(root, extension),
+        candidate,
+        { publisher: "anthropic", name: "claude-code" },
+      );
+      if (trusted) return trusted;
     }
   }
   return null;
@@ -251,15 +282,31 @@ function promptFromMessages(messages) {
 }
 
 function safeCliEnvironment() {
-  const allowed = new Set([
-    "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
-    "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
-    "LANG", "LC_ALL", "TERM", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "GROK_HOME",
-    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+  const exact = new Set([
+    "PATH", "Path", "HOME", "USER", "LOGNAME", "SHELL",
+    "TMPDIR", "TMP", "TEMP", "LANG", "LANGUAGE", "TERM", "COLORTERM",
+    "NO_COLOR", "FORCE_COLOR", "CODEX_HOME", "CLAUDE_CONFIG_DIR",
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+    "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "SYSTEMROOT", "WINDIR",
+    "COMSPEC", "PATHEXT", "OS", "PROCESSOR_ARCHITECTURE",
+    "__CF_USER_TEXT_ENCODING",
   ]);
   return Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => allowed.has(name.toUpperCase()))
+    Object.entries(process.env).filter(([name]) => exact.has(name) || name.startsWith("LC_"))
   );
+}
+
+function appendBoundedOutput(current, chunk, limit) {
+  const next = current + chunk.toString();
+  if (Buffer.byteLength(next) <= limit) return next;
+  const marker = "\n...[earlier host CLI output truncated; process continued]...\n";
+  let tail = next.slice(Math.max(0, next.length - limit));
+  while (Buffer.byteLength(marker + tail) > limit && tail.length) {
+    tail = tail.slice(Math.max(1, Math.ceil(tail.length * 0.02)));
+  }
+  return marker + tail;
 }
 
 function spawnWithInput(command, args, prompt, options = {}) {
@@ -285,8 +332,12 @@ function spawnWithInput(command, args, prompt, options = {}) {
       child.kill();
       finish(new Error("host CLI timed out"));
     }, options.timeout || COMMAND_TIMEOUT_MS);
-    child.stdout.on("data", (chunk) => { stdout = (stdout + chunk).slice(-4 * 1024 * 1024); });
-    child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-1024 * 1024); });
+    child.stdout.on("data", (chunk) => {
+      stdout = appendBoundedOutput(stdout, chunk, options.stdoutLimit || 4 * 1024 * 1024);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = appendBoundedOutput(stderr, chunk, options.stderrLimit || 1024 * 1024);
+    });
     child.on("error", (error) => finish(error));
     child.on("close", (code) => {
       if (code === 0 && stdout.trim()) finish(null, stdout.trim());
@@ -317,9 +368,10 @@ async function runCliModel(model, prompt, options = {}) {
   const native = systemArgs(model, system);
   const body = native.length ? prompt : inlineSystem(prompt, system);
   if (model.alias === "codex-cli") {
+    const sandbox = options.workspaceWrite ? "workspace-write" : "read-only";
     return spawnWithInput(
       model.commandPath,
-      ["exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", ...native, "-"],
+      ["exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", sandbox, "--color", "never", ...native, "-"],
       body,
       { cwd }
     );
@@ -331,7 +383,7 @@ async function runCliModel(model, prompt, options = {}) {
     // `--sandbox read-only` and grok's `--permission-mode plan`.
     return spawnWithInput(
       model.commandPath,
-      ["--print", "--output-format", "text", "--permission-mode", "plan", "--no-session-persistence", ...native],
+      ["--print", "--output-format", "text", "--permission-mode", options.workspaceWrite ? "acceptEdits" : "plan", "--no-session-persistence", ...native],
       body,
       { cwd }
     );
@@ -343,7 +395,7 @@ async function runCliModel(model, prompt, options = {}) {
       await fs.promises.writeFile(promptPath, body, { encoding: "utf8", mode: 0o600 });
       return await spawnWithInput(
         model.commandPath,
-        ["--prompt-file", promptPath, "--output-format", "plain", "--permission-mode", "plan", "--no-memory", "--max-turns", "1", "--disable-web-search", ...native],
+        ["--prompt-file", promptPath, "--output-format", "plain", "--permission-mode", options.workspaceWrite ? "acceptEdits" : "plan", "--no-memory", "--no-plan", "--no-subagents", "--max-turns", "8", "--disable-web-search", ...native],
         "",
         { cwd }
       );
@@ -400,8 +452,24 @@ function authorized(header, token) {
 }
 
 function isTerminalProviderFailure(error) {
-  return /\b402\b|payment required|balance exhausted|usage balance|not authenticated|authentication required|unauthorized|log(?:ged)?\s*out/i
-    .test(String(error && (error.message || error) || ""));
+  return ["provider_limit_reached", "provider_auth_required"].includes(bridgeFailure(error).code);
+}
+
+function bridgeFailure(error) {
+  const raw = String(error && (error.message || error) || "host CLI failed");
+  if (/timed out|\btimeout\b/i.test(raw)) {
+    return { status: 504, code: "provider_timeout", message: "The host CLI timed out." };
+  }
+  if (/not authenticated|authentication required|unauthorized|log(?:ged)?\s*out/i.test(raw)) {
+    return { status: 401, code: "provider_auth_required", message: "The host CLI needs authentication." };
+  }
+  if (/\b402\b|payment required|balance exhausted|usage (?:balance|limit)|session limit|quota|rate limit/i.test(raw)) {
+    return { status: 429, code: "provider_limit_reached", message: "The host CLI account limit was reached." };
+  }
+  if (/too large/i.test(raw)) return { status: 413, code: "request_too_large", message: "The request is too large." };
+  if (/Content-Type/i.test(raw)) return { status: 415, code: "unsupported_media_type", message: "Content-Type must be application/json." };
+  if (/invalid JSON/i.test(raw)) return { status: 400, code: "invalid_json", message: "The request body is not valid JSON." };
+  return { status: 502, code: "provider_execution_failed", message: "The host CLI could not complete the request." };
 }
 
 function createCliBridge(options = {}) {
@@ -428,7 +496,7 @@ function createCliBridge(options = {}) {
 
   async function handler(request, response) {
     if (!authorized(request.headers.authorization, token)) {
-      sendJson(response, 401, { error: "unauthorized" });
+      sendJson(response, 401, { error: "Unauthorized.", code: "unauthorized" });
       return;
     }
     const url = new URL(request.url || "/", `http://127.0.0.1:${port}`);
@@ -446,13 +514,17 @@ function createCliBridge(options = {}) {
         const body = await readJson(request);
         const available = await models();
         const model = available[String(body.model || "")];
-        if (!model) { sendJson(response, 404, { error: "host CLI model is not authenticated or installed" }); return; }
+        if (!model) { sendJson(response, 404, { error: "Host CLI model is not authenticated or installed.", code: "model_unavailable" }); return; }
         const { system, conversation } = splitMessages(body.messages);
         const prompt = promptFromMessages(conversation);
-        if (!prompt.trim()) { sendJson(response, 400, { error: "messages are required" }); return; }
+        if (!prompt.trim()) { sendJson(response, 400, { error: "Messages are required.", code: "invalid_request" }); return; }
         let content;
         try {
-          content = await (options.executor || runCliModel)(model, prompt, { cwd, system });
+          content = await (options.executor || runCliModel)(model, prompt, {
+            cwd,
+            system,
+            workspaceWrite: body.workspace_write === true,
+          });
         } catch (error) {
           if (isTerminalProviderFailure(error)) {
             quarantinedUntil.set(model.alias, Date.now() + TERMINAL_FAILURE_COOLDOWN_MS);
@@ -469,14 +541,11 @@ function createCliBridge(options = {}) {
         });
         return;
       }
-      sendJson(response, 404, { error: "not found" });
+      sendJson(response, 404, { error: "Not found.", code: "not_found" });
     } catch (error) {
-      const message = error.message || String(error);
-      const status = /too large/.test(message) ? 413
-        : /Content-Type/.test(message) ? 415
-          : /invalid JSON/.test(message) ? 400
-            : 500;
-      sendJson(response, status, { error: message });
+      const failure = bridgeFailure(error);
+      console.error(`[cli-bridge] ${failure.code}: ${error.message || error}`);
+      sendJson(response, failure.status, { error: failure.message, code: failure.code });
     }
   }
 
@@ -521,5 +590,8 @@ module.exports = {
   splitMessages,
   runCliModel,
   safeCliEnvironment,
+  spawnWithInput,
+  trustedBundledExecutable,
   isTerminalProviderFailure,
+  bridgeFailure,
 };

@@ -8,6 +8,7 @@ const { reconcileHostCliBridge } = require("./cli-sync");
 const { parseChatInput, commandHelp } = require("./chat-routing");
 const { createChatRequestHandler } = require("./chat-participant");
 const { capConversations, titleFromTranscript } = require("./conversations");
+const { buildServiceRunBody } = require("./service-request");
 const { installRuntime: installRuntimeBundle } = require("./runtime-install");
 const extensionManifest = require("./package.json");
 const DOCKER_SETUP_URL = "https://docs.docker.com/get-started/get-docker/";
@@ -22,6 +23,7 @@ const {
   normalizeLocalUiUrl,
   request,
   requestStream,
+  responseError,
   runCompose,
   restartCompose,
   selectAvailableModels,
@@ -35,6 +37,9 @@ let runtimeRefresh = null;
 let runtimeRefreshIncludesTechnical = false;
 let runtimeRefreshIncludesModels = false;
 let modelVerificationCache = null;
+/** Last stack root used for start/refresh — used to re-import LITELLM_MASTER_KEY on 401. */
+let knownStackRoot = null;
+let lastModelsAuthErrorLogAt = 0;
 
 const SCAN_GLOBS = [
   "**/.continue/**",
@@ -74,6 +79,9 @@ function cfg() {
       if (allowed.includes(raw)) return raw;
       return 512;
     })(),
+    autoSequenceMode: ["sequential_exhaustion", "per_request"].includes(c.get("autoSequenceMode"))
+      ? c.get("autoSequenceMode")
+      : "sequential_exhaustion",
   };
 }
 
@@ -81,8 +89,49 @@ async function getApiKey() {
   return (
     process.env.AETHERSTACK_API_KEY ||
     (secretStorage ? await secretStorage.get("aetherstack.apiKey") : "") ||
-    "sk-aether-local"
+    ""
   );
+}
+
+/**
+ * Re-read LITELLM_MASTER_KEY from a local stack .env into SecretStorage.
+ * VS Code can keep a stale key after start.sh regenerates or the user edits .env.
+ */
+async function reimportGatewayKeyFromDisk() {
+  const candidates = [];
+  if (knownStackRoot) candidates.push(knownStackRoot);
+  const configured = String(cfg().stackPath || "").trim();
+  if (configured) candidates.push(configured);
+  const ws = workspaceRoot();
+  if (ws) candidates.push(ws);
+  try {
+    const found = findStackRoot(ws || process.cwd());
+    if (found) candidates.push(found);
+  } catch {
+    // findStackRoot is best-effort during early activate
+  }
+  const seen = new Set();
+  for (const root of candidates) {
+    const resolved = path.resolve(root);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    if (!isStackRoot(resolved)) continue;
+    const key = readEnvValue(path.join(resolved, ".env"), "LITELLM_MASTER_KEY");
+    if (!key || /[\r\n]/.test(key)) continue;
+    if (secretStorage) await secretStorage.store("aetherstack.apiKey", key);
+    // Prefer the disk key over a stale process env from an older session.
+    process.env.AETHERSTACK_API_KEY = key;
+    knownStackRoot = resolved;
+    return key;
+  }
+  return "";
+}
+
+async function hubBrowserUrl(pathname = "/") {
+  const token = await getApiKey();
+  const url = new URL(pathname, "http://127.0.0.1:8766");
+  if (token) url.hash = `workspaceToken=${encodeURIComponent(token)}`;
+  return url.toString();
 }
 
 async function migrateLegacyApiKey(context) {
@@ -345,7 +394,7 @@ version: 1.0.0
 schema: v1
 # Generated from live Aether Hub capability availability.
 # apiBase is safe to commit. Do not put secrets in this file.
-# Set env AETHERSTACK_API_KEY=sk-... (default lab: sk-aether-local)
+# Set env AETHERSTACK_API_KEY to the generated key in the local .env file
 # or configure aetherstack.apiKey in VS Code *User* settings.
 
 models:
@@ -357,16 +406,35 @@ async function fetchAvailableModels({ force = false } = {}) {
   if (!force && modelVerificationCache && Date.now() - modelVerificationCache.checkedAt < 5 * 60_000) {
     return modelVerificationCache.value;
   }
-  const apiKey = await getApiKey();
-  const [matrixResponse, gatewayResponse] = await Promise.all([
+  let apiKey = await getApiKey();
+  let [matrixResponse, gatewayResponse] = await Promise.all([
     httpJson("http://127.0.0.1:8766/api/matrix"),
     httpJson("http://127.0.0.1:4000/v1/models", { Authorization: `Bearer ${apiKey}` }),
   ]);
+  // Stale SecretStorage / AETHERSTACK_API_KEY after .env rotation → re-import once.
+  if (gatewayResponse.status === 401) {
+    const refreshed = await reimportGatewayKeyFromDisk();
+    if (refreshed && refreshed !== apiKey) {
+      apiKey = refreshed;
+      gatewayResponse = await httpJson("http://127.0.0.1:4000/v1/models", {
+        Authorization: `Bearer ${apiKey}`,
+      });
+    } else if (refreshed && !apiKey) {
+      apiKey = refreshed;
+      gatewayResponse = await httpJson("http://127.0.0.1:4000/v1/models", {
+        Authorization: `Bearer ${apiKey}`,
+      });
+    }
+  }
   if (matrixResponse.status !== 200 || !matrixResponse.body || !matrixResponse.body.models) {
     throw new Error(`capability matrix returned HTTP ${matrixResponse.status}`);
   }
   if (gatewayResponse.status !== 200) {
-    throw new Error(`gateway model list returned HTTP ${gatewayResponse.status}`);
+    const hint =
+      gatewayResponse.status === 401
+        ? " (API key mismatch — run Start AetherStack or AetherStack: Set API Key from stack .env LITELLM_MASTER_KEY)"
+        : "";
+    throw new Error(`gateway model list returned HTTP ${gatewayResponse.status}${hint}`);
   }
   const gatewayIds = (gatewayResponse.body.data || []).map((model) => model.id);
   const candidates = selectAvailableModels(matrixResponse.body, gatewayIds, null, 32);
@@ -587,7 +655,12 @@ function readEnvValue(file, key) {
 
 async function importGatewayKey(context, stackRoot) {
   const key = readEnvValue(path.join(stackRoot, ".env"), "LITELLM_MASTER_KEY");
-  if (key) await context.secrets.store("aetherstack.apiKey", key);
+  if (key) {
+    await context.secrets.store("aetherstack.apiKey", key);
+    process.env.AETHERSTACK_API_KEY = key;
+    knownStackRoot = stackRoot;
+    modelVerificationCache = null;
+  }
   return Boolean(key);
 }
 
@@ -747,10 +820,12 @@ class ControlCenter {
       { enableScripts: true, retainContextWhenHidden: true }
     );
     const template = fs.readFileSync(path.join(this.context.extensionPath, "control-center.html"), "utf8");
+    const uiTokens = fs.readFileSync(path.join(this.context.extensionPath, "ui-tokens.css"), "utf8");
     const token = nonce();
     this.panel.webview.html = template
       .replaceAll("{{NONCE}}", token)
-      .replaceAll("{{CSP_SOURCE}}", this.panel.webview.cspSource);
+      .replaceAll("{{CSP_SOURCE}}", this.panel.webview.cspSource)
+      .replace("{{UI_TOKENS}}", () => uiTokens);
     this.panel.onDidDispose(() => {
       this.panel = null;
     }, null, this.context.subscriptions);
@@ -779,18 +854,22 @@ class HubChat {
     this.panel = null;
     this.view = null;
     this.services = [];
-    this.activityWords = [];
     this.conversations = this.context.globalState.get("aetherstack.conversations", []);
     this.surfaceStates = new WeakMap();
     this.activeRuns = new WeakMap();
+    this.serviceRetryTimers = new WeakMap();
     this.readiness = { docker: { installed: true, running: true }, runtimeUp: false, aiReady: false, modelCount: 0 };
   }
 
   async hubRequest(pathname, options = {}) {
-    const response = await request(`http://127.0.0.1:8766${pathname}`, { timeoutMs: 190_000, ...options });
+    const workspaceToken = await getApiKey();
+    const response = await request(`http://127.0.0.1:8766${pathname}`, {
+      timeoutMs: 190_000,
+      ...options,
+      headers: { "X-AetherStack-Workspace-Token": workspaceToken, ...(options.headers || {}) },
+    });
     if (response.status < 200 || response.status >= 300) {
-      const detail = response.body && (response.body.error || response.body.detail);
-      throw new Error(detail || `Aether Hub returned HTTP ${response.status}`);
+      throw responseError(response.status, response.body, response.headers);
     }
     return response.body || {};
   }
@@ -799,7 +878,7 @@ class HubChat {
     if (!webview) return { history: [], activeConversationId: null, selectedServiceId: "auto" };
     let state = this.surfaceStates.get(webview);
     if (!state) {
-      state = { history: [], activeConversationId: null, selectedServiceId: "auto" };
+      state = { history: [], activeConversationId: null, selectedServiceId: "auto", generation: 0 };
       this.surfaceStates.set(webview, state);
     }
     return state;
@@ -865,30 +944,43 @@ class HubChat {
     return capConversations(this.conversations).map(({ id, title, updatedAt }) => ({ id, title, updatedAt }));
   }
 
+  buildRunBody(options = {}) {
+    const settings = cfg();
+    return buildServiceRunBody({
+      ...options,
+      memoryContextKb: settings.memoryContextKb,
+      sequenceMode: settings.autoSequenceMode,
+    });
+  }
+
+  cancelServiceRetry(webview) {
+    if (!webview) return;
+    clearTimeout(this.serviceRetryTimers.get(webview));
+    this.serviceRetryTimers.delete(webview);
+  }
+
   async loadServices(force = false, webview = this.activeWebview()) {
     const pathname = force ? "/api/services/refresh" : "/api/services";
     const options = force ? { method: "POST", body: {} } : {};
     try {
       const body = await this.hubRequest(pathname, options);
       this.services = Array.isArray(body.services) ? body.services : [];
+      this.cancelServiceRetry(webview);
     } catch (error) {
       // Leave the "Auto" option selectable (and schedule a retry) instead of letting a failed
       // fetch permanently strand the webview with an empty <select>, which silently no-ops the
       // prompt input (sendPrompt() bails out whenever no service is selected).
       this.services = [];
       await this.postState(`AetherStack Hub is unreachable (${error.message || error}). Retrying…`, true, webview);
-      clearTimeout(this.servicesRetryTimer);
-      this.servicesRetryTimer = setTimeout(() => this.loadServices(false, webview), 4000);
-      // The retry re-arms itself for as long as the Hub stays down, so it must
-      // never be the reason a process stays alive.
-      this.servicesRetryTimer.unref?.();
+      if (webview) {
+        this.cancelServiceRetry(webview);
+        const timer = setTimeout(() => this.loadServices(false, webview), 4000);
+        this.serviceRetryTimers.set(webview, timer);
+        // The retry re-arms itself for as long as the Hub stays down, so it must
+        // never be the reason a process stays alive.
+        timer.unref?.();
+      }
       return;
-    }
-    try {
-      const activity = await this.hubRequest("/api/activity-words");
-      this.activityWords = Array.isArray(activity.words) ? activity.words.filter((item) => item.enabled !== false) : [];
-    } catch {
-      this.activityWords = [];
     }
     await this.postState(this.services.length ? "" : "No capability-matched services are currently available.", false, webview);
   }
@@ -913,10 +1005,19 @@ class HubChat {
     this.activeRuns.get(webview)?.abort();
     const controller = new AbortController();
     this.activeRuns.set(webview, controller);
-    await webview.postMessage({ type: "busy", value: true });
+    const state = this.stateFor(webview);
+    const generation = state.generation;
+    const isCurrentRun = () => (
+      this.activeRuns.get(webview) === controller
+      && state.generation === generation
+      && !controller.signal.aborted
+    );
+    const postRun = async (payload) => {
+      if (isCurrentRun()) await webview.postMessage(payload);
+    };
+    await postRun({ type: "busy", value: true });
     let inferenceTimer = null;
     try {
-      const state = this.stateFor(webview);
       const requestedService = String(message.serviceId || state.selectedServiceId || "auto");
       const parsed = parseChatInput(
         message.prompt,
@@ -990,39 +1091,37 @@ class HubChat {
         const service = this.services.find((item) => item.id === serviceId) || {};
         plannedModels = (service.agents || []).map((agent) => agent.model).filter(Boolean);
       }
-      if (selection) await webview.postMessage({ type: "route", selection });
-      await webview.postMessage({ type: "inferenceSetting", enabled: cfg().showActiveModel });
+      if (selection) await postRun({ type: "route", selection });
+      await postRun({ type: "inferenceSetting", enabled: cfg().showActiveModel });
       // Always surface live answering progress (phase + model) while a run is active.
       const service = this.services.find((item) => item.id === serviceId) || {};
       if (!plannedModels.length) {
         plannedModels = (service.agents || []).map((agent) => agent.model).filter(Boolean);
       }
       const publishProgress = (payload = {}) => {
-        webview.postMessage({
+        postRun({
           type: "progress",
           phase: payload.phase || "",
-          label: payload.label || "",
+          label: "on it..",
           model: payload.model || "",
           models: payload.models || plannedModels,
         });
       };
       publishProgress({
         phase: serviceId === "auto" ? "auto" : "starting",
-        label: serviceId === "auto"
-          ? (plannedModels[0] ? `Auto · ${plannedModels[0]}…` : "Auto · picking model…")
-          : "Starting…",
+        label: "on it..",
         model: plannedModels[0] || "",
         models: plannedModels,
       });
       const publishInference = async () => {
         try {
           const inference = await fetchInferenceStatus();
-          await webview.postMessage({ type: "inference", inference });
+          await postRun({ type: "inference", inference });
           const active = ((inference || {}).active || []).map((item) => item.model).filter(Boolean);
           if (active.length) {
             publishProgress({
               phase: "running",
-              label: "Answering…",
+              label: "on it..",
               model: active[0],
               models: active,
             });
@@ -1033,21 +1132,26 @@ class HubChat {
       };
       inferenceTimer = setInterval(publishInference, 900);
       await publishInference();
-      const requestBody = {
+      const requestBody = this.buildRunBody({
         goal: prompt,
-        lean_mode: ["off", "balanced", "strict"].includes(message.leanMode) ? message.leanMode : "balanced",
-        token_saver: Boolean(message.tokenSaver),
+        leanMode: message.leanMode,
+        tokenSaver: message.tokenSaver,
         history: state.history.slice(-8),
         attachments,
-        session_id: state.activeConversationId || "vscode-chat",
-        memory_context_kb: cfg().memoryContextKb,
-      };
+        sessionId: state.activeConversationId || "vscode-chat",
+      });
       let result = null;
       let streamedText = "";
       try {
+        const workspaceToken = await getApiKey();
         await requestStream(
           `http://127.0.0.1:8766/api/services/${encodeURIComponent(serviceId)}/run/stream`,
-          { method: "POST", body: requestBody, signal: controller.signal },
+          {
+            method: "POST",
+            body: requestBody,
+            signal: controller.signal,
+            headers: { "X-AetherStack-Workspace-Token": workspaceToken },
+          },
           (event) => {
             if (event.type === "status") {
               publishProgress({
@@ -1060,13 +1164,13 @@ class HubChat {
               if (!streamedText) {
                 publishProgress({
                   phase: "streaming",
-                  label: "Writing…",
+                  label: "on it..",
                   model: event.model || plannedModels[0] || "",
                   models: plannedModels,
                 });
               }
               streamedText += event.text || "";
-              webview.postMessage({ type: "delta", text: event.text || "" });
+              postRun({ type: "delta", text: event.text || "" });
             } else if (event.type === "done") {
               result = event.result;
             }
@@ -1085,7 +1189,7 @@ class HubChat {
       }
       if (!result) {
         if (streamedText) {
-          await webview.postMessage({ type: "deltaInterrupted" });
+          await postRun({ type: "deltaInterrupted" });
         }
         publishProgress({
           phase: "waiting",
@@ -1099,20 +1203,23 @@ class HubChat {
           signal: controller.signal,
         });
       }
+      if (!isCurrentRun()) return;
       if (selection) result.selection = selection;
       state.history.push({ role: "user", content: prompt }, { role: "assistant", content: result.answer || "" });
       await this.saveConversationSnapshot(
         state.history.map((entry) => ({ role: entry.role, value: entry.content })),
         webview
       );
-      await webview.postMessage({ type: "conversationIdentity", id: state.activeConversationId, serviceId: state.selectedServiceId });
-      await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
-      await webview.postMessage({ type: "result", result, streamed: Boolean(streamedText) });
+      await postRun({ type: "conversationIdentity", id: state.activeConversationId, serviceId: state.selectedServiceId });
+      await postRun({ type: "conversations", items: this.conversationSummaries() });
+      await postRun({ type: "result", result, streamed: Boolean(streamedText) });
     } finally {
-      this.activeRuns.delete(webview);
       if (inferenceTimer) clearInterval(inferenceTimer);
-      await webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
-      await webview.postMessage({ type: "busy", value: false });
+      if (this.activeRuns.get(webview) === controller) {
+        this.activeRuns.delete(webview);
+        await webview.postMessage({ type: "inference", inference: { active: [], activeCount: 0 } });
+        await webview.postMessage({ type: "busy", value: false });
+      }
     }
   }
 
@@ -1122,7 +1229,6 @@ class HubChat {
     await webview.postMessage({
       type: "state",
       services: this.services,
-      activityWords: this.activityWords,
       showActiveModel: settings.showActiveModel,
       showThoughtProcess: settings.showThoughtProcess,
       showTokens: settings.showTokens,
@@ -1141,9 +1247,11 @@ class HubChat {
     webview.options = { enableScripts: true };
     const template = fs.readFileSync(path.join(this.context.extensionPath, "chat.html"), "utf8");
     const renderScript = fs.readFileSync(path.join(this.context.extensionPath, "chat-render.js"), "utf8");
+    const uiTokens = fs.readFileSync(path.join(this.context.extensionPath, "ui-tokens.css"), "utf8");
     webview.html = template
       .replaceAll("{{NONCE}}", nonce())
       .replaceAll("{{CSP_SOURCE}}", webview.cspSource)
+      .replace("{{UI_TOKENS}}", () => uiTokens)
       .replace("{{CHAT_RENDER_JS}}", () => renderScript);
     webview.onDidReceiveMessage(async (message) => {
       try {
@@ -1167,7 +1275,7 @@ class HubChat {
         else if (message.type === "dismissTip") await this.context.globalState.update("aetherstack.firstReadyTipDismissed", true);
         else if (message.type === "run") await this.run(message, webview);
         else if (message.type === "cancel") this.activeRuns.get(webview)?.abort();
-        else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/advanced"));
+        else if (message.type === "openAdvanced") await vscode.env.openExternal(vscode.Uri.parse(await hubBrowserUrl("/advanced")));
         else if (message.type === "action") {
           if (message.action === "toggleActiveModel") {
             await vscode.workspace.getConfiguration("aetherstack")
@@ -1211,12 +1319,16 @@ class HubChat {
           await webview.postMessage({ type: "conversations", items: this.conversationSummaries() });
         } else if (message.type === "newConversation") {
           const state = this.stateFor(webview);
+          this.activeRuns.get(webview)?.abort();
+          state.generation += 1;
           state.activeConversationId = null;
           state.history = [];
           state.selectedServiceId = "auto";
           await webview.postMessage({ type: "conversationSwitched", id: null, transcript: [], serviceId: "auto" });
         } else if (message.type === "switchConversation") {
           const state = this.stateFor(webview);
+          this.activeRuns.get(webview)?.abort();
+          state.generation += 1;
           const entry = this.conversations.find((item) => item.id === message.id);
           state.activeConversationId = entry ? entry.id : null;
           state.history = entry ? this.sanitizeTranscript(entry.transcript).map((item) => ({ role: item.role, content: item.value })) : [];
@@ -1224,6 +1336,10 @@ class HubChat {
           await webview.postMessage({ type: "conversationSwitched", id: state.activeConversationId, transcript: entry ? entry.transcript : [], serviceId: state.selectedServiceId });
         } else if (message.type === "deleteConversation") {
           const state = this.stateFor(webview);
+          if (state.activeConversationId === message.id) {
+            this.activeRuns.get(webview)?.abort();
+            state.generation += 1;
+          }
           this.conversations = this.conversations.filter((item) => item.id !== message.id);
           await this.context.globalState.update("aetherstack.conversations", this.conversations);
           if (state.activeConversationId === message.id) {
@@ -1260,7 +1376,13 @@ class HubChat {
           await this.context.globalState.update("aetherstack.conversations", this.conversations);
         }
       } catch (error) {
-        await webview.postMessage({ type: "error", message: error.message || String(error) });
+        if (error && error.name === "AbortError") return;
+        await webview.postMessage({
+          type: "error",
+          message: error.message || String(error),
+          code: error.code || "request_failed",
+          requestId: error.requestId || null,
+        });
       }
     }, null, this.context.subscriptions);
   }
@@ -1269,8 +1391,9 @@ class HubChat {
     this.view = view;
     this.configureWebview(view.webview);
     view.onDidDispose(() => {
+      this.activeRuns.get(view.webview)?.abort();
+      this.cancelServiceRetry(view.webview);
       if (this.view === view) this.view = null;
-      if (!this.activeWebview()) clearTimeout(this.servicesRetryTimer);
     }, null, this.context.subscriptions);
   }
 
@@ -1293,8 +1416,9 @@ class HubChat {
     );
     this.configureWebview(this.panel.webview);
     this.panel.onDidDispose(() => {
+      this.activeRuns.get(this.panel.webview)?.abort();
+      this.cancelServiceRetry(this.panel.webview);
       this.panel = null;
-      if (!this.activeWebview()) clearTimeout(this.servicesRetryTimer);
     }, null, this.context.subscriptions);
   }
 }
@@ -1400,8 +1524,16 @@ async function activate(context) {
       if (runtime.up && includeModels) {
         try {
           models = (await fetchAvailableModels()).models;
+          lastModelsAuthErrorLogAt = 0;
         } catch (error) {
-          output.appendLine(`[models] ${error.message}`);
+          const message = String(error && error.message ? error.message : error);
+          const isAuth = /HTTP 401/.test(message);
+          const now = Date.now();
+          // Auth failures spam every status-bar refresh; log at most once per minute.
+          if (!isAuth || now - lastModelsAuthErrorLogAt > 60_000) {
+            output.appendLine(`[models] ${message}`);
+            if (isAuth) lastModelsAuthErrorLogAt = now;
+          }
           models = [];
         }
         if (cfg().showActiveModel) {
@@ -1647,25 +1779,41 @@ async function activate(context) {
       };
       if (commands[message.type]) await vscode.commands.executeCommand(commands[message.type]);
       else if (message.type === "openUrl" && message.url) await vscode.commands.executeCommand("aetherstack.openUrl", message.url);
-      else if (message.type === "showActiveModel") {
-        await vscode.workspace
-          .getConfiguration("aetherstack")
-          .update("showActiveModel", Boolean(message.value), vscode.ConfigurationTarget.Global);
-        await refreshRuntime(false);
+      else if (message.type === "saveAutoSequence") {
+        const sequenceMode = ["sequential_exhaustion", "per_request"].includes(message.sequenceMode)
+          ? message.sequenceMode
+          : "sequential_exhaustion";
+        const response = await request("http://127.0.0.1:8766/api/auto/chain", {
+          method: "POST",
+          body: { order: Array.isArray(message.order) ? message.order : [], sequence_mode: sequenceMode },
+          timeoutMs: 15_000,
+        });
+        if (response.status < 200 || response.status >= 300) {
+          throw new Error(response.body?.error || `Auto sequence save failed (HTTP ${response.status})`);
+        }
+        await vscode.workspace.getConfiguration("aetherstack")
+          .update("autoSequenceMode", sequenceMode, vscode.ConfigurationTarget.Global);
       } else if (message.type === "ready") {
         await refreshRuntime(true);
       }
     },
-    async () => ({
-      runtime: provider.runtime,
-      models: provider.availableModels,
-      inference: provider.inference,
-      showActiveModel: cfg().showActiveModel,
-      stackPath: stackRoot,
-      containers,
-      technicalError,
-      busy: stackActionInProgress,
-    })
+    async () => {
+      let autoChain = {};
+      try {
+        const response = await request("http://127.0.0.1:8766/api/auto/chain", { timeoutMs: 5_000 });
+        if (response.status >= 200 && response.status < 300) autoChain = response.body || {};
+      } catch { /* Control Center still renders when Hub is down. */ }
+      return {
+        runtime: provider.runtime,
+        models: provider.availableModels,
+        autoSequenceMode: cfg().autoSequenceMode,
+        autoChain,
+        stackPath: stackRoot,
+        containers,
+        technicalError,
+        busy: stackActionInProgress,
+      };
+    }
   );
 
   context.subscriptions.push(
@@ -1679,8 +1827,8 @@ async function activate(context) {
       }
     }),
     vscode.commands.registerCommand("aetherstack.openChatEditor", () => hubChat.showPanel()),
-    vscode.commands.registerCommand("aetherstack.openHub", () =>
-      vscode.env.openExternal(vscode.Uri.parse("http://127.0.0.1:8766/"))
+    vscode.commands.registerCommand("aetherstack.openHub", async () =>
+      vscode.env.openExternal(vscode.Uri.parse(await hubBrowserUrl("/")))
     ),
     vscode.commands.registerCommand("aetherstack.openControlCenter", async () => {
       controlCenter.show();
@@ -1901,10 +2049,19 @@ async function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand("aetherstack.openModels", async () => {
       try {
-        const res = await fetchModels();
+        let res = await fetchModels();
+        if (res.status === 401) {
+          const refreshed = await reimportGatewayKeyFromDisk();
+          if (refreshed) {
+            const retry = await fetchModels();
+            if (retry.status === 200) {
+              res = retry;
+            }
+          }
+        }
         if (res.status === 401) {
           vscode.window.showErrorMessage(
-            "LiteLLM 401: set aetherstack.apiKey (default sk-aether-local) and ensure stack is running."
+            "LiteLLM 401: VS Code API key does not match stack .env LITELLM_MASTER_KEY. Run “AetherStack: Start” (imports the key) or set the key via the command palette."
           );
           return;
         }

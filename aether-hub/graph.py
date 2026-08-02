@@ -38,7 +38,7 @@ NODE_TYPES = {
     "analyser": {"label": "Analyser", "ports_in": -1, "ports_out": -1, "color": "#fbbf24", "pass_through": False},
     "tester": {"label": "Tester", "ports_in": -1, "ports_out": -1, "color": "#22d3ee", "pass_through": False},
     "memory": {"label": "Memory", "ports_in": -1, "ports_out": -1, "color": "#fb7185", "pass_through": True},
-    "route": {"label": "Model route", "ports_in": -1, "ports_out": -1, "color": "#e0a458", "pass_through": False},
+    "route": {"label": "Model route", "ports_in": -1, "ports_out": -1, "color": "#e0a458", "pass_through": True},
     # Private: local-GPU-only inference over a folder of PDF/text; vault-isolated
     "private": {
         "label": "Private",
@@ -77,6 +77,7 @@ _DEFAULT_DATA = {
         "tier": None,
         "max_cost": "high",
         "strategy": "best_score",
+        "workspace_write": False,
     },
     "worker": {
         "role": "builder",
@@ -87,6 +88,7 @@ _DEFAULT_DATA = {
         "max_cost": "medium",
         "strategy": "cheapest",
         "parallel": 2,
+        "workspace_write": False,
     },
     "analyser": {
         "role": "critic",
@@ -98,6 +100,7 @@ _DEFAULT_DATA = {
         "strategy": "best_score",
         "gate": True,
         "ack": True,
+        "workspace_write": False,
     },
     "tester": {
         "role": "tester",
@@ -107,6 +110,7 @@ _DEFAULT_DATA = {
         "tier": "local",
         "max_cost": "low",
         "strategy": "cheapest",
+        "workspace_write": False,
     },
     "memory": {
         # Three tiers: tree (this decision graph), project (all trees in project), global (pan-project)
@@ -495,13 +499,22 @@ def service_to_graph(service: dict[str, Any], goal_text: str = "") -> dict[str, 
             },
         }
 
+    # Prefer neutral task_template (discipline brief without project names) over
+    # the short marketing summary when the caller did not supply a live goal.
+    default_goal = (
+        goal_text
+        or service.get("task_template")
+        or service.get("summary")
+        or service.get("label")
+        or "Describe the task"
+    )
     goal = new_node(
         "goal",
         30,
         center_y,
         {
             "label": "Task / goal",
-            "text": goal_text or service.get("summary") or service.get("label") or "Describe the task",
+            "text": default_goal,
             "service_id": service.get("id"),
         },
     )
@@ -730,6 +743,7 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
                 "behavior_markdown": str(d.get("instructions_md") or "")[:100_000],
                 "behavior_source": str(d.get("instructions_source") or "")[:500],
                 "pass_through": False,
+                "workspace_write": bool(d.get("workspace_write")),
                 "inputs_from": list(incoming.get(nid) or []),
                 "outputs_to": list(outgoing.get(nid) or []),
             }
@@ -761,6 +775,7 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
             "behavior_markdown": str(d.get("instructions_md") or "")[:100_000],
             "behavior_source": str(d.get("instructions_source") or "")[:500],
             "pass_through": bool(NODE_TYPES.get(t, {}).get("pass_through")),
+            "workspace_write": bool(d.get("workspace_write")),
             # Multi-wire topology (fan-in / fan-out)
             "inputs_from": list(incoming.get(nid) or []),
             "outputs_to": list(outgoing.get(nid) or []),

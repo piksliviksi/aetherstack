@@ -59,7 +59,7 @@ Set only keys for providers and slots in use. Local Ollama does not require a cl
 powershell -File scripts/list-models.ps1   # Windows
 ./scripts/list-models.sh                  # Linux / macOS
 curl http://localhost:4000/v1/models \
-  -H "Authorization: Bearer sk-aether-local"
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
 ```
 
 ### HTTP 401
@@ -73,7 +73,7 @@ Use Open WebUI `:3000`, an IDE client with the master key, or curl as above.
 
 ```bash
 curl http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-aether-local" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "local-default",

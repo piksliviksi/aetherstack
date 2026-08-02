@@ -11,8 +11,8 @@ from typing import Any
 
 REPOSITORY = "piksliviksi/aetherstack"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/commits/main"
-ARCHIVE_URL = f"https://github.com/{REPOSITORY}/archive/refs/heads/main.zip"
-VERSION_URL = f"https://raw.githubusercontent.com/{REPOSITORY}/main/VERSION"
+ARCHIVE_URL = f"https://api.github.com/repos/{REPOSITORY}/zipball/{{revision}}"
+VERSION_URL = f"https://raw.githubusercontent.com/{REPOSITORY}/{{revision}}/VERSION"
 UPDATE_DIR = Path(os.environ.get("AETHER_UPDATE_DIR", "/host-aetherstack/updates"))
 CURRENT_VERSION = os.environ.get("AETHERSTACK_VERSION", "development")
 CURRENT_REVISION = os.environ.get("AETHERSTACK_REVISION", "").strip()
@@ -20,12 +20,16 @@ MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 
 def _request(url: str):
+    token = os.environ.get("AETHER_GITHUB_TOKEN", "").strip()
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": f"AetherStack/{CURRENT_VERSION}",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     return urllib.request.Request(
         url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": f"AetherStack/{CURRENT_VERSION}",
-        },
+        headers=headers,
     )
 
 
@@ -42,16 +46,18 @@ def _version_tuple(value: str) -> tuple[int, ...]:
 def check_update() -> dict[str, Any]:
     with urllib.request.urlopen(_request(API_URL), timeout=15) as response:
         value = json.loads(response.read().decode("utf-8"))
+    commit = value.get("commit") or {}
+    # Pin every subsequent fetch (VERSION + zipball) to this commit SHA so a
+    # moving `main` between check and download cannot desync the staged artifact.
+    latest = str(value.get("sha") or "")
     latest_version = ""
     try:
-        with urllib.request.urlopen(_request(VERSION_URL), timeout=15) as response:
+        with urllib.request.urlopen(_request(VERSION_URL.format(revision=latest)), timeout=15) as response:
             latest_version = response.read().decode("utf-8").strip()[:40]
     except Exception:
         # Older upstream revisions predate VERSION. Commit checks and archive
         # staging remain useful until the version marker is published.
         pass
-    commit = value.get("commit") or {}
-    latest = str(value.get("sha") or "")
     return {
         "ok": bool(latest),
         "repository": REPOSITORY,
@@ -84,7 +90,8 @@ def stage_update() -> dict[str, Any]:
     digest = hashlib.sha256()
     size = 0
     try:
-        with urllib.request.urlopen(_request(ARCHIVE_URL), timeout=60) as response, open(temporary, "wb") as handle:
+        archive_url = ARCHIVE_URL.format(revision=revision)
+        with urllib.request.urlopen(_request(archive_url), timeout=60) as response, open(temporary, "wb") as handle:
             while True:
                 chunk = response.read(1024 * 1024)
                 if not chunk:

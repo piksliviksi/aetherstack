@@ -84,9 +84,10 @@ work an Auto-mode session started, and vice versa.
 | Every run appends to the session pool Auto mode reads | `MemoryStore.append_message` |
 | Preset multi-agent services | `execute_service` → `_store_handoff_context`, [`services.py`](../aether-hub/services.py) |
 
-A stage that fails does not abort the run — it is recorded in `steps` with its
-error and the remaining stages continue, so one rate-limited model does not cost
-you the whole tree.
+A stage failure is recorded in `steps`. Independent branches may continue, while
+dependent stages are skipped when they have no successful upstream output. If no
+terminal stage feeding the Output node succeeds, the run fails with node-level
+diagnostics instead of presenting an incomplete result as success.
 
 Canvas and format: [NODE-GRAPH.md](./NODE-GRAPH.md). Scripted equivalents:
 [PIPELINES.md](./PIPELINES.md), [combos/](../combos/).
@@ -102,7 +103,6 @@ Auto mode is a pipe. These are the ways a pipe leaks, and each one is a bug:
 | Multi-agent scaffolding reaching the model | The model sees an orchestration transcript instead of your question, and answers the scaffolding |
 | Blending output from a second model | The answer stops being the model you chose |
 | Instructions telling the model to conceal its process | Well-aligned coding models correctly refuse this, and say so instead of answering |
-| Rewriting the answer before display | Formatting, code, and tone stop matching the native product |
 
 A model that answers a question about its own prompt instead of your task means
 the pass-through was broken upstream — not that the model misbehaved.
@@ -124,6 +124,13 @@ One endpoint drives the whole sequence: `GET|POST /api/first-run`.
 
 `GET /api/first-run` reports each step as done or pending plus the next step to
 take. `POST /api/first-run` runs the sequence.
+
+Named service runs execute independent workers concurrently, then feed their
+evidence into the reviewer and final answer in dependency order. The returned
+`timings_ms` map reports lead, workers, review, answering, and total latency.
+Partial worker/reviewer failures set `degraded` and `degraded_reasons`; HTTP and
+stream failures carry stable `code` and `request_id` fields. `/api/health`
+includes `background_sync` heartbeat and Redis publication state.
 
 **The consent rule.** Scanning and planning always run — they change nothing.
 Nothing is *installed* until you pass `confirm: true`:

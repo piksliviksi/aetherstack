@@ -67,15 +67,17 @@ def probe_ollama_endpoint(base: str, label: str) -> dict[str, Any]:
         "inference_hint": None,
     }
     code, body = _http(f"{base}/api/version", timeout=3.0)
-    if code == 200 and isinstance(body, dict):
+    if code == 200 and isinstance(body, dict) and body.get("version"):
         out["version"] = body.get("version")
         out["reachable"] = True
     else:
-        code2, _ = _http(f"{base}/", timeout=2.0)
-        out["reachable"] = code2 is not None and code2 < 500
-        if not out["reachable"]:
-            out["error"] = body if isinstance(body, dict) else "unreachable"
-            return out
+        detail = body.get("error") if isinstance(body, dict) else body
+        out["error"] = {
+            "code": "ollama_version_probe_failed",
+            "http_status": code,
+            "detail": str(detail or "unreachable")[:300],
+        }
+        return out
 
     code, tags = _http(f"{base}/api/tags", timeout=5.0)
     if code == 200 and isinstance(tags, dict):
@@ -167,7 +169,7 @@ def discover_services() -> dict[str, Any]:
         litellm_base = os.environ.get("LITELLM_BASE_URL", "http://127.0.0.1:4000")
         redis_host = "127.0.0.1"
 
-    key = os.environ.get("LITELLM_MASTER_KEY", "sk-aether-local")
+    key = os.environ.get("LITELLM_MASTER_KEY", "")
     code, models = _http(
         f"{litellm_base.rstrip('/')}/v1/models",
         timeout=5.0,

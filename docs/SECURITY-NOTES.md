@@ -10,7 +10,7 @@ This page records security review notes for AetherStack and mitigations applied.
 | **High** | Extension writes connection secrets into workspace files | Yes (user command) | Mitigated — no key in workspace |
 | **Medium** | CORS was `Access-Control-Allow-Origin: *` on engine | Yes | Mitigated — tightened |
 | **Medium** | Engine APIs unauthenticated on shared lab machines | Yes | Token gate — `AETHERSTACK_ENGINE_TOKEN` / `--token` |
-| **Low** | Default LiteLLM master key `sk-aether-local` | Lab default | Rotate before exposure |
+| **Low** | LiteLLM master-key handling | Generated on first start | Keep `.env` private; no shared default key is accepted |
 | **Low** | `/api/system` discloses host install layout | Localhost | By design; token when shared |
 | **Info** | Host bind warning if not 127.0.0.1 | Config | Warning printed |
 | **Medium** | Browser/proxy cache may retain Open WebUI auth and user responses | Local browser | Mitigated — global `no-store` |

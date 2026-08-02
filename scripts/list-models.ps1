@@ -1,11 +1,15 @@
 # List LiteLLM models (sends master key - browsers do not)
 $Root = Split-Path (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $envFile = Join-Path $Root ".env"
-$key = "sk-aether-local"
+$key = ""
 if (Test-Path $envFile) {
   Get-Content $envFile | ForEach-Object {
     if ($_ -match '^\s*LITELLM_MASTER_KEY=(.+)\s*$') { $key = $Matches[1].Trim() }
   }
+}
+if (-not $key) {
+  Write-Host "LITELLM_MASTER_KEY is missing. Run start.ps1 once." -ForegroundColor Red
+  exit 1
 }
 $headers = @{ Authorization = "Bearer $key" }
 try {
