@@ -93,13 +93,13 @@ Status: **not mitigated in Hub yet** — tracked as E1+ in [ENTERPRISE-ROADMAP.m
 
 | Gap | Risk | Direction |
 |-----|------|-----------|
-| Hub `/api/*` open on loopback | Any local process can control the plane | JWT/session when `AETHER_REQUIRE_AUTH=1` or edition is team/cloud |
-| No project ACLs | Multi-user would share memory/runs | Tenancy model in [MULTI-USER.md](./MULTI-USER.md) / [schemas/tenancy-v0.json](./schemas/tenancy-v0.json) |
-| Shared master gateway key | All users share one secret | Per-user/project virtual keys + org vault |
+| Hub `/api/*` open on loopback | Any local process can control the plane | **Mitigated when** `AETHER_REQUIRE_AUTH=1` / edition team\|cloud — see [AUTH.md](./AUTH.md) |
+| Project ACLs incomplete | Memory paths may still ignore project scope | Tenancy APIs exist; full memory wire-up is E2 |
+| Shared master gateway key | All users share one secret | Per-user JWTs mintable; LiteLLM virtual keys still TODO |
 | Passwordless WebUI proxy | Fine on Desktop loopback only | Must not publish proxy on LAN for Team Server |
-| LAN bind without auth | Accidental exposure | Refuse non-loopback bind unless auth enabled (E1) |
+| LAN bind without auth | Accidental exposure | **Mitigated** — Hub refuses non-loopback unless auth required |
 
-**Do not** enable `docker-compose.team.yml` with public binds in production until E1 auth ships. Templates set `AETHER_REQUIRE_AUTH=1` and keep `AETHER_BIND_HOST=127.0.0.1` behind a reverse proxy.
+Team Server templates set `AETHER_REQUIRE_AUTH=1` and keep app binds on `127.0.0.1` behind a reverse proxy. Rebuild the Hub image after pulling E1 so `auth.py` / `tenancy.py` are included.
 
 Platform overview: [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md).
 

@@ -18,6 +18,7 @@ This tree holds procedures, APIs, and platform facts.
 | [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md) | Desktop / Team Server / Cloud SKUs, trust boundaries, multi-user enterprise |
 | [ENTERPRISE-ROADMAP.md](./ENTERPRISE-ROADMAP.md) | E0–E5 milestones vs MULTI-USER M0–M4 |
 | [MULTI-USER.md](./MULTI-USER.md) | Team multi-user feature roadmap |
+| [AUTH.md](./AUTH.md) | E1 control-plane auth (JWT, OIDC, tenancy APIs) |
 | [schemas/](./schemas/) | Tenancy, audit, file-lease JSON contracts (v0) |
 
 ---

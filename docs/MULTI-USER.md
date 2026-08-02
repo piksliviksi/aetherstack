@@ -1,8 +1,15 @@
 # Multi-user AetherStack (roadmap)
 
-Status: **design** — not implemented in Hub runtime. Today AetherStack is a **single-tenant local appliance** (one operator, loopback Hub, one CLI bridge cwd, client-chosen `session_id`).
+Status: **M0/E1 in progress** — Desktop remains a single-tenant local appliance by default. Team/Cloud can enable control-plane auth.
 
-**E0 preparation** (docs, distro scaffold, compose/env overlays, JSON schemas) is in progress — see [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md), [ENTERPRISE-ROADMAP.md](./ENTERPRISE-ROADMAP.md), and [distro/](../distro/).
+| Layer | Status |
+|-------|--------|
+| E0 docs + distro scaffold | Done |
+| E1 Hub API auth + local JWT + OIDC validate + tenancy file store | **Done** — see [AUTH.md](./AUTH.md) |
+| M1 shared research ACL on all memory paths | Not done |
+| M2 file leases | Not done |
+
+See [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md), [ENTERPRISE-ROADMAP.md](./ENTERPRISE-ROADMAP.md), and [distro/](../distro/).
 
 This document captures the product direction for team projects: shared research, login, per-user CLI/VS Code spaces, and edit-collision guards. Enterprise delivery adds Debian **Team Server** images and a managed **Cloud** SKU without forcing cloud on Desktop users.
 
@@ -58,6 +65,8 @@ Opt-in Compose: [docker-compose.team.yml](../docker-compose.team.yml), [docker-c
 - Authz: `owner | member | viewer` per project
 - Gate **all** Hub `/api/*` with JWT/session (close loopback-open control plane)
 - Namespace memory: `project:{id}:…`, `user:{id}:…`
+
+**E1 shipped:** gate + local JWT mint + OIDC token validation + file-backed memberships (`aether-hub/auth.py`, `tenancy.py`). Enable with `AETHER_REQUIRE_AUTH=1` or `AETHER_EDITION=team`. Details: [AUTH.md](./AUTH.md).
 
 ### M1 — Shared research
 

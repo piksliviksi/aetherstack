@@ -72,6 +72,9 @@ from matrix import (  # noqa: E402
     probe_host_cli_bridge,
     route,
 )
+import gdpr  # noqa: E402
+import auth as hub_auth  # noqa: E402
+import tenancy  # noqa: E402
 from memory import MemoryStore  # noqa: E402
 from inference_runtime import snapshot as hub_inference_snapshot  # noqa: E402
 from graph import (  # noqa: E402
@@ -207,10 +210,18 @@ def _request_origin_allowed(origin: str | None, host: str) -> bool:
 
 def _validate_public_binding(host: str = PUBLIC_BIND_HOST) -> None:
     normalized = host.strip().lower().strip("[]")
-    if normalized not in {"127.0.0.1", "localhost", "::1"}:
-        raise RuntimeError(
-            "Aether Hub cannot be published beyond loopback until authenticated control-plane APIs are enabled"
+    if normalized in {"127.0.0.1", "localhost", "::1", ""}:
+        return
+    if hub_auth.allow_non_loopback_bind():
+        sys.stderr.write(
+            "[hub] non-loopback bind allowed because AETHER_REQUIRE_AUTH is enabled "
+            f"(AETHER_EDITION={hub_auth.edition()})\n"
         )
+        return
+    raise RuntimeError(
+        "Aether Hub cannot be published beyond loopback until authenticated control-plane "
+        "APIs are enabled (set AETHER_REQUIRE_AUTH=1 or AETHER_EDITION=team|cloud)"
+    )
 
 _state_lock = threading.Lock()
 _snapshot: dict = {}
@@ -531,11 +542,58 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self) -> None:
         super().setup()
         self.request_id = uuid.uuid4().hex[:16]
+        self.auth_context: hub_auth.AuthContext | None = None
 
     def log_message(self, fmt: str, *args) -> None:
         sys.stderr.write(f"[hub] request_id={self.request_id} " + (fmt % args) + "\n")
 
+    def _ensure_control_plane_auth(self, method: str, path: str) -> bool:
+        """Attach auth_context; send 401 and return False when required auth fails."""
+        ctx, err = hub_auth.resolve_request_auth(
+            method=method,
+            path=path,
+            authorization=self.headers.get("Authorization"),
+        )
+        self.auth_context = ctx
+        if err == "unauthorized":
+            self._send(
+                401,
+                {
+                    "error": "authentication required",
+                    "code": "unauthorized",
+                    "hint": "Send Authorization: Bearer <token>. "
+                    "Mint a local JWT via POST /api/auth/token with the platform master key, "
+                    "or use an OIDC access token when configured.",
+                },
+            )
+            return False
+        # Optional project scope from header when membership exists
+        if ctx is not None:
+            project_hdr = (self.headers.get("X-AetherStack-Project") or "").strip()
+            if project_hdr:
+                tenancy.attach_project_context(ctx, project_hdr)
+        return True
+
     def _workspace_write_authorized(self) -> bool:
+        # Platform admin JWT / master-key auth satisfies workspace write in team mode;
+        # desktop still uses the dedicated workspace token header.
+        if self.auth_context is not None and self.auth_context.is_admin():
+            return True
+        if self.auth_context is not None and self.auth_context.auth_method in {
+            "local_jwt",
+            "oidc",
+            "master_key",
+        }:
+            # Members may write when they hold at least member on the active project
+            # or when no project is scoped (single-tenant team ops).
+            if self.auth_context.project_id:
+                try:
+                    tenancy.authorize_project(self.auth_context, self.auth_context.project_id, "member")
+                    return True
+                except PermissionError:
+                    return False
+            if self.auth_context.role in {"owner", "member", "admin"}:
+                return True
         supplied = self.headers.get("X-AetherStack-Workspace-Token", "")
         return bool(WORKSPACE_WRITE_TOKEN and supplied) and secrets.compare_digest(
             supplied, WORKSPACE_WRITE_TOKEN
@@ -635,6 +693,8 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         qs = parse_qs(u.query)
+        if not self._ensure_control_plane_auth("GET", path):
+            return
 
         if path in ("/", "/index.html", "/simple", "/simple.html"):
             simple = ROOT / "static" / "simple.html"
@@ -653,6 +713,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, {"error": "graph.html missing"})
             return
+        if path in ("/gdpr", "/gdpr/", "/gdpr.html", "/privacy"):
+            gp = ROOT / "static" / "gdpr.html"
+            if gp.is_file():
+                self._send(200, gp.read_bytes(), "text/html; charset=utf-8")
+            else:
+                self._send(404, {"error": "gdpr.html missing"})
+            return
         if path in ("/aetherstack-icon.png", "/favicon.png"):
             icon = ROOT / "static" / "aetherstack-icon.png"
             if icon.is_file():
@@ -666,6 +733,43 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, gateway_model_list(get_snapshot()))
             return
+        if path == "/api/auth/config":
+            self._send(200, hub_auth.public_auth_config())
+            return
+        if path == "/api/auth/me":
+            if self.auth_context is None:
+                self._send(401, {"error": "authentication required", "code": "unauthorized"})
+                return
+            self._send(200, self.auth_context.to_public())
+            return
+        if path in ("/api/tenancy", "/api/tenancy/snapshot"):
+            self._send(200, tenancy.snapshot())
+            return
+        if path == "/api/tenancy/projects":
+            team_id = (qs.get("team_id") or [None])[0]
+            self._send(200, {"projects": tenancy.list_projects(team_id)})
+            return
+        if path.startswith("/api/tenancy/projects/") and path.count("/") >= 4:
+            pid = path[len("/api/tenancy/projects/") :].strip("/")
+            if pid and "/" not in pid:
+                project = tenancy.get_project(pid)
+                if not project:
+                    self._send(404, {"error": "unknown project"})
+                    return
+                if self.auth_context is not None:
+                    try:
+                        tenancy.authorize_project(self.auth_context, pid, "viewer")
+                    except PermissionError as e:
+                        self._send(403, {"error": str(e), "code": "forbidden"})
+                        return
+                self._send(
+                    200,
+                    {
+                        "project": project,
+                        "memberships": tenancy.list_memberships(project_id=pid),
+                    },
+                )
+                return
         if path == "/api/health":
             d = get_discover()
             models = get_snapshot().get("models") or {}
@@ -700,6 +804,13 @@ class Handler(BaseHTTPRequestHandler):
                     "local_fallback_ready": "local-default" in routable_models,
                     "discover": d.get("summary"),
                     "background_sync": _get_sync_health(),
+                    "auth": {
+                        "require_auth": hub_auth.require_auth(),
+                        "edition": hub_auth.edition(),
+                    },
+                    "tenancy": {
+                        "project_count": tenancy.snapshot().get("project_count"),
+                    },
                 },
             )
             return
@@ -864,6 +975,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, _memory.stats(ns))
             return
+        if path == "/api/gdpr":
+            settings = gdpr.get_settings()
+            self._send(200, {**settings, "subprocessors": gdpr.subprocessors()})
+            return
+        if path == "/api/gdpr/consent":
+            sid = (qs.get("session_id") or [""])[0]
+            self._send(200, {"session_id": sid, "consented": gdpr.has_consent(sid)})
+            return
         if path in ("/api/slash", "/api/commands"):
             self._send(200, {"commands": list_commands()})
             return
@@ -933,10 +1052,66 @@ class Handler(BaseHTTPRequestHandler):
             return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
+        if not self._ensure_control_plane_auth("POST", path):
+            return
         try:
             body = self._read_json()
         except ValueError as exc:
             self._send(400, {"error": str(exc)})
+            return
+
+        if path == "/api/auth/token":
+            try:
+                self._send(200, hub_auth.mint_token_from_master_request(body or {}))
+            except PermissionError as e:
+                self._send(401, {"error": str(e), "code": "unauthorized"})
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path == "/api/tenancy/projects":
+            if self.auth_context is None:
+                self._send(401, {"error": "authentication required", "code": "unauthorized"})
+                return
+            name = str((body or {}).get("name") or "").strip()
+            if not name:
+                self._send(400, {"error": "name is required"})
+                return
+            try:
+                project = tenancy.create_project(
+                    name=name,
+                    team_id=(body or {}).get("team_id"),
+                    owner_user_id=self.auth_context.user_id,
+                    project_id=(body or {}).get("project_id"),
+                )
+                self._send(200, {"project": project})
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path.startswith("/api/tenancy/projects/") and path.endswith("/members"):
+            if self.auth_context is None:
+                self._send(401, {"error": "authentication required", "code": "unauthorized"})
+                return
+            pid = path[len("/api/tenancy/projects/") : -len("/members")].strip("/")
+            try:
+                tenancy.authorize_project(self.auth_context, pid, "owner")
+            except PermissionError as e:
+                # platform admin still allowed via is_admin inside authorize
+                if not self.auth_context.is_admin():
+                    self._send(403, {"error": str(e), "code": "forbidden"})
+                    return
+            user_id = str((body or {}).get("user_id") or "").strip()
+            role = str((body or {}).get("role") or "member").strip()
+            if not user_id:
+                self._send(400, {"error": "user_id is required"})
+                return
+            try:
+                self._send(200, {"membership": tenancy.add_member(pid, user_id, role)})
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
             return
 
         if path in ("/api/backup", "/api/backups", "/api/backup/run"):
@@ -1081,6 +1256,44 @@ class Handler(BaseHTTPRequestHandler):
             sid = body.get("session_id") or body.get("session") or "default"
             try:
                 self._send(200, execute_slash(text, _memory, session_id=sid))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path == "/api/gdpr":
+            try:
+                settings = gdpr.set_settings(body or {})
+                self._send(200, {**settings, "subprocessors": gdpr.subprocessors()})
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path == "/api/gdpr/consent":
+            sid = str(body.get("session_id") or "").strip()
+            if not sid:
+                self._send(400, {"error": "session_id is required"})
+                return
+            if body.get("revoke"):
+                gdpr.revoke_consent(sid)
+            else:
+                gdpr.record_consent(sid)
+            self._send(200, {"session_id": sid, "consented": gdpr.has_consent(sid)})
+            return
+        if path == "/api/gdpr/export":
+            sid = str(body.get("session_id") or "").strip()
+            if not sid:
+                self._send(400, {"error": "session_id is required"})
+                return
+            try:
+                self._send(200, gdpr.export_user_data(_memory, sid))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+        if path == "/api/gdpr/erase":
+            sid = str(body.get("session_id") or "").strip()
+            if not sid:
+                self._send(400, {"error": "session_id is required"})
+                return
+            try:
+                self._send(200, {"session_id": sid, "removed": gdpr.erase_user_data(_memory, sid)})
             except Exception as e:
                 self._send(500, {"error": str(e)})
             return
@@ -1902,6 +2115,26 @@ class Handler(BaseHTTPRequestHandler):
             return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
+        if not self._ensure_control_plane_auth("DELETE", path):
+            return
+        if path.startswith("/api/tenancy/projects/") and "/members/" in path:
+            if self.auth_context is None:
+                self._send(401, {"error": "authentication required", "code": "unauthorized"})
+                return
+            # /api/tenancy/projects/{pid}/members/{user_id}
+            rest = path[len("/api/tenancy/projects/") :]
+            parts = rest.split("/")
+            if len(parts) == 3 and parts[1] == "members":
+                pid, user_id = parts[0], parts[2]
+                try:
+                    if not self.auth_context.is_admin():
+                        tenancy.authorize_project(self.auth_context, pid, "owner")
+                except PermissionError as e:
+                    self._send(403, {"error": str(e), "code": "forbidden"})
+                    return
+                ok = tenancy.remove_member(pid, user_id)
+                self._send(200 if ok else 404, {"removed": ok, "project_id": pid, "user_id": user_id})
+                return
         if path.startswith("/api/memory/sessions/"):
             sid = path[len("/api/memory/sessions/") :].strip("/")
             _memory.clear_session(sid)
@@ -1937,6 +2170,10 @@ def _paths() -> list[str]:
         "POST /api/combos/import",
         "GET  /api/slash             ← list /clear /compact /save …",
         "POST /api/slash             {session_id, text:\"/clear\"}",
+        "GET|POST /api/gdpr          ← settings + subprocessor list; POST {enabled, retention_days, require_cloud_consent}",
+        "GET|POST /api/gdpr/consent  ← {session_id} — record/check per-session cloud-dispatch consent",
+        "POST /api/gdpr/export       {session_id} ← Article 15/20: everything stored for that session",
+        "POST /api/gdpr/erase        {session_id} ← Article 17: real deletion, not archive-then-clear",
         "GET  /api/pipelines         ← multi-stage LLM scripts",
         "POST /api/pipelines/import",
         "GET  /api/pipelines/{id}/export",
@@ -2043,7 +2280,7 @@ def _index_html() -> bytes:
 </style></head><body>
 <header>
   <div class="brand"><img src="/aetherstack-icon.png" width="34" height="34" alt=""/><div><h1>AetherStack</h1><div class="muted">Choose the work. The system chooses the team.</div></div></div>
-  <nav aria-label="AetherStack views"><a href="/">Simple</a><a class="active" aria-current="page" href="/advanced">Advanced</a><a href="http://127.0.0.1:3000/">WebUI</a></nav>
+  <nav aria-label="AetherStack views"><a href="/">Simple</a><a class="active" aria-current="page" href="/advanced">Advanced</a><a href="/gdpr">Privacy</a><a href="http://127.0.0.1:3000/">WebUI</a></nav>
 </header>
 <main>
 <div class="card">
@@ -2408,6 +2645,10 @@ def main() -> None:
     print("[hub] agent modes + token saver…")
     init_runtime_from_config()
     print(f"[hub] mode={get_runtime().get('mode')} token_saver={get_runtime().get('token_saver')}")
+    print(
+        f"[hub] edition={hub_auth.edition()} require_auth={hub_auth.require_auth()} "
+        f"oidc={'on' if hub_auth.oidc_issuer() else 'off'}"
+    )
     print("[hub] initial system discover…")
     refresh_snapshot()
     t = threading.Thread(target=_bg_sync, daemon=True)
@@ -2415,6 +2656,8 @@ def main() -> None:
     httpd = BoundedThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Aether Hub -> http://{HOST}:{PORT}/")
     print("  FIRST:  GET /api/discover")
+    print("  AUTH:   GET /api/auth/config  POST /api/auth/token  GET /api/auth/me")
+    print("  TENANT: GET|POST /api/tenancy/projects")
     print("  MODES:  GET|POST /api/modes   (inline|multi_agent, token_saver)")
     print("  PLAN:   POST /api/agents/plan (multi-LLM event)")
     print("  SLASH:  POST /api/slash  {\"text\":\"/clear\"}  (archive -> clear)")

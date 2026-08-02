@@ -14,6 +14,19 @@ Maps product engineering (M0–M4) to **enterprise milestones (E0–E5)** and di
 |-----------|--------|------------|------------------------|---------------|
 | **E0 — Prep** | Architecture docs, `distro/` scaffold, team/enterprise compose & env stubs, JSON schemas | — | Scaffold only; no GA claims | Docs + overlays validate; desktop path unchanged |
 | **E1 — Auth (M0)** | Principals, OIDC/local login, JWT on all Hub `/api/*`, project roles | M0 | Team Server ISO **alpha** (auth services on image) | Non-loopback refused without auth; ACL unit tests |
+
+### E1 progress
+
+| Item | Status |
+|------|--------|
+| `AETHER_REQUIRE_AUTH` / edition gate on Hub `/api/*` | **Done** (`auth.py` + `server.py`) |
+| Local HS256 JWT mint (`POST /api/auth/token`) | **Done** |
+| Master key bearer → platform-admin | **Done** |
+| OIDC JWKS validation (PyJWT) | **Done** (optional dependency) |
+| Tenancy file store + project ACL helpers | **Done** (`tenancy.py`) |
+| Non-loopback bind only when auth on | **Done** |
+| Browser OIDC login UI | Not started |
+| Memory namespace enforcement on all writes | Partial (namespace helper; full wire-up E2) |
 | **E2 — Shared research (M1)** | Project memory namespaces, research library, audit log | M1 | Team Server **beta** | Members share project memory; audit query API |
 | **E3 — Edit guards (M2)** | Redis file leases; agent `workspace_write` requires lease; VS Code lock UI | M2 | Team Server **GA candidate** | Concurrent write blocked without lease |
 | **E4 — User spaces (M3)** | Per-user CLI bridge + git worktrees; presence SSE | M3 | Desktop clients attach to Team Server cleanly | Two users, two worktrees, no cwd clobber |
