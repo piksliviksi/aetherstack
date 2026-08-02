@@ -1,8 +1,18 @@
 # Multi-user AetherStack (roadmap)
 
-Status: **design** — not implemented. Today AetherStack is a **single-tenant local appliance** (one operator, loopback Hub, one CLI bridge cwd, client-chosen `session_id`).
+Status: **design** — not implemented in Hub runtime. Today AetherStack is a **single-tenant local appliance** (one operator, loopback Hub, one CLI bridge cwd, client-chosen `session_id`).
 
-This document captures the product direction for team projects: shared research, login, per-user CLI/VS Code spaces, and edit-collision guards.
+**E0 preparation** (docs, distro scaffold, compose/env overlays, JSON schemas) is in progress — see [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md), [ENTERPRISE-ROADMAP.md](./ENTERPRISE-ROADMAP.md), and [distro/](../distro/).
+
+This document captures the product direction for team projects: shared research, login, per-user CLI/VS Code spaces, and edit-collision guards. Enterprise delivery adds Debian **Team Server** images and a managed **Cloud** SKU without forcing cloud on Desktop users.
+
+## Product SKUs
+
+| SKU | Multi-user? | Delivery |
+|-----|-------------|----------|
+| **Desktop** | No (single operator) | Current appliance + future Desktop ISO |
+| **Team Server** | Yes (single org) | Self-host Debian image / Compose + OIDC — **ship first** |
+| **Cloud / Enterprise** | Yes (multi-tenant) | Managed control plane + optional customer VPC — **after** self-host Team |
 
 ## Goals
 
@@ -34,6 +44,10 @@ None of these are multi-user ACLs yet. Loopback Hub `/api/*` is effectively open
 | **Hybrid** | Cloud auth/billing; compute in customer VPC | Enterprise |
 
 **Cloud is not required** for multi-user. Ship self-hosted team edition first.
+
+Contracts (not enforced yet): [schemas/tenancy-v0.json](./schemas/tenancy-v0.json), [schemas/audit-event-v0.json](./schemas/audit-event-v0.json), [schemas/file-lease-v0.json](./schemas/file-lease-v0.json).
+
+Opt-in Compose: [docker-compose.team.yml](../docker-compose.team.yml), [docker-compose.enterprise.yml](../docker-compose.enterprise.yml) · env: [.env.team.example](../.env.team.example), [.env.cloud.example](../.env.cloud.example).
 
 ## Implementation phases
 
@@ -115,6 +129,9 @@ Measure real token use per preset before locking list prices.
 
 ## Related docs
 
+- [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md) — SKUs, trust boundaries, Team/Cloud architecture
+- [ENTERPRISE-ROADMAP.md](./ENTERPRISE-ROADMAP.md) — E0–E5 vs M0–M4
+- [DEBIAN-DISTRO-BUILD.md](./DEBIAN-DISTRO-BUILD.md) · [distro/](../distro/) — OS image packaging
 - [SECURITY-NOTES.md](./SECURITY-NOTES.md) — tokens, loopback trust
 - [AGENT-MEMORY.md](./AGENT-MEMORY.md) — session/vector namespaces
 - [PRIVATE-MODE.md](./PRIVATE-MODE.md) — vault isolation patterns

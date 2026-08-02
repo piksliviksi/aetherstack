@@ -1,0 +1,27 @@
+#!/bin/bash
+# Example chroot hook — copy to 0100-aetherstack.hook.chroot and chmod +x for live-build.
+# E0: illustrative only.
+set -euo pipefail
+
+install -d -m 0755 /opt/aetherstack /etc/aetherstack /var/lib/aetherstack
+# rsync of toolkit is done via includes.chroot in real builds
+
+if [[ -f /opt/aetherstack/distro/systemd/aetherstack-compose.service ]]; then
+  install -m 0644 /opt/aetherstack/distro/systemd/aetherstack-compose.service \
+    /etc/systemd/system/aetherstack-compose.service
+  install -m 0644 /opt/aetherstack/distro/systemd/aetherstack-firstboot.service \
+    /etc/systemd/system/aetherstack-firstboot.service
+  systemctl enable aetherstack-compose.service || true
+  systemctl enable aetherstack-firstboot.service || true
+fi
+
+# Desktop: link env template without secrets
+if [[ ! -f /etc/aetherstack/env ]] && [[ -f /opt/aetherstack/.env.example ]]; then
+  cp /opt/aetherstack/.env.example /etc/aetherstack/env
+  chmod 0600 /etc/aetherstack/env
+fi
+
+# Pre-load docker images if builder staged a cache
+if [[ -f /root/cache/aether-images.tar ]]; then
+  docker load -i /root/cache/aether-images.tar || true
+fi

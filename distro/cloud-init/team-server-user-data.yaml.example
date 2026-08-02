@@ -1,0 +1,40 @@
+#cloud-config
+# Example first-boot for AetherStack Team Server VMs (E0 template).
+# Do not commit real secrets. Inject via your vault / cloud secret store.
+
+hostname: aether-team-01
+manage_etc_hosts: true
+
+users:
+  - name: aether
+    groups: [docker, sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    # ssh_authorized_keys:
+    #   - ssh-ed25519 AAAA...
+
+write_files:
+  - path: /etc/aetherstack/env.d/10-edition.env
+    permissions: "0600"
+    content: |
+      AETHER_EDITION=team
+      AETHER_REQUIRE_AUTH=1
+      AETHER_TENANT_MODE=single
+      AETHER_BIND_HOST=127.0.0.1
+      # AETHER_OIDC_ISSUER=https://auth.example.com/application/o/aetherstack/
+      # AETHER_OIDC_CLIENT_ID=
+      # AETHER_OIDC_AUDIENCE=aetherstack
+
+  # Optional: provider keys for org-level gateway (not per-developer laptops)
+  # - path: /etc/aetherstack/env.d/20-providers.env
+  #   permissions: "0600"
+  #   content: |
+  #     ANTHROPIC_API_KEY_ENTERPRISE=
+  #     OPENAI_API_KEY_ENTERPRISE=
+
+runcmd:
+  - [ bash, -lc, "mkdir -p /var/lib/aetherstack && systemctl enable --now docker || true" ]
+  - [ bash, -lc, "systemctl start aetherstack-firstboot.service || true" ]
+  - [ bash, -lc, "systemctl start aetherstack-compose.service || true" ]
+
+final_message: "AetherStack Team Server cloud-init finished. Configure OIDC then verify TLS proxy."

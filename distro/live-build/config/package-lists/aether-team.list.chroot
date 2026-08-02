@@ -1,0 +1,7 @@
+# Team Server — lean server image
+openssh-server
+nftables
+# Reverse proxy: install caddy or traefik via compose profile, not necessarily apt
+# fail2ban optional for SSH hardening on public VMs
+curl
+jq

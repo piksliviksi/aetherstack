@@ -1,0 +1,23 @@
+[Unit]
+Description=AetherStack Docker Compose control plane
+Documentation=https://github.com/piksliviksi/aetherstack
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+# Optional: wait for host Ollama when installed
+After=ollama.service
+Wants=ollama.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/aetherstack
+EnvironmentFile=-/etc/aetherstack/env
+# Desktop/Team: start.sh generates keys when needed and brings the stack up.
+# Team Server images should set AETHER_EDITION and compose override files via env.
+ExecStart=/usr/local/bin/aetherstack-start
+ExecStop=/usr/local/bin/aetherstack-stop
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

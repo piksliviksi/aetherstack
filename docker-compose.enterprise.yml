@@ -1,0 +1,33 @@
+# AetherStack Enterprise / Cloud control-plane overlay (opt-in)
+# Usage:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.team.yml \
+#     -f docker-compose.enterprise.yml \
+#     --env-file .env.cloud \
+#     up -d
+#
+# E0: multi-tenant flags and ops placeholders only. No billing implementation.
+
+services:
+  aether-hub:
+    environment:
+      - AETHER_EDITION=${AETHER_EDITION:-cloud}
+      - AETHER_REQUIRE_AUTH=${AETHER_REQUIRE_AUTH:-1}
+      - AETHER_TENANT_MODE=${AETHER_TENANT_MODE:-multi}
+      - AETHER_METERING_ENABLED=${AETHER_METERING_ENABLED:-1}
+      - AETHER_FAIR_QUEUE=${AETHER_FAIR_QUEUE:-1}
+      - AETHER_REMOTE_WORKERS_URL=${AETHER_REMOTE_WORKERS_URL:-}
+      - AETHER_OBJECT_STORE_ENDPOINT=${AETHER_OBJECT_STORE_ENDPOINT:-}
+      - AETHER_OBJECT_STORE_BUCKET=${AETHER_OBJECT_STORE_BUCKET:-}
+      # Future: DATABASE_URL for hub tenancy tables (separate from litellm spend)
+
+  litellm:
+    environment:
+      - AETHER_EDITION=${AETHER_EDITION:-cloud}
+      # Scale workers carefully behind a real edge; default remains 1 for safety
+      # command override left to operators when ready:
+      # command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2"]
+
+  # Metrics scraper placeholder — wire Prometheus in ops charts later
+  # node-exporter / otel-collector intentionally not pinned in E0

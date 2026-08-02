@@ -1,0 +1,18 @@
+Source: aetherstack-team
+Section: devel
+Priority: optional
+Maintainer: AetherStack Packaging <packaging@localhost>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/piksliviksi/aetherstack
+
+Package: aetherstack-team
+Architecture: all
+Depends: ${misc:Depends}, aetherstack-toolkit
+Recommends: nftables
+Description: AetherStack Team Server additions (metapackage)
+ Depends on aetherstack-toolkit and documents Team Server extras:
+ OIDC IdP (Authentik/Keycloak via Compose profile), reverse proxy,
+ and multi-user configuration templates (.env.team.example).
+ Auth enforcement is product milestone E1 — this package does not
+ enable unsafe LAN binds by itself.

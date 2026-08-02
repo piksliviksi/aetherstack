@@ -1,0 +1,10 @@
+aetherstack-team
+----------------
+
+Team Server metapackage skeleton.
+
+See:
+  docs/ENTERPRISE-PLATFORM.md
+  docs/MULTI-USER.md
+  docker-compose.team.yml
+  .env.team.example

@@ -1,0 +1,16 @@
+# Common packages for Desktop and Team Server images
+ca-certificates
+curl
+gnupg
+git
+jq
+python3
+python3-venv
+python3-yaml
+sudo
+vim-tiny
+openssh-client
+# Prefer docker-ce from Docker's apt repo in production hooks;
+# docker.io is acceptable for early ISO prototypes.
+docker.io
+docker-compose

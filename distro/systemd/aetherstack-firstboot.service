@@ -1,0 +1,17 @@
+[Unit]
+Description=AetherStack first-boot provisioning
+Documentation=file:///opt/aetherstack/distro/README.md
+ConditionPathExists=!/var/lib/aetherstack/first-boot-done
+After=network-online.target docker.service
+Before=aetherstack-compose.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/aetherstack-firstboot
+# firstboot script should: generate LITELLM_MASTER_KEY if empty,
+# render edition env, mkdir state dirs, touch first-boot-done
+
+[Install]
+WantedBy=multi-user.target

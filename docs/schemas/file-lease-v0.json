@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aetherstack.local/schemas/file-lease-v0.json",
+  "title": "AetherStack file lease v0",
+  "description": "Edit collision guard (MULTI-USER M2). Redis key shape lock:{project_id}:{path}.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "lease_id",
+    "project_id",
+    "path",
+    "holder_user_id",
+    "acquired_at",
+    "expires_at"
+  ],
+  "properties": {
+    "lease_id": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "path": {
+      "type": "string",
+      "description": "Repo-relative POSIX path",
+      "minLength": 1
+    },
+    "holder_user_id": { "type": "string" },
+    "holder_session_id": { "type": "string" },
+    "holder_agent_id": {
+      "type": "string",
+      "description": "Optional agent/run id when lease is for automated workspace_write"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["exclusive_write", "read_intent"],
+      "default": "exclusive_write"
+    },
+    "acquired_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "heartbeat_sec": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 300,
+      "default": 30
+    },
+    "ttl_sec": {
+      "type": "integer",
+      "minimum": 15,
+      "maximum": 3600,
+      "default": 120
+    }
+  }
+}

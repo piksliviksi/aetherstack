@@ -1,0 +1,23 @@
+# AetherStack Desktop edition — single-operator local appliance
+edition: desktop
+aether_edition: desktop
+require_auth: false
+tenant_mode: single
+bind_host: "127.0.0.1"
+compose_files:
+  - docker-compose.yml
+features:
+  host_ollama: true
+  open_webui_loopback_proxy: true
+  oidc: false
+  reverse_proxy: false
+  multi_user: false
+resources:
+  recommended_ram_gb: 16
+  min_ram_gb: 8
+  notes: "8 GB hosts should avoid large local models alongside full Compose."
+packages:
+  - aetherstack-toolkit
+systemd:
+  - aetherstack-compose.service
+  - aetherstack-firstboot.service

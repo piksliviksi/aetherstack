@@ -1,0 +1,11 @@
+aetherstack-toolkit
+-------------------
+
+Metapackage skeleton for the Desktop / common toolkit.
+
+Build (on Debian):
+
+  dpkg-buildpackage -us -uc
+
+Runtime files are expected from the AetherStack release tarball unpacked to
+/opt/aetherstack. This control file is E0 scaffolding only.

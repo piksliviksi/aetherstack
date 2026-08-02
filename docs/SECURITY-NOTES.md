@@ -87,6 +87,24 @@ API keys / gateway secrets committed to git or shared workspaces.
 
 ---
 
+## Enterprise readiness gaps (Team Server / Cloud)
+
+Status: **not mitigated in Hub yet** — tracked as E1+ in [ENTERPRISE-ROADMAP.md](./ENTERPRISE-ROADMAP.md).
+
+| Gap | Risk | Direction |
+|-----|------|-----------|
+| Hub `/api/*` open on loopback | Any local process can control the plane | JWT/session when `AETHER_REQUIRE_AUTH=1` or edition is team/cloud |
+| No project ACLs | Multi-user would share memory/runs | Tenancy model in [MULTI-USER.md](./MULTI-USER.md) / [schemas/tenancy-v0.json](./schemas/tenancy-v0.json) |
+| Shared master gateway key | All users share one secret | Per-user/project virtual keys + org vault |
+| Passwordless WebUI proxy | Fine on Desktop loopback only | Must not publish proxy on LAN for Team Server |
+| LAN bind without auth | Accidental exposure | Refuse non-loopback bind unless auth enabled (E1) |
+
+**Do not** enable `docker-compose.team.yml` with public binds in production until E1 auth ships. Templates set `AETHER_REQUIRE_AUTH=1` and keep `AETHER_BIND_HOST=127.0.0.1` behind a reverse proxy.
+
+Platform overview: [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md).
+
+---
+
 ## Operator rules
 
 | Rule | Requirement |
@@ -97,3 +115,4 @@ API keys / gateway secrets committed to git or shared workspaces.
 | Shared machines | `AETHERSTACK_ENGINE_TOKEN` before starting the engine |
 | `.continue/config.yaml` | No secrets in git; gitignore local overrides |
 | Open WebUI volume | Treat `webui.db`, WAL, uploads, and vector DB as sensitive user data |
+| Team Server | Auth required; TLS edge only; see enterprise gaps above |

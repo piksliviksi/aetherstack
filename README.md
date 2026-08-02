@@ -252,7 +252,14 @@ GPU memory. `--skip-inference` performs control-plane checks only.
 | Capability matrix | [docs/CAPABILITY-MATRIX.md](./docs/CAPABILITY-MATRIX.md) |
 | Project engine | [project-engine/README.md](./project-engine/README.md) |
 | Security | [docs/SECURITY-NOTES.md](./docs/SECURITY-NOTES.md) |
+| Multi-user / teams (design) | [docs/MULTI-USER.md](./docs/MULTI-USER.md) |
+| Enterprise platform (design) | [docs/ENTERPRISE-PLATFORM.md](./docs/ENTERPRISE-PLATFORM.md) · [docs/ENTERPRISE-ROADMAP.md](./docs/ENTERPRISE-ROADMAP.md) |
+| Debian distro packaging (scaffold) | [distro/](./distro/) · [docs/DEBIAN-DISTRO-BUILD.md](./docs/DEBIAN-DISTRO-BUILD.md) |
 | Full index | [docs/README.md](./docs/README.md) |
+
+### Enterprise / Team Server (preparation)
+
+Self-hosted **Team Server** and managed **Cloud** multi-user are roadmap items (not enabled in the default local appliance). E0 prep includes architecture docs, `distro/` ISO packaging scaffold, opt-in `docker-compose.team.yml` / `docker-compose.enterprise.yml`, and tenancy schemas. Default `./start.sh` remains single-user and loopback-safe.
 
 ---
 

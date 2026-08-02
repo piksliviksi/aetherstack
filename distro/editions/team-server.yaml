@@ -1,0 +1,35 @@
+# AetherStack Team Server edition — self-hosted multi-user (MULTI-USER M0+)
+edition: team-server
+aether_edition: team
+require_auth: true
+tenant_mode: single
+# Application ports stay on loopback; reverse proxy publishes 443.
+bind_host: "127.0.0.1"
+publish_proxy: true
+compose_files:
+  - docker-compose.yml
+  - docker-compose.team.yml
+features:
+  host_ollama: true
+  open_webui_loopback_proxy: false
+  oidc: true
+  reverse_proxy: true
+  multi_user: true
+  file_leases: true # from M2
+  audit_log: true   # from M1
+identity:
+  preferred: authentik # or keycloak
+  local_users_airgap: true
+resources:
+  recommended_ram_gb: 32
+  min_ram_gb: 16
+  vcpu: 8
+  notes: "See docs/MULTI-USER.md hardware envelopes (Starter/Team/Heavy)."
+packages:
+  - aetherstack-toolkit
+  - aetherstack-team
+systemd:
+  - aetherstack-compose.service
+  - aetherstack-firstboot.service
+  - aetherstack-team.target
+env_template: .env.team.example

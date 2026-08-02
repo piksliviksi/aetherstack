@@ -1,0 +1,78 @@
+# AetherStack Team Server overlay (opt-in)
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.team.yml --env-file .env.team up -d
+#
+# E0: placeholders for reverse proxy and identity. Does not implement Hub JWT.
+# Default single-user path is unchanged if this file is not used.
+#
+# Safety: keep app binds on loopback; publish only the proxy. Set
+# AETHER_REQUIRE_AUTH=1 (see .env.team.example). Hub enforcement is milestone E1.
+
+services:
+  aether-hub:
+    environment:
+      - AETHER_EDITION=${AETHER_EDITION:-team}
+      - AETHER_REQUIRE_AUTH=${AETHER_REQUIRE_AUTH:-1}
+      - AETHER_TENANT_MODE=${AETHER_TENANT_MODE:-single}
+      - AETHER_OIDC_ISSUER=${AETHER_OIDC_ISSUER:-}
+      - AETHER_OIDC_CLIENT_ID=${AETHER_OIDC_CLIENT_ID:-}
+      - AETHER_OIDC_AUDIENCE=${AETHER_OIDC_AUDIENCE:-}
+      - AETHER_OIDC_JWKS_URL=${AETHER_OIDC_JWKS_URL:-}
+      # When E1 lands, Hub must reject unauthenticated /api/* if REQUIRE_AUTH=1
+
+  litellm:
+    environment:
+      - AETHER_EDITION=${AETHER_EDITION:-team}
+
+  # Edge reverse proxy (TLS). Only this service should be reachable on LAN.
+  # Configure Caddyfile / certificates via volume in real deployments.
+  caddy:
+    profiles: ["team-edge"]
+    image: ${CADDY_IMAGE:-caddy:2.8-alpine}
+    ports:
+      - "${AETHER_PROXY_HTTP:-80}:80"
+      - "${AETHER_PROXY_HTTPS:-443}:443"
+    volumes:
+      - ./distro/edge/Caddyfile.team.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - aether-hub
+      - litellm
+    restart: unless-stopped
+
+  # Optional self-hosted IdP — enable with: --profile team-idp
+  # Prefer external corporate IdP in production; this is for lab / air-gap.
+  authentik-server:
+    profiles: ["team-idp"]
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2024.8.3}
+    command: server
+    environment:
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY:-change-me-in-production}
+      - AUTHENTIK_POSTGRESQL__HOST=postgres
+      - AUTHENTIK_POSTGRESQL__USER=litellm
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${LITELLM_DB_PASSWORD:-litellm-local}
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+    # DB bootstrap for authentik is operator-owned in E0 (create DB manually).
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional artifact store for team research exports / backups
+  minio:
+    profiles: ["team-objects"]
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2024-09-22T00-33-43Z}
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-aether}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-change-me-minio}
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  minio_data:

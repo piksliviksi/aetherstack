@@ -1,0 +1,4 @@
+# Desktop ISO conveniences (optional GNOME/KDE chosen at lb config time)
+network-manager
+firefox-esr
+# code  # optional: install VS Code from Microsoft repo in chroot hook

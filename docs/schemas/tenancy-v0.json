@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aetherstack.local/schemas/tenancy-v0.json",
+  "title": "AetherStack tenancy v0",
+  "description": "Contract for multi-user principals (MULTI-USER M0). Not yet enforced by Hub.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/User" },
+    { "$ref": "#/$defs/Team" },
+    { "$ref": "#/$defs/Project" },
+    { "$ref": "#/$defs/Membership" },
+    { "$ref": "#/$defs/TenantContext" }
+  ],
+  "$defs": {
+    "Role": {
+      "type": "string",
+      "enum": ["owner", "member", "viewer"]
+    },
+    "User": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "user_id"],
+      "properties": {
+        "kind": { "const": "user" },
+        "user_id": { "type": "string", "minLength": 1 },
+        "email": { "type": "string" },
+        "display_name": { "type": "string" },
+        "idp_sub": { "type": "string", "description": "OIDC subject" },
+        "tenant_id": {
+          "type": "string",
+          "description": "Cloud multi-tenant org; omit for single-org Team Server"
+        },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Team": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "team_id", "name"],
+      "properties": {
+        "kind": { "const": "team" },
+        "team_id": { "type": "string", "minLength": 1 },
+        "tenant_id": { "type": "string" },
+        "name": { "type": "string" },
+        "seat_limit": { "type": "integer", "minimum": 1 },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "project_id", "team_id", "name"],
+      "properties": {
+        "kind": { "const": "project" },
+        "project_id": { "type": "string", "minLength": 1 },
+        "team_id": { "type": "string", "minLength": 1 },
+        "tenant_id": { "type": "string" },
+        "name": { "type": "string" },
+        "memory_namespace": {
+          "type": "string",
+          "description": "e.g. project:{project_id}",
+          "pattern": "^project:"
+        },
+        "private_default": { "type": "boolean", "default": false },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "user_id", "project_id", "role"],
+      "properties": {
+        "kind": { "const": "membership" },
+        "user_id": { "type": "string" },
+        "project_id": { "type": "string" },
+        "team_id": { "type": "string" },
+        "role": { "$ref": "#/$defs/Role" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "TenantContext": {
+      "type": "object",
+      "description": "Resolved request context after JWT validation",
+      "additionalProperties": false,
+      "required": ["user_id"],
+      "properties": {
+        "user_id": { "type": "string" },
+        "tenant_id": { "type": "string" },
+        "team_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "project_id": {
+          "type": "string",
+          "description": "Active project for this request"
+        },
+        "role": { "$ref": "#/$defs/Role" },
+        "edition": {
+          "type": "string",
+          "enum": ["desktop", "team", "cloud"]
+        }
+      }
+    }
+  }
+}

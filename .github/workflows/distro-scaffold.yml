@@ -1,0 +1,62 @@
+name: Distro scaffold
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "distro/**"
+      - "docker-compose.yml"
+      - "docker-compose.team.yml"
+      - "docker-compose.enterprise.yml"
+      - ".env.team.example"
+      - ".env.cloud.example"
+      - "docs/schemas/**"
+      - "docs/ENTERPRISE-*.md"
+      - "docs/MULTI-USER.md"
+      - ".github/workflows/distro-scaffold.yml"
+  pull_request:
+    paths:
+      - "distro/**"
+      - "docker-compose.yml"
+      - "docker-compose.team.yml"
+      - "docker-compose.enterprise.yml"
+      - ".env.team.example"
+      - ".env.cloud.example"
+      - "docs/schemas/**"
+      - "docs/ENTERPRISE-*.md"
+      - "docs/MULTI-USER.md"
+      - ".github/workflows/distro-scaffold.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold:
+    name: Validate distro E0 scaffold
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck-ish syntax for distro scripts
+        run: |
+          find distro -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: Render edition env templates
+        run: |
+          ./distro/scripts/render-edition-env.sh desktop | grep -q 'AETHER_EDITION=desktop'
+          ./distro/scripts/render-edition-env.sh team-server | grep -q 'AETHER_REQUIRE_AUTH=1'
+          ./distro/scripts/render-edition-env.sh cloud | grep -q 'AETHER_TENANT_MODE=multi'
+
+      - name: Required schema files exist
+        run: |
+          test -f docs/schemas/tenancy-v0.json
+          test -f docs/schemas/audit-event-v0.json
+          test -f docs/schemas/file-lease-v0.json
+          python3 -c "import json; json.load(open('docs/schemas/tenancy-v0.json')); json.load(open('docs/schemas/audit-event-v0.json')); json.load(open('docs/schemas/file-lease-v0.json'))"
+
+      - name: ISO scaffold script (desktop)
+        run: ./distro/live-build/build-iso.sh --edition desktop
+
+      - name: Compose overlay config
+        run: ./distro/scripts/validate-compose.sh

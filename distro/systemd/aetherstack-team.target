@@ -1,0 +1,10 @@
+[Unit]
+Description=AetherStack Team Server target
+Documentation=https://github.com/piksliviksi/aetherstack/blob/main/docs/ENTERPRISE-PLATFORM.md
+Requires=docker.service aetherstack-compose.service
+After=aetherstack-compose.service
+# Future: authentik/keycloak and caddy units pull in here
+Wants=aetherstack-compose.service
+
+[Install]
+WantedBy=multi-user.target

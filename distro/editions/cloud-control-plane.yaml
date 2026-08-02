@@ -1,0 +1,32 @@
+# AetherStack Cloud control plane — multi-tenant managed / hybrid (not an ISO flavor)
+edition: cloud-control-plane
+aether_edition: cloud
+require_auth: true
+tenant_mode: multi
+bind_host: "127.0.0.1"
+publish_edge_only: true
+compose_files:
+  - docker-compose.yml
+  - docker-compose.team.yml
+  - docker-compose.enterprise.yml
+features:
+  host_ollama: false
+  remote_gpu_workers: true
+  open_webui_loopback_proxy: false
+  oidc: true
+  saml: true
+  reverse_proxy: true
+  multi_user: true
+  multi_tenant: true
+  metering: true
+  fair_queue: true
+identity:
+  preferred: customer_idp # Auth0 / Okta / Entra via OIDC/SAML
+resources:
+  notes: "Horizontal scale; do not use Desktop RAM guidance."
+env_template: .env.cloud.example
+deploy:
+  form_factors:
+    - docker-compose-on-vms
+    - kubernetes-later
+  hybrid_vpc: true

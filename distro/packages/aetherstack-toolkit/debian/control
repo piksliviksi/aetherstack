@@ -1,0 +1,16 @@
+Source: aetherstack-toolkit
+Section: devel
+Priority: optional
+Maintainer: AetherStack Packaging <packaging@localhost>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/piksliviksi/aetherstack
+
+Package: aetherstack-toolkit
+Architecture: all
+Depends: ${misc:Depends}, docker.io | docker-ce, curl, ca-certificates, python3, jq
+Recommends: git
+Description: AetherStack local control-plane toolkit (metapackage)
+ Installs layout under /opt/aetherstack and systemd helpers for the
+ single-operator Desktop appliance. Does not include multi-user auth (see
+ aetherstack-team).

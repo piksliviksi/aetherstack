@@ -14,6 +14,11 @@ This tree holds procedures, APIs, and platform facts.
 | [TUTORIAL-WINDOWS.md](./TUTORIAL-WINDOWS.md) | Windows 11 |
 | [TUTORIAL-MACOS.md](./TUTORIAL-MACOS.md) | macOS + Metal |
 | [TUTORIAL-UBUNTU.md](./TUTORIAL-UBUNTU.md) | Ubuntu / Linux |
+| [DEBIAN-DISTRO-BUILD.md](./DEBIAN-DISTRO-BUILD.md) | Design guide: Debian-based OS image with AetherStack built in |
+| [ENTERPRISE-PLATFORM.md](./ENTERPRISE-PLATFORM.md) | Desktop / Team Server / Cloud SKUs, trust boundaries, multi-user enterprise |
+| [ENTERPRISE-ROADMAP.md](./ENTERPRISE-ROADMAP.md) | E0–E5 milestones vs MULTI-USER M0–M4 |
+| [MULTI-USER.md](./MULTI-USER.md) | Team multi-user feature roadmap |
+| [schemas/](./schemas/) | Tenancy, audit, file-lease JSON contracts (v0) |
 
 ---
 

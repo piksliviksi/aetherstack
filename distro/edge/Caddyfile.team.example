@@ -1,0 +1,38 @@
+# Example Caddyfile for Team Server (profile team-edge).
+# Replace aether.example.com and enable real certificates.
+#
+# docker compose -f docker-compose.yml -f docker-compose.team.yml --profile team-edge up -d
+
+{
+  # email admin@example.com
+}
+
+aether.example.com {
+  encode gzip
+
+  # Hub UI + API
+  handle /api/* {
+    reverse_proxy aether-hub:8766
+  }
+  handle /v1/* {
+    reverse_proxy aether-hub:8766
+  }
+  handle /graph* {
+    reverse_proxy aether-hub:8766
+  }
+  handle /advanced* {
+    reverse_proxy aether-hub:8766
+  }
+  handle {
+    reverse_proxy aether-hub:8766
+  }
+
+  # Optional: path-route gateway (or use gateway.aether.example.com)
+  # handle_path /gateway/* {
+  #   reverse_proxy litellm:4000
+  # }
+}
+
+# gateway.aether.example.com {
+#   reverse_proxy litellm:4000
+# }
