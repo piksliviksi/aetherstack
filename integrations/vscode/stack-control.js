@@ -375,6 +375,29 @@ async function startCompose(stackRoot, { onOutput = null } = {}) {
   }
 }
 
+/**
+ * Installs the terminal CLI (integrations/cli) globally via `npm link`, so
+ * the `aetherstack` command becomes available in any terminal — the text
+ * equivalent of "Start All Services" for the text-based Hub client.
+ */
+async function installCliPackage(stackRoot, { onOutput = null } = {}) {
+  if (!isStackRoot(stackRoot)) throw new Error(`Not an AetherStack installation: ${stackRoot}`);
+  const cliDir = path.join(stackRoot, "integrations", "cli");
+  if (!fs.existsSync(path.join(cliDir, "package.json"))) {
+    throw new Error(`CLI package not found at ${cliDir}`);
+  }
+  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+  try {
+    return await execFileResult(npmCmd, ["link"], { cwd: cliDir, onOutput, timeout: 5 * 60_000 });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error("npm was not found. Install Node.js (which bundles npm) and retry.");
+    }
+    const detail = conciseError(error.result && (error.result.stderr || error.result.stdout));
+    throw new Error(`CLI install failed${detail ? `: ${detail}` : ""}`);
+  }
+}
+
 async function runCompose(stackRoot, args, { timeoutMs = 2 * 60_000 } = {}) {
   if (!isStackRoot(stackRoot)) throw new Error(`Not an AetherStack installation: ${stackRoot}`);
   try {
@@ -525,6 +548,7 @@ module.exports = {
   composeDetails,
   composeLogs,
   execFileResult,
+  installCliPackage,
   restartCompose,
   runCompose,
   selectAvailableModels,

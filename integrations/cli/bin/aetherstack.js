@@ -5,10 +5,14 @@ const hubClient = require("../lib/hub-client");
 const commands = require("../lib/commands");
 const { createMenu } = require("../lib/menu");
 
-const USAGE = `AetherStack CLI — the text equivalent of the Hub.
+const USAGE = `AetherStack CLI — the text equivalent of the Hub. No VS Code required:
+this alone can start, use, and stop a full AetherStack checkout.
 
 Usage:
   aetherstack                          Interactive menu (list/run/build/export/import presets)
+  aetherstack up                       Start the local stack (Docker Compose) — like start.sh
+  aetherstack down                     Stop the local stack — like stop.sh
+  aetherstack status                   Docker + service health for this checkout
   aetherstack list                     List available presets
   aetherstack tree <preset>            Show a preset's node tree as text
   aetherstack run <preset> [goal]      Run a preset (reads goal from stdin if omitted)
@@ -20,6 +24,7 @@ Usage:
 
 Options:
   --hub <url>     Hub base URL (default: $AETHERSTACK_HUB_URL or http://127.0.0.1:8766)
+  --cwd <path>    AetherStack checkout to operate on for up/down/status (default: current directory)
   --json          For "run": print the final result as JSON instead of plain text
   -h, --help      Show this help
 `;
@@ -44,6 +49,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--hub") flags.hub = argv[++i];
     else if (arg === "--edit") flags.edit = argv[++i];
+    else if (arg === "--cwd") flags.cwd = argv[++i];
     else if (arg === "--json") flags.json = true;
     else if (arg === "-h" || arg === "--help") flags.help = true;
     else args.push(arg);
@@ -76,6 +82,26 @@ async function main(argv) {
     console.log(`AetherStack CLI — talking to ${baseUrl}`);
     await createMenu(client, { baseUrl }).run();
     return 0;
+  }
+
+  if (command === "up") {
+    const root = await commands.startStack(flags.cwd, { onOutput: (chunk) => process.stdout.write(chunk) });
+    console.log(`\nAetherStack is up (${root}).`);
+    return 0;
+  }
+
+  if (command === "down") {
+    const root = await commands.stopStack(flags.cwd);
+    console.log(`AetherStack stopped (${root}).`);
+    return 0;
+  }
+
+  if (command === "status") {
+    const { root, docker, services } = await commands.stackStatus(flags.cwd);
+    console.log(`Checkout: ${root}`);
+    console.log(`Docker: ${docker.installed ? (docker.running ? "running" : "installed, not running") : "not installed"}`);
+    for (const s of services) console.log(`${s.ok ? "OK  " : "FAIL"}  ${s.name || s.id}\t${s.url || ""}${s.ok ? "" : `\t${s.error || ""}`}`);
+    return services.every((s) => s.ok) ? 0 : 1;
   }
 
   if (command === "list") {

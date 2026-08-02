@@ -145,6 +145,29 @@ async function buildOrEditPreset(client, { presetId, deps = {} } = {}) {
   }
 }
 
+/**
+ * Starts/stops the local AetherStack stack (Docker Compose) directly — no Hub
+ * connection needed, since there's nothing to talk to until this succeeds.
+ * `stack` is injectable for tests; defaults to lib/stack.js.
+ */
+async function startStack(cwd, { onOutput, stack = require("./stack") } = {}) {
+  const root = stack.resolveStackRoot(cwd);
+  await stack.startCompose(root, { onOutput });
+  return root;
+}
+
+async function stopStack(cwd, { onOutput, stack = require("./stack") } = {}) {
+  const root = stack.resolveStackRoot(cwd);
+  await stack.stopCompose(root);
+  return root;
+}
+
+async function stackStatus(cwd, { stack = require("./stack") } = {}) {
+  const root = stack.resolveStackRoot(cwd);
+  const [docker, serviceReport] = await Promise.all([stack.checkDocker(), stack.checkServices()]);
+  return { root, docker, services: serviceReport.services || [] };
+}
+
 module.exports = {
   BLANK_PRESET_SCRIPT,
   genRunId,
@@ -156,4 +179,7 @@ module.exports = {
   exportPreset,
   importPreset,
   buildOrEditPreset,
+  startStack,
+  stopStack,
+  stackStatus,
 };

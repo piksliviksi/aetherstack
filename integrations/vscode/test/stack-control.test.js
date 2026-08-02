@@ -4,7 +4,25 @@ const os = require("os");
 const path = require("path");
 const test = require("node:test");
 
-const { execFileResult, findStackRoot, normalizeLocalUiUrl, request, requestStream, responseError, selectAvailableModels, startCompose } = require("../stack-control");
+const { execFileResult, findStackRoot, installCliPackage, normalizeLocalUiUrl, request, requestStream, responseError, selectAvailableModels, startCompose } = require("../stack-control");
+
+function makeStackRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-cli-install-"));
+  fs.writeFileSync(path.join(root, "docker-compose.yml"), "");
+  fs.writeFileSync(path.join(root, "litellm_config.yaml"), "");
+  fs.mkdirSync(path.join(root, "aether-hub"));
+  return root;
+}
+
+test("installCliPackage refuses a directory that isn't an AetherStack checkout", async () => {
+  const notAStack = fs.mkdtempSync(path.join(os.tmpdir(), "not-a-stack-"));
+  await assert.rejects(installCliPackage(notAStack), /Not an AetherStack installation/);
+});
+
+test("installCliPackage reports a clear error when integrations/cli is missing", async () => {
+  const root = makeStackRoot();
+  await assert.rejects(installCliPackage(root), /CLI package not found/);
+});
 
 test("command execution streams output without killing a cold pull at the capture limit", async () => {
   let streamedBytes = 0;

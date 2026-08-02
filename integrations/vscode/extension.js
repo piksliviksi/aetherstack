@@ -19,6 +19,7 @@ const {
   composeDetails,
   composeLogs,
   findStackRoot,
+  installCliPackage,
   isStackRoot,
   normalizeLocalUiUrl,
   request,
@@ -578,6 +579,7 @@ class OverviewProvider {
         treeCmd("Open Aether Hub", "aetherstack.openHub"),
         treeCmd("List gateway models", "aetherstack.openModels"),
         treeCmd("Write .vscode settings", "aetherstack.configureWorkspace"),
+        treeCmd("$(terminal) Install AetherStack CLI", "aetherstack.installCli"),
       ];
       if (this.overview) {
         const models = new vscode.TreeItem(
@@ -1878,6 +1880,32 @@ async function activate(context) {
         output.appendLine(`[runtime-install] ${detail}`);
         output.show(true);
         vscode.window.showErrorMessage(`AetherStack Runtime installation failed: ${detail}`);
+      }
+    }),
+    vscode.commands.registerCommand("aetherstack.installCli", async () => {
+      try {
+        const root = await resolveStackRoot(context, true);
+        if (!root) return;
+        output.appendLine(`\n[${new Date().toISOString()}] installing AetherStack CLI from ${root}`);
+        output.show(true);
+        await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: "AetherStack: Installing CLI (npm link)…" },
+          () => installCliPackage(root, { onOutput: (chunk) => output.append(stripAnsi(chunk)) })
+        );
+        const choice = await vscode.window.showInformationMessage(
+          "AetherStack CLI installed. Run `aetherstack` in any terminal for the text-based Hub.",
+          "Open a terminal"
+        );
+        if (choice === "Open a terminal") {
+          const terminal = vscode.window.createTerminal("AetherStack CLI");
+          terminal.show();
+          terminal.sendText("aetherstack", false);
+        }
+      } catch (error) {
+        const detail = error.message || String(error);
+        output.appendLine(`[cli-install] ${detail}`);
+        output.show(true);
+        vscode.window.showErrorMessage(`AetherStack CLI installation failed: ${detail}`);
       }
     }),
     vscode.commands.registerCommand("aetherstack.refreshHostClis", () => reconcileCliProviders(true)),

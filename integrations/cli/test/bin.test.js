@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const { parseArgs, main } = require("../bin/aetherstack");
 const hubClient = require("../lib/hub-client");
+const commands = require("../lib/commands");
 
 test("parseArgs separates flags from positional arguments", () => {
   const { args, flags } = parseArgs(["run", "coding", "fix", "the", "bug", "--json", "--hub", "http://x:1"]);
@@ -77,4 +78,83 @@ test("missing required arguments raise a usage error instead of crashing", async
 test("an unknown command exits non-zero without throwing", async () => {
   const code = await main(["bogus-command"]);
   assert.equal(code, 1);
+});
+
+function withMockedCommands(overrides, fn) {
+  const originals = {};
+  for (const key of Object.keys(overrides)) {
+    originals[key] = commands[key];
+    commands[key] = overrides[key];
+  }
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      for (const key of Object.keys(originals)) commands[key] = originals[key];
+    });
+}
+
+test("`aetherstack up` starts the stack found from --cwd and reports where", async () => {
+  const lines = [];
+  const origLog = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    await withMockedCommands({ startStack: async () => "/my/checkout" }, () => main(["up", "--cwd", "/my/checkout"]));
+  } finally {
+    console.log = origLog;
+  }
+  assert.match(lines[0], /AetherStack is up \(\/my\/checkout\)/);
+});
+
+test("`aetherstack down` reports the stack it stopped", async () => {
+  const lines = [];
+  const origLog = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    await withMockedCommands({ stopStack: async () => "/my/checkout" }, () => main(["down"]));
+  } finally {
+    console.log = origLog;
+  }
+  assert.match(lines[0], /AetherStack stopped \(\/my\/checkout\)/);
+});
+
+test("`aetherstack status` exits non-zero when a service is down", async () => {
+  const origLog = console.log;
+  console.log = () => {};
+  let code;
+  try {
+    code = await withMockedCommands(
+      {
+        stackStatus: async () => ({
+          root: "/my/checkout",
+          docker: { installed: true, running: true },
+          services: [{ id: "hub", ok: true }, { id: "litellm", ok: false, error: "connection refused" }],
+        }),
+      },
+      () => main(["status"])
+    );
+  } finally {
+    console.log = origLog;
+  }
+  assert.equal(code, 1);
+});
+
+test("`aetherstack status` exits zero when every service is healthy", async () => {
+  const origLog = console.log;
+  console.log = () => {};
+  let code;
+  try {
+    code = await withMockedCommands(
+      {
+        stackStatus: async () => ({
+          root: "/my/checkout",
+          docker: { installed: true, running: true },
+          services: [{ id: "hub", ok: true }],
+        }),
+      },
+      () => main(["status"])
+    );
+  } finally {
+    console.log = origLog;
+  }
+  assert.equal(code, 0);
 });

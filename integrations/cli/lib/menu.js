@@ -17,6 +17,9 @@ AetherStack — text Hub
 7) Export a preset to a YAML file
 8) Import a preset from a YAML file
 9) Cancel the active run
+s) Start the local stack (Docker Compose)
+d) Stop the local stack
+t) Stack status (Docker + service health)
 0) Exit
 `;
 
@@ -125,6 +128,17 @@ function createMenu(client, { input = process.stdin, output = process.stdout, ba
             await commands.cancelRun(client, activeRunId);
             console.log(`Cancel requested for ${activeRunId}.`);
           }
+        } else if (choice.toLowerCase() === "s") {
+          const root = await commands.startStack(undefined, { onOutput: (chunk) => output.write(chunk) });
+          console.log(`\nAetherStack is up (${root}).`);
+        } else if (choice.toLowerCase() === "d") {
+          const root = await commands.stopStack();
+          console.log(`AetherStack stopped (${root}).`);
+        } else if (choice.toLowerCase() === "t") {
+          const { root, docker, services } = await commands.stackStatus();
+          console.log(`Checkout: ${root}`);
+          console.log(`Docker: ${docker.installed ? (docker.running ? "running" : "installed, not running") : "not installed"}`);
+          services.forEach((s) => console.log(`${s.ok ? "OK  " : "FAIL"}  ${s.name || s.id}\t${s.url || ""}${s.ok ? "" : `\t${s.error || ""}`}`));
         } else if (choice === "0" || choice.toLowerCase() === "q") {
           break;
         } else {

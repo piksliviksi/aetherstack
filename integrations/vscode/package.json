@@ -94,6 +94,10 @@
         "title": "AetherStack: Install Verified Runtime"
       },
       {
+        "command": "aetherstack.installCli",
+        "title": "AetherStack: Install CLI (terminal Hub client)"
+      },
+      {
         "command": "aetherstack.chooseStackPath",
         "title": "AetherStack: Choose Installation Folder"
       },

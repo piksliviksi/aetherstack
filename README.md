@@ -120,6 +120,12 @@ From VS Code, open **AetherStack → Control & Services** and press **Start all 
 | **macOS** | `./start.sh` | `./stop.sh` | [TUTORIAL-MACOS](./docs/TUTORIAL-MACOS.md) |
 | **Ubuntu/Linux** | `./start.sh` | `./stop.sh` | [TUTORIAL-UBUNTU](./docs/TUTORIAL-UBUNTU.md) |
 
+**No VS Code?** [`integrations/cli`](./integrations/cli) is a standalone
+terminal client — `cd integrations/cli && npm link`, then `aetherstack up`
+starts the stack, `aetherstack` (no args) opens a text menu covering
+everything the web Hub does (run/build/export/import presets), and
+`aetherstack down` stops it. Node 18+ and Docker are the only prerequisites.
+
 | Requirement | |
 |-------------|-|
 | Docker | Required |

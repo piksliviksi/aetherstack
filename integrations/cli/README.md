@@ -1,11 +1,16 @@
 # AetherStack CLI
 
 A terminal client for AetherStack Hub — the text equivalent of the web Hub and
-node-graph canvas. Talks to a running local Hub over plain HTTP/SSE (the same
-API `graph.html`/`chat.html`/the VS Code extension use); no dependencies, no
-build step.
+node-graph canvas. No VS Code required: this alone can start, use, and stop a
+full AetherStack checkout, over plain HTTP/SSE for the Hub API (the same one
+`graph.html`/`chat.html`/the VS Code extension use) and Docker Compose
+directly for the stack lifecycle. No dependencies, no build step.
 
 ## Install
+
+Requires Node 18+, Docker Desktop/Engine, and a clone of this repository
+(`git clone` it — that's the entire prerequisite; VS Code is not needed for
+any of this).
 
 ```bash
 cd integrations/cli
@@ -18,9 +23,20 @@ Or run it directly without installing:
 node integrations/cli/bin/aetherstack.js
 ```
 
-Requires Node 18+ and a running AetherStack Hub (`http://127.0.0.1:8766` by
-default — start it with `./start.sh` / `start.bat`, or point elsewhere with
-`--hub <url>` / `AETHERSTACK_HUB_URL`).
+Then start the stack and use it, entirely from the terminal:
+
+```bash
+aetherstack up        # first run pulls images/models — same as ./start.sh
+aetherstack status     # confirm Docker + every service is healthy
+aetherstack run coding "explain what this repo does"
+aetherstack down       # stop everything when you're done
+```
+
+`up`/`down`/`status` auto-detect the checkout from the current directory
+(walking up for `docker-compose.yml`); pass `--cwd <path>` to target a
+different one. The Hub itself defaults to `http://127.0.0.1:8766` — point
+elsewhere with `--hub <url>` / `AETHERSTACK_HUB_URL` for `list`/`tree`/`run`/
+etc. once it's up.
 
 ## Interactive menu
 
@@ -44,6 +60,9 @@ AetherStack — text Hub
 7) Export a preset to a YAML file
 8) Import a preset from a YAML file
 9) Cancel the active run
+s) Start the local stack (Docker Compose)
+d) Stop the local stack
+t) Stack status (Docker + service health)
 0) Exit
 ```
 
@@ -53,6 +72,8 @@ Every menu action also has a direct subcommand, so the CLI is scriptable in
 shell pipelines and CI without touching the menu:
 
 ```bash
+aetherstack up
+aetherstack status
 aetherstack list
 aetherstack tree coding
 aetherstack run coding "fix the flaky test in test_graph_exec.py"

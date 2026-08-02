@@ -158,3 +158,48 @@ test("buildOrEditPreset cleans up its temp file even when the import fails", asy
   );
   assert.equal(unlinked, true);
 });
+
+function mockStack(overrides = {}) {
+  return {
+    resolveStackRoot: (cwd) => cwd || "/fake/root",
+    startCompose: async () => ({ code: 0 }),
+    stopCompose: async () => ({ code: 0 }),
+    checkDocker: async () => ({ installed: true, running: true }),
+    checkServices: async () => ({ services: [{ id: "hub", ok: true }] }),
+    ...overrides,
+  };
+}
+
+test("startStack resolves the stack root and starts compose there", async () => {
+  const calls = [];
+  const stack = mockStack({
+    startCompose: async (root, opts) => { calls.push(root); opts.onOutput && opts.onOutput("booting"); },
+  });
+  const chunks = [];
+  const root = await commands.startStack("/my/checkout", { onOutput: (c) => chunks.push(c), stack });
+  assert.equal(root, "/my/checkout");
+  assert.deepEqual(calls, ["/my/checkout"]);
+  assert.deepEqual(chunks, ["booting"]);
+});
+
+test("stopStack resolves the stack root and stops compose there", async () => {
+  const calls = [];
+  const stack = mockStack({ stopCompose: async (root) => calls.push(root) });
+  await commands.stopStack("/my/checkout", { stack });
+  assert.deepEqual(calls, ["/my/checkout"]);
+});
+
+test("stackStatus reports docker and service health together", async () => {
+  const stack = mockStack();
+  const status = await commands.stackStatus("/my/checkout", { stack });
+  assert.equal(status.root, "/my/checkout");
+  assert.equal(status.docker.running, true);
+  assert.deepEqual(status.services, [{ id: "hub", ok: true }]);
+});
+
+test("startStack propagates a clear error when no checkout is found", async () => {
+  const stack = mockStack({
+    resolveStackRoot: () => { throw new Error("Could not find an AetherStack checkout"); },
+  });
+  await assert.rejects(commands.startStack("/nowhere", { stack }), /Could not find an AetherStack checkout/);
+});
