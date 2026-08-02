@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from graph import graph_to_pipeline
 from memory import MemoryStore
+from node_script import ScriptError, run_script
 from pipelines import _pick_for_stage
 from services import _chat_completion, _chat_completion_stream, _is_host_cli, worker_output_needs_correction
 
@@ -314,6 +315,57 @@ def execute_graph(
             _emit(on_status, "stage_error", stage_id=stage_id, label=label)
             continue
 
+        upstream = _join_upstream_blocks(
+            [
+                (outputs_id, outputs[outputs_id])
+                for outputs_id in (stage.get("inputs_from") or [])
+                if outputs_id in outputs
+            ]
+        )
+
+        script_note = None
+        if stage.get("script"):
+            try:
+                actions = run_script(
+                    stage["script"],
+                    {
+                        "goal": goal,
+                        "upstream": upstream,
+                        "model": branches[0]["model"] if branches else "",
+                        "label": label,
+                        "role": stage.get("role") or "",
+                    },
+                )
+            except ScriptError as exc:
+                steps.append(
+                    {
+                        "stage_id": stage_id,
+                        "label": label,
+                        "role": stage.get("role"),
+                        "model": branches[0]["model"],
+                        "error": f"script error: {exc}",
+                    }
+                )
+                _emit(on_status, "stage_error", stage_id=stage_id, label=label)
+                continue
+            if actions.get("skip"):
+                steps.append(
+                    {
+                        "stage_id": stage_id,
+                        "label": label,
+                        "role": stage.get("role"),
+                        "model": branches[0]["model"],
+                        "skipped": True,
+                    }
+                )
+                _emit(on_status, "stage_done", stage_id=stage_id, label=f"{label} · skipped by script")
+                continue
+            if actions.get("set_model"):
+                # Collapses to a single branch: a script-forced model choice is
+                # an explicit override, not one candidate among several.
+                branches = [{**branches[0], "model": actions["set_model"]}]
+            script_note = actions.get("note")
+
         models_label = ", ".join(b["model"] for b in branches)
         _emit(
             on_status,
@@ -325,14 +377,9 @@ def execute_graph(
             total=len(stages),
             stage_id=stage_id,
         )
-        upstream = _join_upstream_blocks(
-            [
-                (outputs_id, outputs[outputs_id])
-                for outputs_id in (stage.get("inputs_from") or [])
-                if outputs_id in outputs
-            ]
-        )
         messages = _stage_messages(stage, goal, context, upstream)
+        if script_note:
+            messages.append({"role": "user", "content": script_note})
 
         def _run_branch(resolved: dict[str, Any]) -> dict[str, Any]:
             model = resolved["model"]

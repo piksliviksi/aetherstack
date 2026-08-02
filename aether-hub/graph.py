@@ -786,6 +786,7 @@ def graph_to_pipeline(graph: dict[str, Any]) -> dict[str, Any]:
             "gate": bool(d.get("gate")),
             "parallel": int(d.get("parallel") or 1),
             "stream": bool(d.get("stream", True)),
+            "script": str(d.get("script") or "")[:20_000],
             "behavior_markdown": str(d.get("instructions_md") or "")[:100_000],
             "behavior_source": str(d.get("instructions_source") or "")[:500],
             "pass_through": bool(NODE_TYPES.get(t, {}).get("pass_through")),

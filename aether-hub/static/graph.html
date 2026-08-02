@@ -236,7 +236,64 @@
         Code chat window, or anywhere else — the matching nodes light up gold while
         active and green once done, so you can see the actual lead → memory →
         workers → review → answer sequence happen instead of trusting it silently
-        did the right thing.</p>
+        did the right thing. Runs started from this canvas's own <em>Run
+        workflow</em> button now stream the same way — use <em>Cancel run</em> to
+        stop one server-side, not just hide it in this tab.</p>
+
+        <h4>Parallel node</h4>
+        <p>Splits the incoming signal across several branches that run at the same
+        time — set <em>Parallel branches</em> above 1 on a Worker node, or drop a
+        dedicated <strong>Parallel</strong> node from the palette. Each branch
+        prefers a different model where one is available (leave <em>Model</em> on
+        "Auto-resolve" for real diversity), and their answers are combined into
+        one <code>[model]</code>-labeled block for the next node — this is how you
+        get several models' independent takes on the same input instead of just
+        one.</p>
+
+        <h4>Streaming</h4>
+        <p>The <em>Stream tokens live</em> checkbox on agent nodes only applies to
+        gateway-backed models (local Ollama or a cloud API key) — those already
+        stream token-by-token today. Host-CLI-backed models (Grok/Claude/Codex CLI)
+        cannot stream: the CLI bridge runs each as a subprocess and only gets its
+        full output back once the process exits, so there is nothing to stream
+        until that changes at the bridge level.</p>
+
+        <h4>Node scripts (YAML if/then)</h4>
+        <p>Agent nodes have an optional <em>Script</em> field: a small, sandboxed
+        rules language evaluated right before that node runs — no arbitrary code
+        execution, just a fixed set of safe conditions and actions.</p>
+        <pre style="white-space:pre-wrap;font-size:11px;background:var(--panel-raised);padding:.5rem;border:1px solid var(--border)">rules:
+  - if: contains(upstream, "security")
+    then: { set_model: claude-opus-4, note: "Escalate — treat as security-sensitive." }
+  - if: len(goal) &lt; 20
+    then: { skip: true }</pre>
+        <p>Rules are checked top to bottom; the first one whose <code>if</code> is
+        true wins (an empty/missing <code>if</code> always matches). Available in
+        <code>if</code>: variables <code>goal</code>, <code>upstream</code>,
+        <code>model</code>, <code>label</code>, <code>role</code>; functions
+        <code>contains()</code>, <code>not_contains()</code>, <code>matches()</code>
+        (regex), <code>startswith()</code>, <code>endswith()</code>,
+        <code>lower()</code>, <code>upper()</code>, <code>len()</code>; operators
+        <code>and</code>, <code>or</code>, <code>not</code>, <code>==</code>,
+        <code>!=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>in</code>.
+        <code>then</code> supports <code>skip</code> (don't run this node —
+        anything depending only on its output is skipped too),
+        <code>set_model</code> (force which model this node uses, overriding any
+        parallel branches), and <code>note</code> (extra instruction appended to
+        the prompt).</p>
+        <p>Two more examples:</p>
+        <pre style="white-space:pre-wrap;font-size:11px;background:var(--panel-raised);padding:.5rem;border:1px solid var(--border)"># Only run this reviewer node when the worker flagged something risky
+rules:
+  - if: not contains(upstream, "risk")
+    then: { skip: true }
+
+# Route small/simple goals to a cheap fast model, everything else to the pinned one
+rules:
+  - if: len(goal) &lt; 200 and not matches(goal, "(?i)security|migration|breaking")
+    then: { set_model: local-default }</pre>
+        <p>A broken script (bad YAML, an unknown variable/function) fails only that
+        node — it's reported on the node's step as a script error, the rest of the
+        run continues normally.</p>
       </div>
     </div>
   </div>
@@ -303,7 +360,7 @@ const DRAFT_DATA_KEYS = new Set([
   "workspace_write", "stream",
   "purpose", "commands", "namespace", "action", "scope", "project_id",
   "input_folder", "input_globs", "gpu_only", "private_vault",
-  "instructions_md", "instructions_source", "edited_fields",
+  "instructions_md", "instructions_source", "edited_fields", "script",
 ]);
 const MEMORY_SCOPES = {
   tree: "Tree — this decision graph only; shared by nodes in this canvas",
@@ -573,6 +630,7 @@ function roleOptions(current) {
 const FIELD_LABELS = {
   label: "Node name", text: "Goal or input", role: "Agent role", model: "Model",
   instructions_md: "Behavior instructions (.md)", needs: "Required capabilities",
+  script: "Script (YAML if/then — see Help)",
   strategy: "Model selection", max_cost: "Maximum cost", tier: "Run location",
   parallel: "Parallel branches", gate: "Block until approved", ack: "Require acknowledgement",
   purpose: "Purpose", namespace: "Namespace override", commands: "Slash commands",
@@ -584,11 +642,11 @@ const FIELD_LABELS = {
 };
 const INSPECTOR_FIELDS = {
   goal: ["label", "text"],
-  master: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "workspace_write", "instructions_md"],
-  analyser: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "gate", "ack", "workspace_write", "instructions_md"],
-  worker: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "stream", "workspace_write", "instructions_md"],
-  parallel: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "workspace_write", "instructions_md"],
-  tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "workspace_write", "instructions_md"],
+  master: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "workspace_write", "instructions_md", "script"],
+  analyser: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "gate", "ack", "workspace_write", "instructions_md", "script"],
+  worker: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "stream", "workspace_write", "instructions_md", "script"],
+  parallel: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "parallel", "workspace_write", "instructions_md", "script"],
+  tester: ["label", "role", "model", "needs", "strategy", "max_cost", "tier", "stream", "workspace_write", "instructions_md", "script"],
   private: ["label", "model", "input_folder", "input_globs", "gpu_only", "private_vault", "instructions_md"],
   memory: ["label", "scope", "action", "project_id", "namespace"],
   route: ["label", "model", "tier"],
@@ -660,6 +718,9 @@ function select(id) {
       html += `<label>${esc(label)}<br/><select data-k="role">${roleOptions(v)}</select></label>`;
     } else if (k === "instructions_md" && (isAgentNode || isPrivate)) {
       html += `<label>${esc(label)}<br/><textarea data-k="instructions_md" placeholder="Role, workflow, constraints, stopping rules, and output format…">${esc(v ?? "")}</textarea></label>`;
+    } else if (k === "script" && isAgentNode) {
+      html += `<label>${esc(label)}<br/><textarea data-k="script" class="node-script" placeholder="rules:\n  - if: contains(upstream, &quot;security&quot;)\n    then: { set_model: claude-opus-4 }">${esc(v ?? "")}</textarea></label>`;
+      html += `<div class="node-help">Optional. Evaluated before this node runs — see Help for syntax and examples.</div>`;
     } else if (k === "input_folder" && isPrivate) {
       html += `<label>${esc(label)}<br/><input type="text" data-k="input_folder" value="${esc(v ?? "")}" placeholder="D:/research/private-docs or /data/corpus"/></label>`;
       html += `<div class="node-help">Host path (or Docker mount) containing PDF and text sources for this private branch.</div>`;

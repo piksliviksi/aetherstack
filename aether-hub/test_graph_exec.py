@@ -335,3 +335,45 @@ def test_cancel_check_stops_a_run_before_it_starts_the_next_stage() -> None:
         )
     # the first stage was allowed to run; the second was cut off by cancellation
     assert len(calls) == 1
+
+
+def test_node_script_can_skip_a_stage() -> None:
+    calls = []
+    graph = _graph(with_memory=False)
+    graph["nodes"][2]["data"]["script"] = "rules:\n  - if: true\n    then: { skip: true }\n"
+    result = execute_graph(graph, _snapshot(), {"goal": "build the thing"}, completion=_completion(calls))
+    assert result["ok"] is True
+    assert [c["model"] for c in calls] == ["claude-cli"]
+    skipped = [s for s in result["steps"] if s.get("stage_id") == "w1"]
+    assert skipped and skipped[0].get("skipped") is True
+
+
+def test_node_script_can_override_the_model() -> None:
+    calls = []
+    graph = _graph(with_memory=False)
+    graph["nodes"][2]["data"]["script"] = (
+        'rules:\n  - if: contains(upstream, "claude-cli")\n    then: { set_model: local-default }\n'
+    )
+    result = execute_graph(graph, _snapshot(), {"goal": "build the thing"}, completion=_completion(calls))
+    assert result["ok"] is True
+    assert calls[1]["model"] == "local-default"
+
+
+def test_node_script_can_append_a_note_to_the_prompt() -> None:
+    calls = []
+    graph = _graph(with_memory=False)
+    graph["nodes"][2]["data"]["script"] = 'rules:\n  - if: true\n    then: { note: "be extra terse" }\n'
+    execute_graph(graph, _snapshot(), {"goal": "build the thing"}, completion=_completion(calls))
+    assert any("be extra terse" in m.get("content", "") for m in calls[1]["messages"])
+
+
+def test_a_broken_node_script_fails_only_its_own_stage() -> None:
+    calls = []
+    graph = _graph(with_memory=False)
+    graph["nodes"][2]["data"]["script"] = "rules: not-a-list"
+    result = execute_graph(graph, _snapshot(), {"goal": "build the thing"}, completion=_completion(calls))
+    # the master stage still ran and produced the answer; only the worker stage,
+    # whose script is broken, is marked with a script error
+    assert result["ok"] is True
+    worker_step = next(s for s in result["steps"] if s.get("stage_id") == "w1")
+    assert "script error" in (worker_step.get("error") or "")
