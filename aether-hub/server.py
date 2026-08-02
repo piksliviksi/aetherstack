@@ -86,6 +86,7 @@ from graph import (  # noqa: E402
     save_graph,
 )
 from graph_exec import GraphExecutionError, GraphRunCancelled, execute_graph  # noqa: E402
+from preset_script import PresetScriptError, graph_to_preset_script, preset_script_to_graph  # noqa: E402
 from pipelines import (  # noqa: E402
     export_pipeline,
     get_pipeline,
@@ -1140,6 +1141,19 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._send(404, {"error": str(e)})
             return
+        if path == "/api/graphs/from-preset-script":
+            try:
+                self._send(200, preset_script_to_graph(body.get("text") or "", graph_id=body.get("graph_id")))
+            except PresetScriptError as e:
+                self._send(400, {"error": str(e)})
+            return
+        if path == "/api/graphs/to-preset-script":
+            g = body.get("graph") or body
+            try:
+                self._send(200, {"text": graph_to_preset_script(g)})
+            except Exception as e:
+                self._send(400, {"error": str(e)})
+            return
         if path == "/api/graphs/plan":
             g = body.get("graph") or body
             try:
@@ -1932,6 +1946,7 @@ def _paths() -> list[str]:
         "GET|POST /api/graphs",
         "POST /api/graphs/auto-connect",
         "POST /api/graphs/to-pipeline | from-pipeline | plan",
+        "POST /api/graphs/to-preset-script | from-preset-script  ← whole-preset YAML (master/workers/parallel/audit/tester)",
         "POST /api/graphs/run          ← blocking; use run/stream for live node status",
         "POST /api/graphs/run/stream   ← SSE: same fan-out as services/*/run/stream, node-level status/delta",
         "POST /api/runs/cancel  {run_id} ← stops a running services/*/run/stream or graphs/run/stream run server-side",

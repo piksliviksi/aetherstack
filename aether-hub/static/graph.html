@@ -147,6 +147,8 @@
     <button type="button" class="primary" id="btnAuto">Auto-connect</button>
     <button type="button" id="btnTemplate">Best-practice template</button>
     <button type="button" id="btnFromPipe">From pipeline…</button>
+    <button type="button" id="btnFromScript">Import preset script (YAML)…</button>
+    <input type="file" id="scriptFileInput" accept=".yaml,.yml,text/yaml" hidden />
     <button type="button" id="btnSave">Save</button>
     <button type="button" id="btnPlan">Plan models</button>
     <input id="runGoal" type="text" placeholder="Goal for this workflow" style="width:min(320px,24vw)" />
@@ -158,6 +160,7 @@
     </select>
     <button type="button" id="btnCenter">Center tree</button>
     <button type="button" id="btnToPipe">Export pipeline JSON</button>
+    <button type="button" id="btnToScript">Export preset script (YAML)</button>
     <label class="chk" title="Allow cycles, feedback edges, and wiring Output back into earlier nodes">
       <input type="checkbox" id="chkRecursive" /> Recursive mode
     </label>
@@ -230,6 +233,44 @@
         new preset rather than editing a live one. <em>From pipeline…</em> and
         <em>Export pipeline JSON</em> convert to/from the separate
         <code>aetherstack.pipeline.v1</code> "scripts" format.</p>
+
+        <h4>Scripting a whole preset (YAML)</h4>
+        <p>Instead of dragging nodes by hand, you can write a preset as YAML and
+        import it — <em>Import preset script (YAML)…</em> builds the real node
+        tree from it (same fan-out shape as the diagram above); <em>Export preset
+        script</em> converts the current tree back to this format. It sits
+        alongside <em>Export pipeline JSON</em>, not instead of it — the JSON
+        format is a full-fidelity dump of any graph, this YAML format only covers
+        the common master → workers/parallel → audit → tester shape, in exchange
+        for being much shorter to hand-write:</p>
+        <pre style="white-space:pre-wrap;font-size:11px;background:var(--panel-raised);padding:.5rem;border:1px solid var(--border)">title: Backend + Frontend build
+goal: Ship the login page
+master:
+  model: claude-sonnet-4       # omit for auto-resolve
+  prompt: Plan the work and delegate to workers.
+workers:
+  - label: Backend
+    model: grok-code
+    prompt: Implement the backend change.
+  - label: Frontend
+    prompt: Implement the UI change.
+parallel:
+  - label: Survey
+    branches: 3                 # fan out to 3 concurrent, diversified models
+    prompt: Independently investigate the approach.
+audit:
+  model: claude-opus-4
+  prompt: Check the work for correctness and regressions.
+tester:
+  prompt: Run and verify the tests.
+memory:
+  scope: tree
+  action: search</pre>
+        <p>Every entry accepts the same fields you'd set in the Inspector —
+        <code>model</code>, <code>tier</code>, <code>max_cost</code>,
+        <code>strategy</code>, and a per-node <code>script</code> (the if/then
+        rules language above) — so a scripted preset can be just as
+        conditionally aware as one you built by hand.</p>
 
         <h4>Watching it run</h4>
         <p>When a real chat request runs against a preset — from this tab, the VS
@@ -1331,6 +1372,37 @@ document.getElementById("btnFromPipe").onclick = async () => {
   restoreGraphLayout();
   render();
   toast("Loaded pipeline " + id);
+};
+
+document.getElementById("btnFromScript").onclick = () => document.getElementById("scriptFileInput").click();
+document.getElementById("scriptFileInput").onchange = async (event) => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  const text = await file.text();
+  const j = await fetch("/api/graphs/from-preset-script", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  }).then(r => r.json());
+  if (j.error) { toast(j.error); return; }
+  graph = j;
+  restoreGraphLayout();
+  render();
+  toast(`Loaded preset script "${graph.title || graph.id}"`);
+};
+
+document.getElementById("btnToScript").onclick = async () => {
+  const j = await fetch("/api/graphs/to-preset-script", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ graph }),
+  }).then(r => r.json());
+  if (j.error) { toast(j.error); return; }
+  const blob = new Blob([j.text], { type: "text/yaml" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (graph.id || "preset") + ".aether-preset.yaml";
+  a.click();
+  toast("Preset script downloaded");
 };
 
 document.getElementById("btnSave").onclick = async () => {
