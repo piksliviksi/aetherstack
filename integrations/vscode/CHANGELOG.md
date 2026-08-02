@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.21
+
+- **The node graph canvas is no longer blind to its own runs.** Clicking "Run workflow" now streams over a new `POST /api/graphs/run/stream` (SSE), so the canvas's own nodes light up live the same way they already did for runs started from chat — previously that endpoint had no status callback at all and just blocked until the whole run finished.
+- **Real server-side run cancellation.** `execute_auto`/`execute_service`/`execute_graph` now accept a `cancel_check()` polled at each phase/stage boundary; a run-id registry plus `POST /api/runs/cancel` let switching presets mid-run (or the canvas's new **Cancel run** button) actually stop the work server-side instead of only hiding it client-side.
+- **Parallel node**: a stage with more than one parallel branch now really fans out to that many concurrent branches — diversified across distinct models where available — and combines their answers into one `[model]`-labeled block for the next node. Exposed as a first-class **Parallel** node in the canvas palette.
+- **Node scripting**: agent nodes get an optional YAML if/then **Script** field, evaluated right before that node runs — `skip`, `set_model`, or `note` (extra prompt instruction) based on conditions over the goal, upstream output, model, or role. Sandboxed by construction (a whitelisted AST walk, no `eval`/`exec`, no attribute access) since node scripts are user-editable, potentially shared graph data.
+- **Script a whole preset as YAML**, not just one node: a new preset-script format (`master`/`workers`/`parallel`/`audit`/`tester`/`memory`, each with model/tier/prompt/script) imports straight into the real fan-out node tree and runs through the same `execute_graph` path as a hand-built one. Lives alongside the existing pipeline JSON export, not instead of it — new **Import preset script (YAML)…** / **Export preset script** buttons on the canvas.
+- The model picker in the node Inspector now groups by cost tier (Light / Medium / High / Very high) instead of a flat alphabetical list.
+- Every preset's lead-node behavior profile now shows its own discipline-specific self-audit prompt directly in the graph Inspector.
+- READMEs (root + VS Code Marketplace) now recommend a minimum local model (`qwen2.5-coder:7b`) for decent coding output from Auto's local fallback.
+
 ## 0.3.20
 
 - **Auto no longer keeps retrying a model that just hit a real quota/session limit.** Exhaustion is now tracked cross-session (not just per-session), so once one session discovers a model is out of headroom, every other session skips it too until a cooldown elapses, instead of each new session re-probing and failing on the same dead model first.
