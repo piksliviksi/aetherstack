@@ -194,6 +194,7 @@ test("extension activates and registers lifecycle/control commands", async () =>
     composeLogs: async () => ({ stdout: "", stderr: "" }),
     findStackRoot: () => "D:\\workspace\\aetherstack",
     isStackRoot: () => true,
+    readRuntimeVersion: () => null,
     request: async () => ({ status: 503, body: {} }),
     runCompose: async () => ({ stdout: "", stderr: "" }),
     restartCompose: async () => ({ stdout: "", stderr: "" }),

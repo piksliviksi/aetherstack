@@ -8,6 +8,7 @@
 - **Fixed a request-thread exhaustion stall**: the accept loop's blocking semaphore acquire at the `MAX_REQUEST_THREADS` limit (e.g. 64 open SSE connections) could stop the Hub from accepting any new connection, even from clients well under the limit, until a slot freed.
 - **GDPR-compliant mode**: new settings, consent gating, real data erasure (including private-session erase and an erase/archive race fix), and configurable retention, exposed through both the web dashboard (`/gdpr`) and the CLI (`status`/`enable`/`disable`/`retention`/`consent`/`export`/`erase`).
 - Hardening from critic review: ReDoS-safe validation patterns and tightened CLI auth handling.
+- **Fixed silent Runtime/extension version drift**: a remembered `stackRoot` was only ever checked for file presence, never version — so once VS Code auto-updated the extension, every later activation kept quietly reusing whatever Runtime was first provisioned, with no signal it was stale. The extension now compares the installed Runtime's `VERSION` against its own on activation and offers a one-click **Update Runtime** if they've drifted apart.
 
 ## 0.3.21
 

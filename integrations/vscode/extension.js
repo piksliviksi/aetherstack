@@ -22,6 +22,7 @@ const {
   installCliPackage,
   isStackRoot,
   normalizeLocalUiUrl,
+  readRuntimeVersion,
   request,
   requestStream,
   responseError,
@@ -694,6 +695,32 @@ function syncContinueGatewayKey(stackRoot) {
   return true;
 }
 
+let runtimeDriftNotified = false;
+
+// A remembered stackRoot is only ever validated by isStackRoot() (files present),
+// never by version — so once VS Code auto-updates the extension, every later
+// activation keeps silently reusing whatever runtime was first provisioned,
+// with no signal that it's stale. Surface it once per session instead.
+function notifyRuntimeVersionDrift(context, root) {
+  if (runtimeDriftNotified) return;
+  const installedVersion = readRuntimeVersion(root);
+  if (!installedVersion || installedVersion === extensionManifest.version) return;
+  runtimeDriftNotified = true;
+  vscode.window
+    .showWarningMessage(
+      `AetherStack Runtime is on ${installedVersion}, but the extension updated to ${extensionManifest.version}. The backend (Hub, LiteLLM, Open WebUI) won't get new features or fixes until the runtime is reinstalled.`,
+      "Update Runtime",
+      "Later"
+    )
+    .then((choice) => {
+      if (choice === "Update Runtime") {
+        installManagedRuntime(context).catch((error) =>
+          vscode.window.showErrorMessage(`Runtime update failed: ${error.message || error}`)
+        );
+      }
+    });
+}
+
 async function resolveStackRoot(context, prompt = false) {
   const workspacePaths = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
   let root = findStackRoot({
@@ -707,6 +734,7 @@ async function resolveStackRoot(context, prompt = false) {
   if (root) {
     await context.globalState.update("aetherstack.stackRoot", root);
     await importGatewayKey(context, root);
+    notifyRuntimeVersionDrift(context, root);
   }
   return root;
 }

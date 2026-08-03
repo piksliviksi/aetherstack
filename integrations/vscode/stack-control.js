@@ -40,6 +40,20 @@ function isStackRoot(candidate) {
   }
 }
 
+// Every managed install and release tarball carries a root-level VERSION file
+// (it's just the repo's own VERSION file). Reading it back is how we detect
+// that a remembered stackRoot was provisioned by an older extension build,
+// since VS Code auto-updates the extension itself without ever touching the
+// separately-versioned runtime directory it points at.
+function readRuntimeVersion(candidate) {
+  if (!candidate) return null;
+  try {
+    return fs.readFileSync(path.join(candidate, "VERSION"), "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function parentCandidates(start) {
   const out = [];
   if (!start) return out;
@@ -541,6 +555,7 @@ module.exports = {
   conciseError,
   findStackRoot,
   isStackRoot,
+  readRuntimeVersion,
   normalizeLocalUiUrl,
   request,
   requestStream,
