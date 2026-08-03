@@ -127,6 +127,12 @@ presets:
     roles:
       inline: { select: { strategy: best_score } }
 
+  auto:
+    mode: inline
+    token_saver: false
+    roles:
+      inline: { select: { strategy: best_score, max_cost: very_high } }
+
   # Prefer authenticated host CLI seats (Codex/Claude/Grok subscriptions)
   subscription:
     mode: multi_agent
