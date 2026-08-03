@@ -22,6 +22,17 @@ function mockClient(overrides = {}) {
     cancelRun: async (runId) => ({ ok: true, run_id: runId, found: true }),
     fromPresetScript: async (text) => ({ id: "imported", nodes: [{ id: "g", type: "goal", data: {} }], edges: [] }),
     toPresetScript: async (graph) => `title: ${graph.title || graph.id}\n`,
+    getGdprSettings: async () => ({
+      enabled: false,
+      retention_days: 30,
+      require_cloud_consent: true,
+      subprocessors: { cloud_providers: [{ provider: "OpenAI", models: "gpt-*", purpose: "Cloud inference" }], local_note: "local only" },
+    }),
+    setGdprSettings: async (patch) => ({ enabled: false, retention_days: 30, require_cloud_consent: true, ...patch }),
+    gdprConsent: async (sessionId) => ({ session_id: sessionId, consented: true }),
+    gdprRevokeConsent: async (sessionId) => ({ session_id: sessionId, consented: false }),
+    gdprExport: async (sessionId) => ({ session_id: sessionId, session: { messages: [] } }),
+    gdprErase: async (sessionId) => ({ session_id: sessionId, removed: { session: true } }),
     ...overrides,
   };
 }
@@ -202,4 +213,36 @@ test("startStack propagates a clear error when no checkout is found", async () =
     resolveStackRoot: () => { throw new Error("Could not find an AetherStack checkout"); },
   });
   await assert.rejects(commands.startStack("/nowhere", { stack }), /Could not find an AetherStack checkout/);
+});
+
+test("gdprStatus returns the hub's settings and subprocessor list", async () => {
+  const settings = await commands.gdprStatus(mockClient());
+  assert.equal(settings.enabled, false);
+  assert.equal(settings.subprocessors.cloud_providers[0].provider, "OpenAI");
+});
+
+test("gdprSetSettings forwards the patch to the hub", async () => {
+  const calls = [];
+  const client = mockClient({ setGdprSettings: async (patch) => { calls.push(patch); return { ...patch }; } });
+  await commands.gdprSetSettings(client, { enabled: true });
+  assert.deepEqual(calls, [{ enabled: true }]);
+});
+
+test("gdprConsent records consent by default and revokes when asked", async () => {
+  const calls = [];
+  const client = mockClient({
+    gdprConsent: async (sid) => { calls.push(["consent", sid]); return { consented: true }; },
+    gdprRevokeConsent: async (sid) => { calls.push(["revoke", sid]); return { consented: false }; },
+  });
+  await commands.gdprConsent(client, "s1");
+  await commands.gdprConsent(client, "s1", { revoke: true });
+  assert.deepEqual(calls, [["consent", "s1"], ["revoke", "s1"]]);
+});
+
+test("gdprExportData and gdprEraseData forward to the hub by session id", async () => {
+  const client = mockClient();
+  const exported = await commands.gdprExportData(client, "s1");
+  assert.equal(exported.session_id, "s1");
+  const erased = await commands.gdprEraseData(client, "s1");
+  assert.equal(erased.removed.session, true);
 });

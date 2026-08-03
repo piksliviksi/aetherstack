@@ -93,6 +93,25 @@ and a one-line prompt snippet, following the actual fan-out/fan-in wiring
 (master → every worker/parallel branch, concurrently → audit → tester →
 output).
 
+## GDPR-compliant mode
+
+```bash
+aetherstack gdpr status              # settings + the cloud-provider subprocessor list
+aetherstack gdpr enable              # forces safer defaults (see below)
+aetherstack gdpr retention 14        # days before archives/vectors expire
+aetherstack gdpr consent <session>   # allow that session to route to cloud models
+aetherstack gdpr revoke <session>
+aetherstack gdpr export <session>    # Article 15/20: everything stored for that session
+aetherstack gdpr erase <session>     # Article 17: real deletion, not archive-then-clear
+```
+
+When enabled: `/clear` erases instead of archiving, archives/vectors get an
+expiring retention window instead of living forever, and Auto excludes
+cloud/subscription models from a session until `gdpr consent` is recorded for
+it — a prompt cannot silently leave the machine. This flips the Hub's
+defaults for an operator; it does not by itself make a deployment legally
+compliant. Same settings, same effect, as the Hub's `/gdpr` page.
+
 ## Preset scripts (YAML)
 
 `export`/`import`/`build` all use the same

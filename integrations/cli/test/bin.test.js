@@ -158,3 +158,66 @@ test("`aetherstack status` exits zero when every service is healthy", async () =
   }
   assert.equal(code, 0);
 });
+
+test("`aetherstack gdpr status` prints settings and subprocessors", async () => {
+  const lines = [];
+  const origLog = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    await withMockedCommands(
+      {
+        gdprStatus: async () => ({
+          enabled: true,
+          retention_days: 14,
+          require_cloud_consent: true,
+          subprocessors: { cloud_providers: [{ provider: "OpenAI", models: "gpt-*", purpose: "Cloud inference" }], local_note: "local only" },
+        }),
+      },
+      () => main(["gdpr", "status"])
+    );
+  } finally {
+    console.log = origLog;
+  }
+  assert.match(lines.join("\n"), /enabled: true/);
+  assert.match(lines.join("\n"), /OpenAI/);
+});
+
+test("`aetherstack gdpr enable`/`disable` toggle the setting", async () => {
+  const calls = [];
+  const origLog = console.log;
+  console.log = () => {};
+  try {
+    await withMockedCommands({ gdprSetSettings: async (client, patch) => calls.push(patch) }, () => main(["gdpr", "enable"]));
+    await withMockedCommands({ gdprSetSettings: async (client, patch) => calls.push(patch) }, () => main(["gdpr", "disable"]));
+  } finally {
+    console.log = origLog;
+  }
+  assert.deepEqual(calls, [{ enabled: true }, { enabled: false }]);
+});
+
+test("`aetherstack gdpr consent` requires a session id", async () => {
+  await assert.rejects(main(["gdpr", "consent"]), /usage: aetherstack gdpr consent/);
+});
+
+test("`aetherstack gdpr retention` requires a numeric argument", async () => {
+  await assert.rejects(main(["gdpr", "retention"]), /usage: aetherstack gdpr retention/);
+});
+
+test("`aetherstack gdpr` with an unknown subcommand fails clearly", async () => {
+  await assert.rejects(main(["gdpr", "bogus"]), /usage: aetherstack gdpr/);
+});
+
+test("`aetherstack gdpr erase` prints what was removed", async () => {
+  const lines = [];
+  const origLog = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    await withMockedCommands(
+      { gdprEraseData: async () => ({ session_id: "s1", removed: { session: true, archive_namespace: null, tagged_vectors: 0 } }) },
+      () => main(["gdpr", "erase", "s1"])
+    );
+  } finally {
+    console.log = origLog;
+  }
+  assert.match(lines.join("\n"), /"session": true/);
+});

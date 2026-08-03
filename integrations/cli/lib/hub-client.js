@@ -152,6 +152,30 @@ function toPresetScript(graph, opts) {
   return request("/api/graphs/to-preset-script", { ...opts, method: "POST", body: { graph } }).then((r) => r.text);
 }
 
+function getGdprSettings(opts) {
+  return request("/api/gdpr", opts);
+}
+
+function setGdprSettings(patch, opts) {
+  return request("/api/gdpr", { ...opts, method: "POST", body: patch });
+}
+
+function gdprConsent(sessionId, opts) {
+  return request("/api/gdpr/consent", { ...opts, method: "POST", body: { session_id: sessionId } });
+}
+
+function gdprRevokeConsent(sessionId, opts) {
+  return request("/api/gdpr/consent", { ...opts, method: "POST", body: { session_id: sessionId, revoke: true } });
+}
+
+function gdprExport(sessionId, opts) {
+  return request("/api/gdpr/export", { ...opts, method: "POST", body: { session_id: sessionId } });
+}
+
+function gdprErase(sessionId, opts) {
+  return request("/api/gdpr/erase", { ...opts, method: "POST", body: { session_id: sessionId } });
+}
+
 module.exports = {
   DEFAULT_BASE_URL,
   request,
@@ -165,4 +189,10 @@ module.exports = {
   cancelRun,
   fromPresetScript,
   toPresetScript,
+  getGdprSettings,
+  setGdprSettings,
+  gdprConsent,
+  gdprRevokeConsent,
+  gdprExport,
+  gdprErase,
 };

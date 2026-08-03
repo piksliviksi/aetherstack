@@ -168,6 +168,26 @@ async function stackStatus(cwd, { stack = require("./stack") } = {}) {
   return { root, docker, services: serviceReport.services || [] };
 }
 
+async function gdprStatus(client) {
+  return client.getGdprSettings();
+}
+
+async function gdprSetSettings(client, patch) {
+  return client.setGdprSettings(patch);
+}
+
+async function gdprConsent(client, sessionId, { revoke = false } = {}) {
+  return revoke ? client.gdprRevokeConsent(sessionId) : client.gdprConsent(sessionId);
+}
+
+async function gdprExportData(client, sessionId) {
+  return client.gdprExport(sessionId);
+}
+
+async function gdprEraseData(client, sessionId) {
+  return client.gdprErase(sessionId);
+}
+
 module.exports = {
   BLANK_PRESET_SCRIPT,
   genRunId,
@@ -182,4 +202,9 @@ module.exports = {
   startStack,
   stopStack,
   stackStatus,
+  gdprStatus,
+  gdprSetSettings,
+  gdprConsent,
+  gdprExportData,
+  gdprEraseData,
 };

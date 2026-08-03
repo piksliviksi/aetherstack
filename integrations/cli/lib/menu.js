@@ -20,6 +20,7 @@ AetherStack — text Hub
 s) Start the local stack (Docker Compose)
 d) Stop the local stack
 t) Stack status (Docker + service health)
+g) GDPR settings / export / erase a session
 0) Exit
 `;
 
@@ -139,6 +140,33 @@ function createMenu(client, { input = process.stdin, output = process.stdout, ba
           console.log(`Checkout: ${root}`);
           console.log(`Docker: ${docker.installed ? (docker.running ? "running" : "installed, not running") : "not installed"}`);
           services.forEach((s) => console.log(`${s.ok ? "OK  " : "FAIL"}  ${s.name || s.id}\t${s.url || ""}${s.ok ? "" : `\t${s.error || ""}`}`));
+        } else if (choice.toLowerCase() === "g") {
+          const settings = await commands.gdprStatus(client);
+          console.log(`GDPR mode: ${settings.enabled ? "ON" : "off"}  ·  retention: ${settings.retention_days}d  ·  require_cloud_consent: ${settings.require_cloud_consent}`);
+          const sub = (await ask("[t]oggle enabled / set [r]etention / [c]onsent / re[v]oke / [e]xport / [x] erase / blank=back: ")).trim().toLowerCase();
+          if (sub === "t") {
+            await commands.gdprSetSettings(client, { enabled: !settings.enabled });
+            console.log(`GDPR mode ${!settings.enabled ? "enabled" : "disabled"}.`);
+          } else if (sub === "r") {
+            const days = Number((await ask("Retention days: ")).trim());
+            if (days) { await commands.gdprSetSettings(client, { retention_days: days }); console.log(`Retention set to ${days} days.`); }
+          } else if (sub === "c" || sub === "v") {
+            const sid = (await ask("Session id: ")).trim();
+            if (sid) {
+              const result = await commands.gdprConsent(client, sid, { revoke: sub === "v" });
+              console.log(`${sid}: consented=${result.consented}`);
+            }
+          } else if (sub === "e") {
+            const sid = (await ask("Session id: ")).trim();
+            if (sid) console.log(JSON.stringify(await commands.gdprExportData(client, sid), null, 2));
+          } else if (sub === "x") {
+            const sid = (await ask("Session id to permanently erase: ")).trim();
+            if (sid && (await ask(`Type the session id again to confirm erasure: `)).trim() === sid) {
+              console.log(JSON.stringify(await commands.gdprEraseData(client, sid), null, 2));
+            } else if (sid) {
+              console.log("Confirmation did not match — nothing erased.");
+            }
+          }
         } else if (choice === "0" || choice.toLowerCase() === "q") {
           break;
         } else {
