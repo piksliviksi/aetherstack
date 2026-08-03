@@ -104,9 +104,19 @@ class AuthContext:
     def is_admin(self) -> bool:
         if self.auth_method == "master_key":
             return True
-        if self.claims.get("role") == "admin" or self.claims.get("aether_role") == "admin":
-            return True
-        return self.user_id in {"admin", "platform-admin"}
+        # Only the namespaced "aether_role" claim grants admin - mint_local_jwt
+        # is the sole thing that ever sets it, and only via the master-key-gated
+        # POST /api/auth/token (mint_token_from_master_request). A bare "role"
+        # claim is untrustworthy for OIDC tokens: many IdPs project a single
+        # generic "role" attribute across every client app, so a viewer-level
+        # external token could otherwise carry role=admin for an unrelated
+        # system and silently grant full AetherStack platform admin here.
+        # user_id string-matching ("admin"/"platform-admin") is intentionally
+        # not checked - master_key already covers the real platform-admin
+        # case above, and mint_token_from_master_request explicitly reserves
+        # the user_id "platform-admin" so it can never appear on a minted
+        # non-admin token in the first place.
+        return self.claims.get("aether_role") == "admin"
 
     def to_public(self) -> dict[str, Any]:
         data = asdict(self)

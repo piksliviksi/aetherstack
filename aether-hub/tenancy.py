@@ -271,5 +271,40 @@ def snapshot() -> dict[str, Any]:
     }
 
 
+def _accessible_project_ids(ctx: Any) -> set[str] | None:
+    """None means "every project" (admin, or desktop-open single-user mode —
+    both already treated as owner-of-everything by authorize_project);
+    otherwise the set of project ids this user actually has a membership in.
+    """
+    if ctx is None or ctx.is_admin() or ctx.auth_method == "desktop_open":
+        return None
+    return {m["project_id"] for m in list_memberships(user_id=ctx.user_id)}
+
+
+def list_projects_for(ctx: Any, team_id: str | None = None) -> list[dict[str, Any]]:
+    """Same as list_projects(), scoped to what `ctx` can actually see — the
+    unscoped list_projects()/snapshot() let any authenticated (non-admin,
+    non-desktop-open) caller enumerate every project in the org, unlike the
+    single-project route which already checks authorize_project()."""
+    projects = list_projects(team_id)
+    ids = _accessible_project_ids(ctx)
+    if ids is None:
+        return projects
+    return [p for p in projects if p.get("project_id") in ids]
+
+
+def snapshot_for(ctx: Any) -> dict[str, Any]:
+    """Same as snapshot(), with `projects` (and project_count) scoped to `ctx`."""
+    data = _load()
+    projects = list_projects_for(ctx)
+    return {
+        "team_count": len(data["teams"]),
+        "project_count": len(projects),
+        "membership_count": len(data["memberships"]),
+        "teams": list_teams(),
+        "projects": projects,
+    }
+
+
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

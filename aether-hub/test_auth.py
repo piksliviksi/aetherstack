@@ -163,8 +163,90 @@ def test_tenancy_acl(tmp_path) -> None:
         assert tenancy.memory_namespace_for_project(pid) == f"project:{pid}"
 
 
+def test_tenancy_listing_is_scoped_to_the_caller_not_the_whole_org(tmp_path) -> None:
+    tenancy.reset_for_tests(tmp_path / "tenancy.json")
+    with mock.patch.dict(
+        os.environ,
+        {
+            "AETHER_REQUIRE_AUTH": "1",
+            "LITELLM_MASTER_KEY": "sk-test-master-key-aaa",
+            "AETHER_JWT_SECRET": "jwt-secret-for-tests-bbb",
+        },
+        clear=False,
+    ):
+        alpha = tenancy.create_project(name="Alpha", owner_user_id="alice")
+        beta = tenancy.create_project(name="Beta", owner_user_id="bob")
+        tenancy.add_member(alpha["project_id"], "carol", "viewer")
+
+        alice = auth.AuthContext(user_id="alice", auth_method="local_jwt", role="owner")
+        carol = auth.AuthContext(user_id="carol", auth_method="local_jwt", role="viewer")
+        eve = auth.AuthContext(user_id="eve", auth_method="local_jwt", role="member")
+        admin = auth.AuthContext(user_id="platform-admin", auth_method="master_key", claims={"role": "admin"})
+        desktop = auth.AuthContext(user_id="local", auth_method="desktop_open")
+
+        # A member of exactly one project must not see the other org's projects.
+        alice_ids = {p["project_id"] for p in tenancy.list_projects_for(alice)}
+        assert alice_ids == {alpha["project_id"]}
+
+        carol_ids = {p["project_id"] for p in tenancy.list_projects_for(carol)}
+        assert carol_ids == {alpha["project_id"]}
+
+        # A user with no membership anywhere sees nothing, not the whole org.
+        assert tenancy.list_projects_for(eve) == []
+
+        # Admin and desktop-open (single-user local mode) still see everything.
+        admin_ids = {p["project_id"] for p in tenancy.list_projects_for(admin)}
+        assert admin_ids == {alpha["project_id"], beta["project_id"]}
+        desktop_ids = {p["project_id"] for p in tenancy.list_projects_for(desktop)}
+        assert desktop_ids == {alpha["project_id"], beta["project_id"]}
+
+        # snapshot_for() applies the same scoping to its "projects"/"project_count".
+        snap = tenancy.snapshot_for(eve)
+        assert snap["projects"] == []
+        assert snap["project_count"] == 0
+        # team_count/membership_count remain org-wide (no per-user secret there)
+        assert snap["membership_count"] >= 3
+
+
 def test_public_auth_config_shape() -> None:
     cfg = auth.public_auth_config()
     assert "require_auth" in cfg
     assert "oidc" in cfg
     assert cfg["token_endpoint"] == "/api/auth/token"
+
+
+def test_is_admin_ignores_a_bare_role_claim_from_an_external_oidc_token() -> None:
+    # Many IdPs project a single generic "role" attribute across every client
+    # app. A viewer-level external token for some unrelated system must not
+    # grant AetherStack platform admin just because its role claim happens to
+    # say "admin" - only the namespaced aether_role claim (which only
+    # mint_local_jwt ever sets, gated by the platform master key) may.
+    oidc_ctx = auth.AuthContext(user_id="alice", auth_method="oidc", claims={"role": "admin"})
+    assert oidc_ctx.is_admin() is False
+
+
+def test_is_admin_ignores_a_bare_role_claim_on_a_local_jwt_too() -> None:
+    ctx = auth.AuthContext(user_id="alice", auth_method="local_jwt", claims={"role": "admin"})
+    assert ctx.is_admin() is False
+
+
+def test_is_admin_requires_the_namespaced_aether_role_claim() -> None:
+    ctx = auth.AuthContext(user_id="alice", auth_method="local_jwt", claims={"aether_role": "admin"})
+    assert ctx.is_admin() is True
+
+
+def test_is_admin_does_not_trust_a_user_id_string_match_alone() -> None:
+    # A locally minted token for a user literally named "admin" with a
+    # non-admin role must not become platform admin by virtue of the name.
+    ctx = auth.AuthContext(user_id="admin", auth_method="local_jwt", claims={"aether_role": "viewer"})
+    assert ctx.is_admin() is False
+
+
+def test_mint_local_jwt_admin_role_is_granted_via_the_namespaced_claim() -> None:
+    # The legitimate path: master-key-gated mint with role="admin" sets
+    # aether_role, which is_admin() does trust.
+    with mock.patch.dict(os.environ, {"AETHER_JWT_SECRET": "jwt-secret-for-tests-ccc"}, clear=False):
+        minted = auth.mint_local_jwt(user_id="alice", role="admin")
+        claims = auth._verify_local_hs256(minted["access_token"])
+        ctx = auth._context_from_claims(claims, "local_jwt")
+        assert ctx.is_admin() is True

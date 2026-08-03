@@ -149,7 +149,7 @@ try:
 except ImportError:
     redis_lib = None
 
-HOST = os.environ.get("AETHER_HUB_HOST", "0.0.0.0")
+HOST = os.environ.get("AETHER_HUB_HOST", "127.0.0.1")
 PORT = int(os.environ.get("AETHER_HUB_PORT", "8766"))
 PUBLIC_BIND_HOST = os.environ.get("AETHER_PUBLIC_BIND_HOST", "127.0.0.1").strip().lower()
 WORKSPACE_WRITE_TOKEN = os.environ.get("LITELLM_MASTER_KEY", "")
@@ -746,11 +746,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, self.auth_context.to_public())
             return
         if path in ("/api/tenancy", "/api/tenancy/snapshot"):
-            self._send(200, tenancy.snapshot())
+            self._send(200, tenancy.snapshot_for(self.auth_context))
             return
         if path == "/api/tenancy/projects":
             team_id = (qs.get("team_id") or [None])[0]
-            self._send(200, {"projects": tenancy.list_projects(team_id)})
+            self._send(200, {"projects": tenancy.list_projects_for(self.auth_context, team_id)})
             return
         if path.startswith("/api/tenancy/projects/") and path.count("/") >= 4:
             pid = path[len("/api/tenancy/projects/") :].strip("/")
@@ -2635,7 +2635,18 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         super().__init__(server_address, request_handler_class)
 
     def process_request(self, request, client_address) -> None:
-        self._request_slots.acquire()
+        # This runs on the single accept-loop thread (serve_forever calls it
+        # directly, not in a worker thread) - a blocking acquire() here stalls
+        # every client, not just the one over the limit, the moment all slots
+        # are held (e.g. by long-lived SSE connections). Reject immediately
+        # instead: closing the socket is a hard failure for that one caller,
+        # but the hub keeps accepting everyone else.
+        if not self._request_slots.acquire(blocking=False):
+            try:
+                request.close()
+            except Exception:
+                pass
+            return
         try:
             super().process_request(request, client_address)
         except BaseException:
