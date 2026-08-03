@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.22
+
+- **Standalone terminal CLI**: a new `aetherstack` command (`integrations/cli`) is the text equivalent of the Hub — auth against a Hub, run presets/chat, and start/stop/status the local stack, all from a plain terminal. The VS Code Control Center gets an **Install AetherStack CLI** action that runs `npm link` for you and offers to open a terminal with it ready to go.
+- **Hub control-plane auth and tenancy**: the Hub now supports real bearer-token auth (`POST /api/auth/token`, master-key gated) and per-tenant isolation, laying the groundwork for multi-user/enterprise deployments. `is_admin()` now only trusts the namespaced `aether_role` claim — a bare OIDC `role: admin` projected from an unrelated client app can no longer grant AetherStack platform admin.
+- **Fixed a bare-metal bind-guard gap**: running the Hub directly with `python server.py` (outside Docker) could silently listen on `0.0.0.0` with auth off, because the startup guard validated a different env var's default than the one actually controlling the bind address. The no-Docker default is now loopback-only; Docker's explicit `0.0.0.0` override (safe there, restricted at the container port-publish level) is unaffected.
+- **Fixed a request-thread exhaustion stall**: the accept loop's blocking semaphore acquire at the `MAX_REQUEST_THREADS` limit (e.g. 64 open SSE connections) could stop the Hub from accepting any new connection, even from clients well under the limit, until a slot freed.
+- **GDPR-compliant mode**: new settings, consent gating, real data erasure (including private-session erase and an erase/archive race fix), and configurable retention, exposed through both the web dashboard (`/gdpr`) and the CLI (`status`/`enable`/`disable`/`retention`/`consent`/`export`/`erase`).
+- Hardening from critic review: ReDoS-safe validation patterns and tightened CLI auth handling.
+
 ## 0.3.21
 
 - **The node graph canvas is no longer blind to its own runs.** Clicking "Run workflow" now streams over a new `POST /api/graphs/run/stream` (SSE), so the canvas's own nodes light up live the same way they already did for runs started from chat — previously that endpoint had no status callback at all and just blocked until the whole run finished.
