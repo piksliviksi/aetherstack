@@ -1133,14 +1133,20 @@ class HubChat {
         postRun({
           type: "progress",
           phase: payload.phase || "",
-          label: "on it..",
+          // Forward the caller's label. This used to be hardcoded to "on it..",
+          // which threw away the Hub's real stage labels (Planning…, Lead…,
+          // Review…) and left the UI unable to say what was happening.
+          label: payload.label || "",
           model: payload.model || "",
           models: payload.models || plannedModels,
+          // Omitted unless the Hub resolved it, so the UI can tell "read-only"
+          // apart from "not reported yet".
+          ...(payload.workspaceWrite === undefined ? {} : { workspaceWrite: payload.workspaceWrite }),
         });
       };
       publishProgress({
         phase: serviceId === "auto" ? "auto" : "starting",
-        label: "on it..",
+        label: serviceId === "auto" ? "Routing…" : "Starting…",
         model: plannedModels[0] || "",
         models: plannedModels,
       });
@@ -1152,7 +1158,7 @@ class HubChat {
           if (active.length) {
             publishProgress({
               phase: "running",
-              label: "on it..",
+              label: "Answering…",
               model: active[0],
               models: active,
             });
@@ -1191,12 +1197,13 @@ class HubChat {
                 label: event.label || "",
                 model: event.model || "",
                 models: event.models || plannedModels,
+                workspaceWrite: event.workspace_write,
               });
             } else if (event.type === "delta") {
               if (!streamedText) {
                 publishProgress({
                   phase: "streaming",
-                  label: "on it..",
+                  label: "Writing the reply…",
                   model: event.model || plannedModels[0] || "",
                   models: plannedModels,
                 });

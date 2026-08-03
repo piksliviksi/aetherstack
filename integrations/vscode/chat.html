@@ -24,7 +24,9 @@
     select, textarea { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); font: inherit; }
     #route { margin: 0 0 8px; min-height: 18px; color: var(--vscode-descriptionForeground); font-size: 11px; }
     #route:empty { display: none; }
-    #messages { flex: 1 1 auto; min-width: 0; min-height: 0; width: 100%; display: grid; gap: 12px; align-content: start; margin: 4px 0 12px; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+    /* align-content:end keeps the thread anchored to the composer so a short
+       conversation grows upward from the box instead of hanging from the top. */
+    #messages { flex: 1 1 auto; min-width: 0; min-height: 0; width: 100%; display: grid; gap: 12px; align-content: end; margin: 4px 0 12px; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
     .message { min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
     .message > * { max-width: 100%; }
     .message .role { color: var(--vscode-descriptionForeground); }
@@ -87,6 +89,15 @@
     .thought-step { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--vscode-panel-border); }
     .thought-step:first-of-type { border-top: 0; padding-top: 0; }
     .thought-step strong { color: var(--vscode-foreground); }
+    /* Live run activity. The composer keeps only the animated phrase; the
+       stage-by-stage detail belongs here, where it can wrap and scroll. */
+    .activity-live {
+      margin-top: 2px; padding: 6px 9px; border-left: 2px solid var(--vscode-panel-border);
+      color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 1.5;
+    }
+    .activity-step { display: block; overflow-wrap: anywhere; }
+    .activity-step::before { content: '· '; }
+    .activity-step.current { color: var(--vscode-foreground); }
     #tokenLine[hidden] { display: none !important; }
     button, button.secondary { color: var(--vscode-foreground); background: transparent; border: 1px solid var(--vscode-panel-border); border-radius: var(--ae-radius-sm); padding: 5px 10px; cursor: pointer; }
     button:disabled { opacity: .55; cursor: wait; }
@@ -184,6 +195,7 @@
         <section class="menu-section" data-menu-section>
           <div class="menu-title">Chat</div>
           <button id="newConversation" class="menu-row" type="button"><span>New chat</span><small>Ctrl+N</small></button>
+          <button id="toggleThoughts" class="menu-row" type="button"><span>Expand details</span><small>Thought process</small></button>
         </section>
         <section class="menu-section" data-menu-section>
           <div class="menu-title">Mode</div>
@@ -224,7 +236,7 @@
       </div>
       <input type="file" id="attachInput" accept="image/*,.pdf" multiple hidden>
     </div>
-    <div class="statusline"><span id="cwdLine"></span><span id="tokenLine"></span></div>
+    <div class="statusline"><span id="cwdLine"></span><span id="permLine"></span><span id="tokenLine"></span></div>
   </fieldset>
 </main>
 <script nonce="{{NONCE}}">{{CHAT_RENDER_JS}}</script>
@@ -236,6 +248,7 @@
   let activityTimer = null;
   let elapsedTimer = null;
   let showActiveModel = true;
+  let detailsExpanded = false;
   let showThoughtProcess = false;
   let showTokens = true;
   let memoryContextKb = 512;
@@ -436,18 +449,52 @@
   }
   function rotateActivity() {
     activityDotIndex += 1;
-    const model = runMeta.model || (runMeta.models || [])[0] || '';
-    $('activityText').textContent = model ? `${activityLabel()} · ${model}` : activityLabel();
+    $('activityText').textContent = activityLabel();
+  }
+  // Live stage trace. The Hub already labels every stage it runs (Planning…,
+  // Memory…, Lead…, Review…); this renders them as they arrive so the run is
+  // legible while it happens, instead of only in the final thought process.
+  let activityBox = null;
+  let lastActivityKey = '';
+  function pushActivity(label, phase, model) {
+    const text = String(label || phase || '').trim();
+    if (!text) return;
+    const key = `${text}|${model || ''}`;
+    if (key === lastActivityKey) return;
+    lastActivityKey = key;
+    if (!activityBox) {
+      activityBox = document.createElement('div');
+      activityBox.className = 'activity-live';
+      $('messages').appendChild(activityBox);
+    }
+    for (const prev of activityBox.querySelectorAll('.activity-step.current')) prev.classList.remove('current');
+    const line = document.createElement('span');
+    line.className = 'activity-step current';
+    line.textContent = model ? `${text} · ${model}` : text;
+    activityBox.appendChild(line);
+    activityBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  // Reported by the Hub once the plan resolves, never guessed: an absent value
+  // leaves the line blank rather than claiming a permission we do not know.
+  function setFilePermission(canWrite) {
+    const el = $('permLine');
+    el.textContent = canWrite ? 'files: writable' : 'files: read-only';
+    el.title = canWrite
+      ? 'This run includes a stage authorized to write workspace files.'
+      : 'This run cannot modify workspace files.';
+  }
+  function clearActivity() {
+    if (activityBox && activityBox.parentNode) activityBox.parentNode.removeChild(activityBox);
+    activityBox = null;
+    lastActivityKey = '';
   }
   function paintRunChrome() {
     if (!runMeta.busy) return;
-    const secs = Math.max(0, Math.floor((Date.now() - (runMeta.startedAt || Date.now())) / 1000));
     const model = runMeta.model || (runMeta.models || []).filter(Boolean).join(', ');
-    // The "on it.." phrase already lives in #activityText (animated); #status
-    // only adds the phase/model/elapsed detail so the phrase isn't shown twice.
-    const phase = runMeta.label && runMeta.label !== ACTIVITY_BASE ? runMeta.label : (runMeta.phase || '');
-    const parts = [phase, model, `${secs}s`].filter(Boolean);
-    $('status').textContent = parts.join(' · ');
+    // The animated phrase in #activityText is the only run indicator the
+    // composer needs. Phase, model and elapsed were the same facts a second
+    // and third time on one line, so they are deliberately not rendered here.
+    $('status').textContent = '';
     $('status').className = 'muted';
     if (model) {
       $('activeModels').textContent = `Answering: ${model}`;
@@ -468,11 +515,13 @@
     if (value) {
       runMeta.startedAt = Date.now();
       activityDotIndex = 0;
+      clearActivity();
       rotateActivity();
       paintRunChrome();
       activityTimer = setInterval(rotateActivity, 500);
       elapsedTimer = setInterval(paintRunChrome, 500);
     } else {
+      clearActivity();
       $('activityText').textContent = '';
       runMeta = { busy: false, phase: '', label: '', model: '', models: [], startedAt: 0 };
       $('activeModels').classList.remove('live');
@@ -490,7 +539,9 @@
       return `<div class="thought-step"><strong>${escHtml(role)}${escHtml(model)}</strong>\n${escHtml(body)}</div>`;
     }).filter(Boolean);
     if (!blocks.length) return '';
-    return `<details class="thought-process" open><summary>Thought process</summary>${blocks.join('')}</details>`;
+    // Collapsed by default: in a narrow side panel an always-open trace buries
+    // the answer. #toggleThoughts flips this for existing and future messages.
+    return `<details class="thought-process"${detailsExpanded ? ' open' : ''}><summary>Thought process</summary>${blocks.join('')}</details>`;
   }
   function escHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -707,6 +758,12 @@
   });
   $('service').addEventListener('change', () => { activeServiceId = $('service').value === 'auto' ? activeServiceId : $('service').value; renderTeam(); saveState(); });
   function closeActionMenu() { setActionMenuOpen(false); }
+  $('toggleThoughts').addEventListener('click', () => {
+    detailsExpanded = !detailsExpanded;
+    for (const el of document.querySelectorAll('details.thought-process')) el.open = detailsExpanded;
+    $('toggleThoughts').firstElementChild.textContent = detailsExpanded ? 'Collapse details' : 'Expand details';
+    closeActionMenu();
+  });
   $('refresh').addEventListener('click', () => { closeActionMenu(); vscode.postMessage({ type: 'refresh' }); });
   $('openControlCenter').addEventListener('click', () => {
     closeActionMenu();
@@ -833,13 +890,16 @@
       setBusy(Boolean(message.value));
     } else if (message.type === 'progress') {
       runMeta.phase = message.phase || runMeta.phase;
+      if (message.label) runMeta.label = message.label;
+      if (message.workspaceWrite !== undefined) setFilePermission(message.workspaceWrite);
       if (message.model) runMeta.model = message.model;
       if (Array.isArray(message.models) && message.models.length) runMeta.models = message.models;
+      pushActivity(message.label, message.phase, message.model);
       if (runMeta.busy) paintRunChrome();
       else {
-        // Keep status readable even if progress arrives slightly before busy.
+        // Progress can arrive just before busy; keep the answering model live
+        // but leave #status empty - the animated phrase carries the run state.
         const model = runMeta.model || (runMeta.models || [])[0] || '';
-        $('status').textContent = model ? `${runMeta.phase} · ${model}` : runMeta.phase;
         if (model) { $('activeModels').textContent = `Answering: ${model}`; $('activeModels').classList.add('live'); }
       }
     } else if (message.type === 'inference') {

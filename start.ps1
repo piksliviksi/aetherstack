@@ -338,13 +338,20 @@ function Start-CliBridge {
   Start-Sleep -Seconds 2
 
   $log = if (Test-Path $logFile) { (Get-Content -LiteralPath $logFile -Raw) } else { "" }
-  if ($log) { ($log.TrimEnd() -split "`r?`n") | ForEach-Object { Write-Host "  $_" } }
-  if ($log -match 'status=reused') {
-    # Another bridge (the extension's, keyed by its own SecretStorage token)
-    # already owns the port. Ours would never match, so do not hand it to
-    # compose - that owner reconciles its own token with the Hub.
+  $err = if (Test-Path $errFile) { (Get-Content -LiteralPath $errFile -Raw) } else { "" }
+  foreach ($line in @($log, $err)) {
+    if ($line) { ($line.TrimEnd() -split "`r?`n") | ForEach-Object { Write-Host "  $_" } }
+  }
+  # Either another bridge already owns the port with a token we cannot match
+  # (the VSCode extension keys its own from SecretStorage), or it accepted ours
+  # and is being reused. In both cases a token minted here is wrong: handing it
+  # to compose points the Hub at a bridge that will reject it, which is worse
+  # than leaving the Hub unconfigured for the extension to reconcile on its
+  # next start/refresh.
+  if ($log -match 'status=reused' -or $err -match 'rejected this token|EADDRINUSE') {
     $env:AETHER_CLI_BRIDGE_TOKEN = ""
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+    Write-Host "  Another host CLI bridge already owns port 8767; leaving it in place." -ForegroundColor Yellow
   }
 }
 

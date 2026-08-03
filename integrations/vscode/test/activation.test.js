@@ -10,7 +10,11 @@ test("chat exposes a minimal action menu, modes, and model activity state", () =
   assert.match(html, /id="actionMenu"/);
   assert.match(html, /Active preset node graph/);
   assert.match(html, /activeModels/);
-  assert.match(html, /on it\.\./);
+  // Pin the animated activity phrase itself, not prose about it: the previous
+  // /on it\.\./ matched only a code comment, so rewording the comment failed
+  // the test while the behaviour was intact.
+  assert.match(html, /ACTIVITY_BASE = 'On it'/);
+  assert.match(html, /ACTIVITY_DOT_FRAMES = \['', '\.', '\.\.', '\.\.\.'\]/);
   assert.doesNotMatch(html, /activityWords/);
   assert.match(html, /Ask anything…/);
   assert.match(html, /html, body \{ width: 100%; height: 100%; overflow: hidden; \}/);

@@ -1352,6 +1352,7 @@ def _emit_status(
     model: str | None = None,
     models: list[str] | None = None,
     label: str | None = None,
+    workspace_write: bool | None = None,
 ) -> None:
     """Best-effort progress for UIs (VS Code chat, SSE). Never raise into the run."""
     if on_status is None:
@@ -1363,6 +1364,10 @@ def _emit_status(
         payload["models"] = [m for m in models if m]
     if label:
         payload["label"] = label
+    # Only sent when actually resolved, so a UI can distinguish "read-only"
+    # from "not reported yet" instead of assuming one of them.
+    if workspace_write is not None:
+        payload["workspace_write"] = bool(workspace_write)
     try:
         on_status(payload)
     except Exception:
@@ -2153,6 +2158,10 @@ def execute_service(
         model=lead_call.get("model"),
         models=planned_models,
         label="Team ready…",
+        workspace_write=any(
+            bool((call or {}).get("workspace_write"))
+            for call in [lead_call, *worker_calls, supervisor_call]
+        ),
     )
 
     session_history = None
