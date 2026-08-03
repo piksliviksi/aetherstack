@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.23
+
+- **Added the missing `auto` preset** to the Hub, plus buttons for `auto`, `single_inline`, and `subscription`, which had no UI button despite being valid presets. `auto` is inline mode, auto-routed to the best-scoring available model.
+
 ## 0.3.22
 
 - **Standalone terminal CLI**: a new `aetherstack` command (`integrations/cli`) is the text equivalent of the Hub — auth against a Hub, run presets/chat, and start/stop/status the local stack, all from a plain terminal. The VS Code Control Center gets an **Install AetherStack CLI** action that runs `npm link` for you and offers to open a terminal with it ready to go.
