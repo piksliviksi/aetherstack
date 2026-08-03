@@ -2500,9 +2500,12 @@ refreshCombos();
   <button type="button" onclick="setMode('multi_agent')">multi-agent</button>
   <button type="button" onclick="setSaver(true)">token saver ON</button>
   <button type="button" onclick="setSaver(false)">token saver OFF</button>
+  <button type="button" onclick="setPreset('auto')">preset: auto</button>
   <button type="button" onclick="setPreset('thrifty')">preset: thrifty</button>
   <button type="button" onclick="setPreset('quality')">preset: quality</button>
   <button type="button" onclick="setPreset('local_only')">preset: local_only</button>
+  <button type="button" onclick="setPreset('single_inline')">preset: single_inline</button>
+  <button type="button" onclick="setPreset('subscription')">preset: subscription</button>
  </div>
  <div class="muted" style="margin-top:.4rem">
   Pin roles via API: mastermind / supervisor / worker by maker, tier, price, or model —

@@ -156,6 +156,7 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
 | `quality` | multi_agent, xAI mastermind, Anthropic supervisor, OpenAI workers |
 | `local_only` | all roles local tier |
 | `single_inline` | classic one-model |
+| `auto` | inline mode, auto-routed to best available model |
 
 ```bash
 curl -s -X POST http://127.0.0.1:8766/api/modes -d '{"preset":"thrifty"}' -H "Content-Type: application/json"
