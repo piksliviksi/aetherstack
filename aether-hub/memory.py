@@ -153,6 +153,7 @@ class MemoryStore:
         meta: dict | None = None,
         id: str | None = None,
         embedding: list[float] | None = None,
+        ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
         vid = id or str(uuid.uuid4())
         emb = embedding or self.embed_text(text)
@@ -165,6 +166,8 @@ class MemoryStore:
             "namespace": namespace,
             "dim": len(emb),
         }
+        if ttl_seconds is not None:
+            doc["expires_at"] = time.time() + ttl_seconds
         if self._r is not None:
             # Hash field id → json; sidecars for list of ids
             pipe = self._r.pipeline()
@@ -219,13 +222,55 @@ class MemoryStore:
         if self._r is not None:
             raw = self._r.hgetall(self._vec_key(namespace))
             out = []
-            for _, v in list(raw.items())[:MAX_VECTORS_SCAN]:
+            expired_ids = []
+            for field, v in list(raw.items())[:MAX_VECTORS_SCAN]:
                 try:
-                    out.append(json.loads(v))
+                    doc = json.loads(v)
                 except json.JSONDecodeError:
                     continue
+                expires_at = doc.get("expires_at")
+                if expires_at is not None and float(expires_at) <= time.time():
+                    expired_ids.append(field)
+                    continue
+                out.append(doc)
+            if expired_ids:
+                # Field-level TTL isn't guaranteed available (needs Redis 7.4+
+                # HEXPIRE), so retention is enforced here at read time instead —
+                # portable across any Redis version this project supports.
+                try:
+                    self._r.hdel(self._vec_key(namespace), *expired_ids)
+                    self._r.srem(f"{self._vec_key(namespace)}:ids", *expired_ids)
+                except Exception:
+                    pass
             return out
-        return list(self._local_vectors.get(namespace, []))
+        docs = self._local_vectors.get(namespace, [])
+        fresh = [d for d in docs if not (d.get("expires_at") is not None and float(d["expires_at"]) <= time.time())]
+        if len(fresh) != len(docs):
+            self._local_vectors[namespace] = fresh
+        return list(fresh)
+
+    def delete_vector(self, namespace: str, vector_id: str) -> bool:
+        """Erases one vector by id. Returns True if it existed."""
+        if not vector_id:
+            return False
+        if self._r is not None:
+            removed = self._r.hdel(self._vec_key(namespace), vector_id)
+            self._r.srem(f"{self._vec_key(namespace)}:ids", vector_id)
+            return bool(removed)
+        docs = self._local_vectors.get(namespace, [])
+        remaining = [d for d in docs if d.get("id") != vector_id]
+        existed = len(remaining) != len(docs)
+        self._local_vectors[namespace] = remaining
+        return existed
+
+    def delete_namespace(self, namespace: str) -> bool:
+        """Erases every vector in a namespace (e.g. an archive)."""
+        if self._r is not None:
+            removed = self._r.delete(self._vec_key(namespace), f"{self._vec_key(namespace)}:ids")
+            return bool(removed)
+        existed = namespace in self._local_vectors
+        self._local_vectors.pop(namespace, None)
+        return existed
 
     def list_vectors(self, namespace: str) -> list[dict]:
         """All vectors in a namespace, most-recent first (no query/embedding needed)."""

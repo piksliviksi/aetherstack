@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 import yaml
 
+import gdpr
 from agents import apply_runtime_update, plan_event
 from attachments import build_image_content_part, decode_attachment, extract_pdf_text
 from cross_memory import get_xref_state, pull_context
@@ -1476,12 +1477,19 @@ def list_auto_failover_chain(
     now = time.monotonic()
     with _auto_model_cooldown_lock:
         cooling_down = {alias for alias, until in _auto_model_cooldown.items() if until > now}
+    # GDPR mode + consent required + not yet consented for this session: a
+    # prompt must not silently leave the machine, so cloud/subscription
+    # models are excluded from the chain entirely rather than erroring —
+    # Auto still works, using only local models, until consent is recorded.
+    cloud_allowed = gdpr.cloud_dispatch_allowed(session_id)
 
     def add(alias: str, reason: str) -> None:
         if alias in seen or alias in cooling_down:
             return
         meta = models.get(alias) or {}
         if not meta.get("available"):
+            return
+        if not cloud_allowed and meta.get("tier") != "local":
             return
         seen.add(alias)
         chain.append(

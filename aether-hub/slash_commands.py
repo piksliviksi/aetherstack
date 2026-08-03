@@ -14,6 +14,7 @@ import time
 import uuid
 from typing import Any, Callable
 
+import gdpr
 from memory import MemoryStore
 from privacy import (
     is_session_private,
@@ -225,10 +226,12 @@ def archive_to_memory(
         "private": private,
         "project_id": ctx.get("project_id"),
     }
+    archive_ttl = gdpr.retention_seconds() if gdpr.is_enabled() else None
     vec = mem.upsert_vector(
         text=doc[:12000] if not private else doc[:12000],
         namespace=ns,
         meta=meta,
+        ttl_seconds=archive_ttl,
     )
 
     sticky = None
@@ -245,6 +248,7 @@ def archive_to_memory(
                 "archive_ns": ns,
                 "archive_id": vec.get("id"),
             },
+            ttl_seconds=archive_ttl,
         )
 
     # session stream: redacted when private
@@ -299,22 +303,33 @@ def cmd_clear(
     private = bool(ctx.get("private"))
     store_sid = private_session_key(session_id, ctx.get("project_id")) if private else session_id
 
-    archive = archive_to_memory(session_id, mem, reason="clear" if not keep_summary else "compact")
+    gdpr_mode = gdpr.is_enabled()
     prev_summary = get_working(session_id).get("summary") or ""
-    mem.clear_session(store_sid)
-    if private and store_sid != session_id:
-        mem.clear_session(session_id)  # wipe any pre-private residual
 
-    # reset working context
-    if private:
-        summary_line = "[private] context cleared; vault archive only (not in common pool)"
-        if keep_summary and prev_summary:
-            summary_line = "[private] " + prev_summary[:200]
+    if gdpr_mode and not keep_summary:
+        # GDPR mode: /clear means erase, not "relocate to a permanent archive
+        # first" - a real /save (keep_summary=True) still archives, since the
+        # user explicitly asked to keep something.
+        erased = gdpr.erase_user_data(mem, session_id)
+        if private and store_sid != session_id:
+            mem.clear_session(store_sid)
+        archive = {"archive_id": None, "namespace": None, "erased": True}
+        summary_line = "[GDPR mode] context erased, not archived"
     else:
-        summary_line = (
-            (prev_summary[:400] if keep_summary and prev_summary else "")
-            or f"Context cleared; full history in memory archive {archive.get('archive_id')}"
-        )
+        archive = archive_to_memory(session_id, mem, reason="clear" if not keep_summary else "compact")
+        mem.clear_session(store_sid)
+        if private and store_sid != session_id:
+            mem.clear_session(session_id)  # wipe any pre-private residual
+        if private:
+            summary_line = "[private] context cleared; vault archive only (not in common pool)"
+            if keep_summary and prev_summary:
+                summary_line = "[private] " + prev_summary[:200]
+        else:
+            summary_line = (
+                (prev_summary[:400] if keep_summary and prev_summary else "")
+                or f"Context cleared; full history in memory archive {archive.get('archive_id')}"
+            )
+
     new_working = {
         "session_id": session_id,
         "notes": [],
@@ -326,15 +341,16 @@ def cmd_clear(
     }
     _working[_working_key(session_id)] = new_working
 
-    seed = (
-        redact_log("clear", ctx, archive_id=archive.get("archive_id"))
-        if private
-        else (
+    if archive.get("erased"):
+        seed = "[/clear] GDPR mode: prior context was erased, not archived. Nothing to recall."
+    elif private:
+        seed = redact_log("clear", ctx, archive_id=archive.get("archive_id"))
+    else:
+        seed = (
             "[/clear] Working context reset. Prior work is stored in agent memory "
             f"(archive={archive.get('archive_id')}, ns={archive.get('namespace')}). "
             "Recall via POST /api/memory/search namespace=conversation-index or archive ns."
         )
-    )
     mem.append_message(
         store_sid,
         "system",
@@ -351,7 +367,9 @@ def cmd_clear(
         "context_optimal": True,
         "private": private,
         "message": (
-            "Private vault archived; working context cleared; common pool untouched."
+            "GDPR mode: context erased (not archived)."
+            if archive.get("erased")
+            else "Private vault archived; working context cleared; common pool untouched."
             if private
             else "Documented in memory and cleared working context."
         ),

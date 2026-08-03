@@ -253,6 +253,7 @@ class ServiceGraphPersistenceTests(unittest.TestCase):
         get_request = SimpleNamespace(
             path="/api/services/one/graph",
             _send=lambda code, value, *args: sent.append((code, value)),
+            _ensure_control_plane_auth=lambda method, path: True,
         )
         with mock.patch.object(server, "get_snapshot", return_value=snapshot()), mock.patch.object(
             server, "build_service_graph", return_value={"id": "one", "nodes": [], "edges": []}
@@ -267,6 +268,7 @@ class ServiceGraphPersistenceTests(unittest.TestCase):
             _workspace_write_authorized=lambda: True,
             _read_json=lambda: {"nodes": "invalid"},
             _send=lambda code, value, *args: invalid.append((code, value)),
+            _ensure_control_plane_auth=lambda method, path: True,
         )
         with mock.patch.object(server, "save_service_graph", side_effect=ValueError("nodes must be a list")):
             server.Handler.do_POST(post_request)
@@ -277,6 +279,7 @@ class ServiceGraphPersistenceTests(unittest.TestCase):
         unknown_request = SimpleNamespace(
             path="/api/services/missing/graph",
             _send=lambda code, value, *args: unknown.append((code, value)),
+            _ensure_control_plane_auth=lambda method, path: True,
         )
         with mock.patch.object(server, "get_snapshot", return_value=snapshot()), mock.patch.object(
             server, "build_service_graph", side_effect=ValueError("unknown service: missing")

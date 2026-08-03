@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AetherStack — Privacy / GDPR</title>
+  <link rel="icon" type="image/png" href="/aetherstack-icon.png">
+  <style>
+    :root { color-scheme:dark; --bg:#090a0b; --panel:#111315; --panel2:#17191b; --line:#303336; --line-strong:#4b4f52; --text:#ecebe7; --muted:#9b9b95; --brand:#d6b36a; --good:#76b98a; --warn:#d6a85f; --bad:#d87575; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif; color:var(--text); background:var(--bg); }
+    button,select,textarea,input { font:inherit; }
+    button { color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:2px; padding:.55rem .8rem; cursor:pointer; }
+    button:hover { background:#202326; border-color:var(--line-strong); }
+    button.primary { color:#17140d; background:var(--brand); border-color:var(--brand); font-weight:750; }
+    button.danger { color:#ffd7d7; background:#2a1414; border-color:#5c2a2a; }
+    button.danger:hover { background:#3a1a1a; }
+    a { color:var(--brand); }
+    header { position:sticky; top:0; z-index:5; display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:.72rem max(1rem,3vw); border-bottom:1px solid var(--line); background:#0d0f10; }
+    nav { display:flex; border:1px solid var(--line); }
+    nav a { padding:.43rem .72rem; border-right:1px solid var(--line); color:var(--muted); text-decoration:none; }
+    nav a:last-child { border-right:0; }
+    nav a:hover, nav a.active { color:var(--text); background:var(--panel2); }
+    main { max-width:900px; margin:auto; padding:1.2rem max(1rem,3vw) 3rem; display:grid; gap:1rem; }
+    .panel { border:1px solid var(--line); border-radius:2px; background:var(--panel); padding:1rem; }
+    h1 { font-size:1.15rem; margin:0; }
+    h2 { font-size:.95rem; margin:0 0 .6rem; color:var(--brand); }
+    .muted { color:var(--muted); font-size:.85rem; }
+    .row { display:flex; gap:.7rem; align-items:center; flex-wrap:wrap; }
+    .toggle-row { display:flex; justify-content:space-between; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--line); }
+    .toggle-row:last-child { border-bottom:0; }
+    label.field { display:grid; gap:.3rem; color:var(--muted); font-size:.82rem; margin-top:.6rem; }
+    input[type=number] { width:8rem; color:var(--text); background:#0b0c0d; border:1px solid var(--line); border-radius:1px; padding:.5rem; }
+    input[type=text] { width:100%; color:var(--text); background:#0b0c0d; border:1px solid var(--line); border-radius:1px; padding:.5rem; }
+    table { width:100%; border-collapse:collapse; font-size:.82rem; }
+    th,td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    pre { white-space:pre-wrap; overflow:auto; max-height:320px; padding:.6rem; background:#0b0c0d; border:1px solid var(--line); border-radius:1px; font-size:.78rem; }
+    #status { min-height:1.2rem; color:var(--muted); }
+    .banner { padding:.6rem .8rem; border-left:3px solid var(--brand); background:#1c1811; color:#dcc891; font-size:.85rem; }
+    .banner.off { border-color:var(--line-strong); background:transparent; color:var(--muted); }
+  </style>
+</head>
+<body>
+<header>
+  <strong>AetherStack — Privacy / GDPR</strong>
+  <nav aria-label="AetherStack views"><a href="/">Simple</a><a href="/advanced">Advanced</a><a href="/graph">Node canvas</a><a class="active" aria-current="page" href="/gdpr">Privacy</a></nav>
+</header>
+<main>
+  <div id="modeBanner" class="banner off">Checking GDPR mode…</div>
+
+  <section class="panel">
+    <h2>GDPR-compliant mode</h2>
+    <p class="muted">Forces safer defaults: cloud/subscription models are excluded from Auto until you record consent per session, archived conversations get an expiring retention window instead of living forever, and <code>/clear</code> actually erases instead of archiving first. This flips defaults for an operator — it does not by itself make a deployment legally compliant.</p>
+    <div class="toggle-row">
+      <div><strong>Enabled</strong><div class="muted">Applies immediately to new requests.</div></div>
+      <label class="row"><input type="checkbox" id="chkEnabled"> <span id="enabledLabel">Off</span></label>
+    </div>
+    <div class="toggle-row">
+      <div><strong>Require cloud consent</strong><div class="muted">When on, a session must record consent before Auto will route to a cloud/subscription model.</div></div>
+      <label class="row"><input type="checkbox" id="chkConsent"> <span id="consentLabel">On</span></label>
+    </div>
+    <label class="field">Retention (days) — applies to new archives/vectors going forward
+      <input type="number" id="retentionDays" min="1" max="3650" value="30">
+    </label>
+    <div class="row" style="margin-top:.8rem">
+      <button class="primary" id="btnSave">Save settings</button>
+      <span id="status"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Subprocessors (cloud LLM providers)</h2>
+    <p class="muted">Every provider a prompt can be routed to when not using a local model, for your own Article 28 disclosures.</p>
+    <table id="subprocessorTable"><thead><tr><th>Provider</th><th>Models</th><th>Purpose</th></tr></thead><tbody></tbody></table>
+    <p class="muted" id="localNote" style="margin-top:.6rem"></p>
+  </section>
+
+  <section class="panel">
+    <h2>Your session data</h2>
+    <p class="muted">Look up, export, or erase everything stored under a specific session id (Article 15/17/20).</p>
+    <label class="field">Session id
+      <input type="text" id="sessionId" placeholder="e.g. the id shown in your chat client">
+    </label>
+    <div class="row" style="margin-top:.7rem">
+      <button id="btnExport">Export my data</button>
+      <button class="row" id="btnConsent">Record consent for this session</button>
+      <button class="danger" id="btnErase">Erase my data</button>
+    </div>
+    <pre id="dataOut" hidden></pre>
+  </section>
+</main>
+<script>
+async function api(path, opts) {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+function setStatus(text) { document.getElementById("status").textContent = text; }
+function applyBanner(enabled) {
+  const banner = document.getElementById("modeBanner");
+  banner.textContent = enabled
+    ? "GDPR-compliant mode is ON — cloud models require per-session consent, archives expire, /clear erases."
+    : "GDPR-compliant mode is OFF — default AetherStack behavior (archive-on-clear, no retention limit).";
+  banner.classList.toggle("off", !enabled);
+}
+async function loadSettings() {
+  const data = await api("/api/gdpr");
+  document.getElementById("chkEnabled").checked = !!data.enabled;
+  document.getElementById("enabledLabel").textContent = data.enabled ? "On" : "Off";
+  document.getElementById("chkConsent").checked = !!data.require_cloud_consent;
+  document.getElementById("consentLabel").textContent = data.require_cloud_consent ? "On" : "Off";
+  document.getElementById("retentionDays").value = data.retention_days;
+  applyBanner(!!data.enabled);
+  const tbody = document.querySelector("#subprocessorTable tbody");
+  tbody.replaceChildren(...data.subprocessors.cloud_providers.map(p => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${p.provider}</td><td>${p.models}</td><td>${p.purpose}</td>`;
+    return tr;
+  }));
+  document.getElementById("localNote").textContent = data.subprocessors.local_note;
+}
+document.getElementById("chkEnabled").onchange = (e) => {
+  document.getElementById("enabledLabel").textContent = e.target.checked ? "On" : "Off";
+};
+document.getElementById("chkConsent").onchange = (e) => {
+  document.getElementById("consentLabel").textContent = e.target.checked ? "On" : "Off";
+};
+document.getElementById("btnSave").onclick = async () => {
+  setStatus("Saving…");
+  try {
+    const data = await api("/api/gdpr", { method: "POST", body: JSON.stringify({
+      enabled: document.getElementById("chkEnabled").checked,
+      require_cloud_consent: document.getElementById("chkConsent").checked,
+      retention_days: Number(document.getElementById("retentionDays").value) || 30,
+    })});
+    applyBanner(!!data.enabled);
+    setStatus("Saved.");
+  } catch (error) { setStatus(error.message); }
+};
+function currentSessionId() {
+  const sid = document.getElementById("sessionId").value.trim();
+  if (!sid) setStatus("Enter a session id first.");
+  return sid;
+}
+document.getElementById("btnExport").onclick = async () => {
+  const sid = currentSessionId(); if (!sid) return;
+  setStatus("Exporting…");
+  try {
+    const data = await api("/api/gdpr/export", { method: "POST", body: JSON.stringify({ session_id: sid }) });
+    const out = document.getElementById("dataOut"); out.hidden = false; out.textContent = JSON.stringify(data, null, 2);
+    setStatus("Exported.");
+  } catch (error) { setStatus(error.message); }
+};
+document.getElementById("btnConsent").onclick = async () => {
+  const sid = currentSessionId(); if (!sid) return;
+  try {
+    await api("/api/gdpr/consent", { method: "POST", body: JSON.stringify({ session_id: sid }) });
+    setStatus(`Consent recorded for ${sid}.`);
+  } catch (error) { setStatus(error.message); }
+};
+document.getElementById("btnErase").onclick = async () => {
+  const sid = currentSessionId(); if (!sid) return;
+  if (!confirm(`Permanently erase all data for session "${sid}"? This cannot be undone.`)) return;
+  setStatus("Erasing…");
+  try {
+    const data = await api("/api/gdpr/erase", { method: "POST", body: JSON.stringify({ session_id: sid }) });
+    const out = document.getElementById("dataOut"); out.hidden = false; out.textContent = JSON.stringify(data, null, 2);
+    setStatus("Erased.");
+  } catch (error) { setStatus(error.message); }
+};
+loadSettings().catch((error) => setStatus(error.message));
+</script>
+</body>
+</html>

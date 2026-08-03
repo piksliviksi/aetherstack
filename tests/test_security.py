@@ -58,6 +58,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             _send=lambda code, value, content_type="application/json; charset=utf-8": sent.append(
                 (code, value, content_type)
             ),
+            _ensure_control_plane_auth=lambda method, path: True,
         )
         hub_server.Handler.do_GET(fake)
         self.assertEqual(sent[0][0], 200)
@@ -443,6 +444,7 @@ class SecurityBoundaryTests(unittest.TestCase):
             _send=lambda code, value, content_type="application/json; charset=utf-8": sent.append(
                 (code, value, content_type)
             ),
+            _ensure_control_plane_auth=lambda method, path: True,
         )
         hub_server.Handler.do_GET(fake)
         self.assertEqual(sent[0][0], 200)

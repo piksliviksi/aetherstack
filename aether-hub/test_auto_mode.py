@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import gdpr  # noqa: E402
 import services  # noqa: E402
 from services import (  # noqa: E402
     DEFAULT_MEMORY_CONTEXT_KB,
@@ -73,6 +74,29 @@ def test_chain_order() -> None:
     assert "codex-cli" not in models  # unavailable
     assert models.index("local-default") > models.index("claude-cli")
     assert "local-tiny" in models
+
+
+def test_gdpr_mode_excludes_cloud_models_from_the_chain_until_consent() -> None:
+    import tempfile
+
+    settings_file = Path(tempfile.mkdtemp()) / "gdpr_settings.json"
+    original_file = gdpr.GDPR_SETTINGS_FILE
+    gdpr.GDPR_SETTINGS_FILE = settings_file
+    gdpr._consented_sessions.clear()
+    try:
+        gdpr.set_settings({"enabled": True, "require_cloud_consent": True})
+        chain = list_auto_failover_chain(_snap(), session_id="gdpr-test")
+        models = [c["model"] for c in chain]
+        assert models, "local models must still be offered"
+        assert all(c.get("tier") == "local" for c in chain)
+        assert "claude-cli" not in models
+
+        gdpr.record_consent("gdpr-test")
+        chain_after_consent = list_auto_failover_chain(_snap(), session_id="gdpr-test")
+        assert "claude-cli" in [c["model"] for c in chain_after_consent]
+    finally:
+        gdpr.GDPR_SETTINGS_FILE = original_file
+        gdpr._consented_sessions.clear()
 
 
 def test_sticky_and_local_only() -> None:
