@@ -33,6 +33,8 @@ Usage:
 
 Options:
   --hub <url>     Hub base URL (default: $AETHERSTACK_HUB_URL or http://127.0.0.1:8766)
+  --token <tok>   Bearer token (default: $AETHERSTACK_HUB_TOKEN) — only needed when the
+                  Hub has AETHER_REQUIRE_AUTH set; mint one with POST /api/auth/token
   --cwd <path>    AetherStack checkout to operate on for up/down/status (default: current directory)
   --json          For "run": print the final result as JSON instead of plain text
   -h, --help      Show this help
@@ -57,6 +59,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--hub") flags.hub = argv[++i];
+    else if (arg === "--token") flags.token = argv[++i];
     else if (arg === "--edit") flags.edit = argv[++i];
     else if (arg === "--cwd") flags.cwd = argv[++i];
     else if (arg === "--json") flags.json = true;
@@ -73,22 +76,23 @@ async function main(argv) {
     return 0;
   }
   const baseUrl = flags.hub || hubClient.DEFAULT_BASE_URL;
+  const token = flags.token || process.env.AETHERSTACK_HUB_TOKEN || "";
   const client = {
-    listServices: (o) => hubClient.listServices({ baseUrl, ...o }),
-    getServiceGraph: (id, o) => hubClient.getServiceGraph(id, { baseUrl, ...o }),
-    saveServiceGraph: (id, g, o) => hubClient.saveServiceGraph(id, g, { baseUrl, ...o }),
-    saveGraph: (g, o) => hubClient.saveGraph(g, { baseUrl, ...o }),
-    runServiceStream: (id, e, cb, o) => hubClient.runServiceStream(id, e, cb, { baseUrl, ...o }),
-    runGraphStream: (g, e, cb, o) => hubClient.runGraphStream(g, e, cb, { baseUrl, ...o }),
-    cancelRun: (id, o) => hubClient.cancelRun(id, { baseUrl, ...o }),
-    fromPresetScript: (t, o) => hubClient.fromPresetScript(t, { baseUrl, ...o }),
-    toPresetScript: (g, o) => hubClient.toPresetScript(g, { baseUrl, ...o }),
-    getGdprSettings: (o) => hubClient.getGdprSettings({ baseUrl, ...o }),
-    setGdprSettings: (p, o) => hubClient.setGdprSettings(p, { baseUrl, ...o }),
-    gdprConsent: (id, o) => hubClient.gdprConsent(id, { baseUrl, ...o }),
-    gdprRevokeConsent: (id, o) => hubClient.gdprRevokeConsent(id, { baseUrl, ...o }),
-    gdprExport: (id, o) => hubClient.gdprExport(id, { baseUrl, ...o }),
-    gdprErase: (id, o) => hubClient.gdprErase(id, { baseUrl, ...o }),
+    listServices: (o) => hubClient.listServices({ baseUrl, token, ...o }),
+    getServiceGraph: (id, o) => hubClient.getServiceGraph(id, { baseUrl, token, ...o }),
+    saveServiceGraph: (id, g, o) => hubClient.saveServiceGraph(id, g, { baseUrl, token, ...o }),
+    saveGraph: (g, o) => hubClient.saveGraph(g, { baseUrl, token, ...o }),
+    runServiceStream: (id, e, cb, o) => hubClient.runServiceStream(id, e, cb, { baseUrl, token, ...o }),
+    runGraphStream: (g, e, cb, o) => hubClient.runGraphStream(g, e, cb, { baseUrl, token, ...o }),
+    cancelRun: (id, o) => hubClient.cancelRun(id, { baseUrl, token, ...o }),
+    fromPresetScript: (t, o) => hubClient.fromPresetScript(t, { baseUrl, token, ...o }),
+    toPresetScript: (g, o) => hubClient.toPresetScript(g, { baseUrl, token, ...o }),
+    getGdprSettings: (o) => hubClient.getGdprSettings({ baseUrl, token, ...o }),
+    setGdprSettings: (p, o) => hubClient.setGdprSettings(p, { baseUrl, token, ...o }),
+    gdprConsent: (id, o) => hubClient.gdprConsent(id, { baseUrl, token, ...o }),
+    gdprRevokeConsent: (id, o) => hubClient.gdprRevokeConsent(id, { baseUrl, token, ...o }),
+    gdprExport: (id, o) => hubClient.gdprExport(id, { baseUrl, token, ...o }),
+    gdprErase: (id, o) => hubClient.gdprErase(id, { baseUrl, token, ...o }),
   };
 
   const [command, ...rest] = args;
@@ -260,6 +264,7 @@ if (require.main === module) {
     .then((code) => process.exit(code || 0))
     .catch((err) => {
       console.error(`Error: ${err.message}`);
+      if (err.status === 401 && err.body && err.body.hint) console.error(err.body.hint);
       process.exit(1);
     });
 }

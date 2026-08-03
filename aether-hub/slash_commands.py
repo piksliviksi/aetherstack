@@ -198,7 +198,24 @@ def archive_to_memory(
     """Persist full context into vector + session meta before clear.
 
     Private sessions: vault-only archive. No conversation-index sticky. No content in logs.
+
+    Holds gdpr.session_lock() for the write: serialized against a concurrent
+    gdpr.erase_user_data() for the same session_id, so an archive write can't
+    land after an erase's sweep already passed that namespace and silently
+    resurrect data the erase call reported as removed.
     """
+    with gdpr.session_lock(session_id):
+        return _archive_to_memory_locked(session_id, mem, reason=reason, namespace=namespace, extra=extra)
+
+
+def _archive_to_memory_locked(
+    session_id: str,
+    mem: MemoryStore,
+    *,
+    reason: str = "manual_save",
+    namespace: str | None = None,
+    extra: dict | None = None,
+) -> dict[str, Any]:
     ctx = resolve_private_context(session_id=session_id)
     private = bool(ctx.get("private"))
     store_sid = private_session_key(session_id, ctx.get("project_id")) if private else session_id

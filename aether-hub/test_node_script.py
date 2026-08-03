@@ -95,3 +95,31 @@ def test_rules_must_be_a_list() -> None:
 def test_script_length_is_bounded() -> None:
     with pytest.raises(ScriptError, match="exceeds"):
         run_script("rules:\n" + ("  - if: true\n    then: {skip: true}\n" * 2000), {"goal": "x"})
+
+
+def test_and_short_circuits_without_evaluating_the_right_operand() -> None:
+    # The right operand uses an invalid regex that would raise ScriptError if
+    # evaluated - `and` short-circuiting on a false left operand must skip it.
+    ctx = {"goal": "no match here", "upstream": "", "model": "", "label": "", "role": ""}
+    assert evaluate_condition('contains(goal, "nope") and matches(upstream, "(unclosed")', ctx) is False
+
+
+def test_or_short_circuits_without_evaluating_the_right_operand() -> None:
+    ctx = {"goal": "found it", "upstream": "", "model": "", "label": "", "role": ""}
+    assert evaluate_condition('contains(goal, "found") or matches(upstream, "(unclosed")', ctx) is True
+
+
+def test_matches_rejects_an_overlong_pattern_instead_of_evaluating_it() -> None:
+    ctx = {"goal": "x", "upstream": "y" * 100, "model": "", "label": "", "role": ""}
+    with pytest.raises(ScriptError, match="pattern exceeds"):
+        evaluate_condition(f'matches(upstream, "{"a" * 300}")', ctx)
+
+
+def test_matches_bounds_the_input_text_length() -> None:
+    # A catastrophic pattern against a huge upstream block is capped by
+    # truncating the input matches() actually searches, not by evaluating
+    # against the full (up to 20k char) upstream text.
+    huge = "a" * 50_000
+    ctx = {"goal": "x", "upstream": huge, "model": "", "label": "", "role": ""}
+    # A benign match still works within the bound.
+    assert evaluate_condition('matches(upstream, "^a+$")', ctx) is True

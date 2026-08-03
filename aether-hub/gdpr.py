@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -124,6 +125,26 @@ def subprocessors() -> dict[str, Any]:
     return {"cloud_providers": list(SUBPROCESSORS), "local_note": LOCAL_NOTE}
 
 
+# ── per-session write lock ────────────────────────────────────────────
+# Erase and archive-write (slash_commands.archive_to_memory, and any run's
+# post-completion memory writes) must not interleave: without this, an
+# archive that lands mid-erase resurrects data erase_user_data already
+# reported as removed. Callers take this lock around their write/erase
+# critical section; it does not itself gate reads.
+_session_locks: dict[str, threading.Lock] = {}
+_session_locks_guard = threading.Lock()
+
+
+def session_lock(session_id: str) -> threading.Lock:
+    key = str(session_id or "")
+    with _session_locks_guard:
+        lock = _session_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _session_locks[key] = lock
+        return lock
+
+
 # ── consent ────────────────────────────────────────────────────────────
 # Per-session, in-process only: there is no per-user auth yet (multi-user
 # mode is design-only, see docs/MULTI-USER.md), so "consent" here is
@@ -191,6 +212,14 @@ def _resolve_storage_ids(session_id: str) -> tuple[str, str]:
     return store_sid, archive_ns
 
 
+def _namespace_possibly_truncated(mem: Any, namespace: str, seen: int) -> bool:
+    """True when a namespace has more vectors than list_vectors()'s bounded
+    scan can see (MAX_VECTORS_SCAN) — export/erase must say so rather than
+    silently reporting success on a partial sweep."""
+    real_count = mem.namespace_size(namespace) if hasattr(mem, "namespace_size") else -1
+    return real_count < 0 or real_count > seen
+
+
 def export_user_data(mem: Any, session_id: str) -> dict[str, Any]:
     """Everything stored under this session_id: live messages, its archive (if
     any), and any vector tagged with this session_id in meta (Article 15/20).
@@ -206,13 +235,23 @@ def export_user_data(mem: Any, session_id: str) -> dict[str, Any]:
         result["session_pre_bind"] = mem.export_session(session_id)
     result["archive"] = mem.export_namespace(archive_ns) if archive_ns in mem.list_vector_namespaces() else None
     tagged: list[dict[str, Any]] = []
+    truncated_namespaces: list[str] = []
     for ns in mem.list_vector_namespaces():
+        vectors = mem.list_vectors(ns)
+        if _namespace_possibly_truncated(mem, ns, len(vectors)):
+            truncated_namespaces.append(ns)
         if ns == archive_ns:
             continue
-        for vec in mem.list_vectors(ns):
+        for vec in vectors:
             if (vec.get("meta") or {}).get("session_id") == session_id:
                 tagged.append({"namespace": ns, **vec})
     result["tagged_vectors"] = tagged
+    # Not a guarantee every hit came from a truncated namespace — a hint that
+    # this export may be incomplete and worth re-running / investigating,
+    # rather than treating "found nothing more" as proof nothing more exists.
+    result["possibly_incomplete"] = bool(truncated_namespaces)
+    if truncated_namespaces:
+        result["truncated_namespaces"] = truncated_namespaces
     return result
 
 
@@ -220,20 +259,41 @@ def erase_user_data(mem: Any, session_id: str) -> dict[str, Any]:
     """Deletes the live session AND its archive AND every vector tagged with
     this session_id anywhere (Article 17) — unlike a plain /clear, nothing is
     relocated first. Resolves the private vault's storage ids first, so a
-    private session's data is not silently left behind."""
-    store_sid, archive_ns = _resolve_storage_ids(session_id)
-    removed: dict[str, Any] = {"session": False, "archive_namespace": None, "tagged_vectors": 0}
-    mem.clear_session(store_sid)
-    if store_sid != session_id:
-        mem.clear_session(session_id)  # wipe any pre-bind residual too
-    removed["session"] = True
-    if archive_ns in mem.list_vector_namespaces() and mem.delete_namespace(archive_ns):
-        removed["archive_namespace"] = archive_ns
-    for ns in mem.list_vector_namespaces():
-        if ns == archive_ns:
-            continue
-        for vec in list(mem.list_vectors(ns)):
-            if (vec.get("meta") or {}).get("session_id") == session_id:
-                if mem.delete_vector(ns, vec.get("id")):
-                    removed["tagged_vectors"] += 1
-    return removed
+    private session's data is not silently left behind.
+
+    Holds session_lock() for the duration: a concurrent archive_to_memory()
+    call for the same session_id is serialized against this instead of being
+    able to write a fresh archive after the sweep already passed that
+    namespace, which would silently resurrect data this call just reported
+    as removed.
+    """
+    with session_lock(session_id):
+        store_sid, archive_ns = _resolve_storage_ids(session_id)
+        removed: dict[str, Any] = {"session": False, "archive_namespace": None, "tagged_vectors": 0}
+        mem.clear_session(store_sid)
+        if store_sid != session_id:
+            mem.clear_session(session_id)  # wipe any pre-bind residual too
+        removed["session"] = True
+        # delete_namespace() removes the whole namespace regardless of scan
+        # limits (it's a single Redis DEL), so the archive is never at risk
+        # of the truncation delete_vector's per-entry sweep below has.
+        if archive_ns in mem.list_vector_namespaces() and mem.delete_namespace(archive_ns):
+            removed["archive_namespace"] = archive_ns
+        truncated_namespaces: list[str] = []
+        for ns in mem.list_vector_namespaces():
+            if ns == archive_ns:
+                continue
+            vectors = list(mem.list_vectors(ns))
+            if _namespace_possibly_truncated(mem, ns, len(vectors)):
+                truncated_namespaces.append(ns)
+            for vec in vectors:
+                if (vec.get("meta") or {}).get("session_id") == session_id:
+                    if mem.delete_vector(ns, vec.get("id")):
+                        removed["tagged_vectors"] += 1
+        # Article 17 is not satisfied if a namespace's tagged-vector sweep may
+        # have missed entries past the bounded scan — say so instead of
+        # reporting a clean, possibly-false, "fully erased".
+        removed["possibly_incomplete"] = bool(truncated_namespaces)
+        if truncated_namespaces:
+            removed["truncated_namespaces"] = truncated_namespaces
+        return removed

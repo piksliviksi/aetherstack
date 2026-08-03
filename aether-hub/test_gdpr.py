@@ -160,3 +160,84 @@ def test_export_and_erase_resolve_the_private_vault_storage_id(monkeypatch) -> N
     assert removed["archive_namespace"] == archive_ns
     assert mem.get_session(store_sid) == []
     assert mem.list_vectors(archive_ns) == []
+
+
+def test_session_lock_serializes_a_concurrent_archive_write_against_erase() -> None:
+    import threading
+    import time as time_mod
+
+    mem = _mem()
+    mem.append_message("s1", "user", "hello")
+    order: list[str] = []
+    archive_started = threading.Event()
+
+    def slow_archive_write():
+        with gdpr.session_lock("s1"):
+            order.append("archive_start")
+            archive_started.set()
+            time_mod.sleep(0.05)
+            mem.upsert_vector("archived after erase would have run", namespace="archive:s1", meta={"session_id": "s1"})
+            order.append("archive_end")
+
+    t = threading.Thread(target=slow_archive_write)
+    t.start()
+    archive_started.wait(timeout=1)
+    # erase_user_data must block until the archive write releases the lock,
+    # not run concurrently and see a namespace state mid-write.
+    gdpr.erase_user_data(mem, "s1")
+    order.append("erase_done")
+    t.join(timeout=1)
+
+    assert order == ["archive_start", "archive_end", "erase_done"]
+    # the archive written *while holding the lock* is erased too, because
+    # erase only started after the archive released it
+    assert mem.list_vectors("archive:s1") == []
+
+
+class _TruncatedNamespaceMemory:
+    """A memory double whose "notes" namespace claims more real vectors than
+    list_vectors() actually returns — simulates hitting MAX_VECTORS_SCAN."""
+
+    def export_session(self, session_id):
+        return {"session_id": session_id, "messages": []}
+
+    def export_namespace(self, namespace):
+        return {"namespace": namespace, "count": 0, "vectors": []}
+
+    def list_vector_namespaces(self):
+        return ["notes"]
+
+    def list_vectors(self, namespace):
+        return [{"id": "v1", "meta": {}, "text": "only one of many"}]
+
+    def namespace_size(self, namespace):
+        return 9999  # far more than list_vectors() returned
+
+    def clear_session(self, session_id):
+        pass
+
+    def delete_namespace(self, namespace):
+        return False
+
+    def delete_vector(self, namespace, vector_id):
+        return True
+
+
+def test_export_flags_a_namespace_that_may_be_truncated() -> None:
+    export = gdpr.export_user_data(_TruncatedNamespaceMemory(), "s1")
+    assert export["possibly_incomplete"] is True
+    assert export["truncated_namespaces"] == ["notes"]
+
+
+def test_erase_flags_a_namespace_that_may_be_truncated() -> None:
+    removed = gdpr.erase_user_data(_TruncatedNamespaceMemory(), "s1")
+    assert removed["possibly_incomplete"] is True
+    assert removed["truncated_namespaces"] == ["notes"]
+
+
+def test_export_and_erase_do_not_flag_incomplete_when_nothing_is_truncated() -> None:
+    mem = _mem()
+    mem.upsert_vector("just one", namespace="notes", meta={"session_id": "s1"})
+    export = gdpr.export_user_data(mem, "s1")
+    assert export["possibly_incomplete"] is False
+    assert "truncated_namespaces" not in export

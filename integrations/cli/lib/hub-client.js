@@ -5,6 +5,7 @@ const https = require("https");
 const { URL } = require("url");
 
 const DEFAULT_BASE_URL = process.env.AETHERSTACK_HUB_URL || "http://127.0.0.1:8766";
+const DEFAULT_TOKEN = process.env.AETHERSTACK_HUB_TOKEN || "";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const STREAM_TIMEOUT_MS = 20 * 60_000;
 
@@ -12,8 +13,13 @@ function transportFor(url) {
   return url.protocol === "https:" ? https : http;
 }
 
+function authHeaders(token) {
+  const t = token || DEFAULT_TOKEN;
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 /** One JSON request/response — used for everything except the SSE run endpoints. */
-function request(pathname, { method = "GET", body, baseUrl = DEFAULT_BASE_URL, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+function request(pathname, { method = "GET", body, baseUrl = DEFAULT_BASE_URL, token, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     const url = new URL(pathname, baseUrl);
     const payload = body !== undefined ? Buffer.from(JSON.stringify(body)) : undefined;
@@ -23,6 +29,7 @@ function request(pathname, { method = "GET", body, baseUrl = DEFAULT_BASE_URL, t
         method,
         headers: {
           "Content-Type": "application/json",
+          ...authHeaders(token),
           ...(payload ? { "Content-Length": payload.length } : {}),
         },
         timeout: timeoutMs,
@@ -61,7 +68,7 @@ function request(pathname, { method = "GET", body, baseUrl = DEFAULT_BASE_URL, t
  * parsed `data:` chunk. Resolves once the connection closes. Mirrors the SSE
  * framing server.py's _send_sse_event() writes: `data: {...}\n\n`.
  */
-function requestStream(pathname, { body, baseUrl = DEFAULT_BASE_URL, signal } = {}, onEvent) {
+function requestStream(pathname, { body, baseUrl = DEFAULT_BASE_URL, token, signal } = {}, onEvent) {
   return new Promise((resolve, reject) => {
     const url = new URL(pathname, baseUrl);
     const payload = Buffer.from(JSON.stringify(body || {}));
@@ -72,6 +79,7 @@ function requestStream(pathname, { body, baseUrl = DEFAULT_BASE_URL, signal } = 
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
+          ...authHeaders(token),
           "Content-Length": payload.length,
         },
         timeout: STREAM_TIMEOUT_MS,
@@ -82,7 +90,16 @@ function requestStream(pathname, { body, baseUrl = DEFAULT_BASE_URL, signal } = 
           res.on("data", (c) => chunks.push(c));
           res.on("end", () => {
             const text = Buffer.concat(chunks).toString("utf8");
-            reject(new Error(text || `HTTP ${res.statusCode}`));
+            let parsed;
+            try {
+              parsed = text ? JSON.parse(text) : {};
+            } catch {
+              parsed = { error: text };
+            }
+            const err = new Error(parsed.error || `HTTP ${res.statusCode}`);
+            err.status = res.statusCode;
+            err.body = parsed;
+            reject(err);
           });
           return;
         }

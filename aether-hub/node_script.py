@@ -36,9 +36,24 @@ def _fn_not_contains(a: Any, b: Any) -> bool:
     return str(b) not in str(a)
 
 
+MAX_MATCHES_PATTERN_CHARS = 200
+MAX_MATCHES_INPUT_CHARS = 2000
+
+
 def _fn_matches(a: Any, pattern: Any) -> bool:
+    # Python's `re` has no timeout, so a catastrophic-backtracking pattern
+    # (e.g. "(a+)+$") against attacker-influenced text — upstream output can
+    # be up to MAX_STAGE_OUTPUT_CHARS (20k) and node scripts are user-editable,
+    # potentially shared, graph data — can hang the executing thread
+    # indefinitely. Bounding both operands' length caps the worst case;
+    # it does not eliminate it, but keeps a single bad rule from being able
+    # to wedge the hub for an unbounded time.
+    pattern_str = str(pattern)
+    if len(pattern_str) > MAX_MATCHES_PATTERN_CHARS:
+        raise ScriptError(f"matches() pattern exceeds {MAX_MATCHES_PATTERN_CHARS} characters")
+    text = str(a)[:MAX_MATCHES_INPUT_CHARS]
     try:
-        return bool(re.search(str(pattern), str(a)))
+        return bool(re.search(pattern_str, text))
     except re.error as exc:
         raise ScriptError(f"invalid regex in matches(): {exc}") from exc
 
@@ -118,8 +133,18 @@ def _eval_node(node: ast.AST, context: dict[str, Any]) -> Any:
             )
         return context.get(node.id, "")
     if isinstance(node, ast.BoolOp):
-        values = [_eval_node(v, context) for v in node.values]
-        return all(values) if isinstance(node.op, ast.And) else any(values)
+        is_and = isinstance(node.op, ast.And)
+        # Short-circuit: `matches()` can be expensive (see _fn_matches), so an
+        # `and`/`or` must not evaluate every operand regardless of an earlier
+        # one already deciding the result.
+        result = is_and
+        for value_node in node.values:
+            result = bool(_eval_node(value_node, context))
+            if is_and and not result:
+                return False
+            if not is_and and result:
+                return True
+        return result
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
         return not _eval_node(node.operand, context)
     if isinstance(node, ast.Compare):

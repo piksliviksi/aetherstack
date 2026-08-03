@@ -127,3 +127,36 @@ def test_too_many_branches_is_rejected() -> None:
     workers = "\n".join(f"  - label: W{i}\n    prompt: x" for i in range(20))
     with pytest.raises(PresetScriptError, match="more than"):
         preset_script_to_graph(f"workers:\n{workers}\n")
+
+
+def test_a_non_numeric_branches_value_raises_a_clean_script_error_not_a_bare_exception() -> None:
+    # Previously this raised a bare ValueError, which server.py's route only
+    # catches PresetScriptError for - the connection would drop with no
+    # response at all instead of a 400.
+    script = "parallel:\n  - label: Survey\n    branches: three\n    prompt: go\n"
+    with pytest.raises(PresetScriptError, match="branches"):
+        preset_script_to_graph(script)
+
+
+def test_a_non_numeric_worker_parallel_value_raises_a_clean_script_error() -> None:
+    script = "workers:\n  - label: W\n    parallel: not-a-number\n    prompt: go\n"
+    with pytest.raises(PresetScriptError, match="parallel"):
+        preset_script_to_graph(script)
+
+
+def test_branches_above_the_execution_cap_is_clamped_not_silently_wrong() -> None:
+    script = "parallel:\n  - label: Survey\n    branches: 40\n    prompt: go\n"
+    graph = preset_script_to_graph(script)
+    node = next(n for n in graph["nodes"] if n["type"] == "parallel")
+    # graph_exec.py only ever runs MAX_PARALLEL_BRANCHES (8) branches - what's
+    # saved/shown must match what will actually execute.
+    assert node["data"]["parallel"] == 8
+
+
+def test_worker_parallel_round_trips_through_export_and_reimport() -> None:
+    script = "workers:\n  - label: Fan\n    parallel: 4\n    prompt: go\n"
+    graph = preset_script_to_graph(script)
+    exported = graph_to_preset_script(graph)
+    reimported = preset_script_to_graph(exported)
+    worker = next(n for n in reimported["nodes"] if n["type"] == "worker")
+    assert worker["data"]["parallel"] == 4

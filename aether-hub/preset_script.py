@@ -37,10 +37,26 @@ from typing import Any
 import yaml
 
 from graph import empty_graph, new_node
+from graph_exec import MAX_PARALLEL_BRANCHES
 
 SCRIPT_SCHEMA = "aetherstack.preset-script.v1"
 MAX_TEXT_CHARS = 20_000
 MAX_BRANCH_NODES = 12
+
+
+def _parse_positive_int(value: Any, field: str, *, default: int, minimum: int, maximum: int) -> int:
+    """Coerces a script-supplied number, raising a clean PresetScriptError
+    instead of letting a bare ValueError/TypeError escape to the caller —
+    server.py only catches PresetScriptError for this endpoint, so anything
+    else propagates as an unhandled exception and drops the connection with
+    no response at all."""
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise PresetScriptError(f"{field!r} must be a whole number, got {value!r}")
+    return max(minimum, min(maximum, parsed))
 
 
 class PresetScriptError(ValueError):
@@ -109,14 +125,21 @@ def preset_script_to_graph(text: str, graph_id: str | None = None) -> dict[str, 
     for index, entry in enumerate(worker_specs):
         entry = _node_spec(entry, index, "workers")
         node = new_node("worker", 470, y, _agent_data(entry, "builder", "medium", f"Worker {index + 1}"))
-        if entry.get("parallel"):
-            node["data"]["parallel"] = max(1, int(entry["parallel"]))
+        if entry.get("parallel") is not None:
+            node["data"]["parallel"] = _parse_positive_int(
+                entry["parallel"], "workers[].parallel", default=1, minimum=1, maximum=MAX_PARALLEL_BRANCHES
+            )
         branch_nodes.append(node)
         y += 120
     for index, entry in enumerate(parallel_specs):
         entry = _node_spec(entry, index, "parallel")
         data = _agent_data(entry, "builder", "medium", f"Parallel {index + 1}")
-        data["parallel"] = max(2, int(entry.get("branches") or 3))
+        # Clamped to what graph_exec.py will actually run (MAX_PARALLEL_BRANCHES) at
+        # parse time, so what's saved/shown in the tree matches what executes —
+        # previously an unclamped `branches: 40` silently ran as 8 at run time.
+        data["parallel"] = _parse_positive_int(
+            entry.get("branches"), "parallel[].branches", default=3, minimum=2, maximum=MAX_PARALLEL_BRANCHES
+        )
         node = new_node("parallel", 470, y, data)
         branch_nodes.append(node)
         y += 120
@@ -235,7 +258,17 @@ def graph_to_preset_script(graph: dict[str, Any]) -> str:
     if master_nodes:
         out["master"] = _node_to_agent_spec(master_nodes[0])
 
-    workers = [_node_to_agent_spec(n) for n in sorted(by_type.get("worker") or [], key=lambda n: n.get("y", 0))]
+    workers = []
+    for n in sorted(by_type.get("worker") or [], key=lambda n: n.get("y", 0)):
+        entry = _node_to_agent_spec(n)
+        worker_parallel = int((n.get("data") or {}).get("parallel") or 1)
+        if worker_parallel > 1:
+            # Otherwise round-tripping a preset through export/import silently
+            # drops fan-out: a worker with parallel > 1 imported fine (see
+            # preset_script_to_graph), but exporting it back had no field for
+            # this, so a re-import collapsed it to a single branch.
+            entry["parallel"] = worker_parallel
+        workers.append(entry)
     if workers:
         out["workers"] = workers
 

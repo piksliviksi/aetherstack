@@ -120,3 +120,11 @@ def test_normal_mode_uses_the_plain_env_ttl() -> None:
     mem._r = fake
     mem.append_message("s1", "user", "hello")
     assert fake.expire_calls == [604800]
+
+
+def test_namespace_size_reports_the_real_count_local_fallback() -> None:
+    mem = _mem()
+    mem.upsert_vector("a", namespace="ns1")
+    mem.upsert_vector("b", namespace="ns1")
+    assert mem.namespace_size("ns1") == 2
+    assert mem.namespace_size("never-existed") == 0

@@ -36,7 +36,9 @@ aetherstack down       # stop everything when you're done
 (walking up for `docker-compose.yml`); pass `--cwd <path>` to target a
 different one. The Hub itself defaults to `http://127.0.0.1:8766` — point
 elsewhere with `--hub <url>` / `AETHERSTACK_HUB_URL` for `list`/`tree`/`run`/
-etc. once it's up.
+etc. once it's up. If the Hub has `AETHER_REQUIRE_AUTH` set (team/cloud
+mode), pass a bearer token with `--token <tok>` / `AETHERSTACK_HUB_TOKEN` —
+mint one with `POST /api/auth/token` using the platform master key.
 
 ## Interactive menu
 

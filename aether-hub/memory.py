@@ -258,6 +258,17 @@ class MemoryStore:
             self._local_vectors[namespace] = fresh
         return list(fresh)
 
+    def namespace_size(self, namespace: str) -> int:
+        """Real vector count for a namespace (O(1) in Redis via HLEN), independent
+        of _load_vectors's MAX_VECTORS_SCAN cap — used to detect when a sweep
+        (export/erase) may have only seen a truncated subset."""
+        if self._r is not None:
+            try:
+                return int(self._r.hlen(self._vec_key(namespace)))
+            except Exception:
+                return -1  # unknown: caller should treat this as "can't confirm complete"
+        return len(self._local_vectors.get(namespace, []))
+
     def delete_vector(self, namespace: str, vector_id: str) -> bool:
         """Erases one vector by id. Returns True if it existed."""
         if not vector_id:
