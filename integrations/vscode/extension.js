@@ -18,6 +18,7 @@ const {
   checkServices,
   composeDetails,
   composeLogs,
+  detectHostCliBridgeGateways,
   findStackRoot,
   installCliPackage,
   isStackRoot,
@@ -1631,6 +1632,42 @@ async function activate(context) {
     }
   }
 
+  // Native Linux Docker cannot reach a loopback-only host port through
+  // host.docker.internal (Docker Desktop's virtualized networking is what
+  // makes that trick work there). Binding the bridge additionally to
+  // aether-hub's own bridge-network gateway lets the container reach it
+  // without exposing the bearer-token-gated bridge on 0.0.0.0.
+  //
+  // host.docker.internal itself is not a safe substitute even once the extra
+  // listener is bound: on Linux, Docker resolves that name to the default
+  // "bridge" network's gateway (docker0), not to the gateway of whichever
+  // network a given compose project actually attached the container to.
+  // Verified on this host: aether-hub sits on a 172.19.0.0/16 project network,
+  // but host.docker.internal resolves inside it to 172.17.0.1 (docker0) —
+  // nothing listens there. Pointing AETHER_CLI_BRIDGE_URL at the detected
+  // gateway IP directly sidesteps that mismatch entirely.
+  async function syncCliBridgeHosts(root) {
+    if (!root) return;
+    let gateways = [];
+    try {
+      gateways = await detectHostCliBridgeGateways(root);
+    } catch (error) {
+      output.appendLine(`[cli-bridge] gateway detection failed: ${error.message || error}`);
+      return;
+    }
+    for (const gateway of gateways) {
+      try {
+        const result = await cliBridge.addHost(gateway);
+        if (result.added) {
+          output.appendLine(`[cli-bridge] bound additional listener on ${gateway} for container reachability`);
+          process.env.AETHER_CLI_BRIDGE_URL = `http://${gateway}:${cliBridge.port}`;
+        }
+      } catch (error) {
+        output.appendLine(`[cli-bridge] could not bind ${gateway}: ${error.message || error}`);
+      }
+    }
+  }
+
   async function reconcileCliProviders(notify = false) {
     stackRoot = await resolveStackRoot(context, false);
     if (!stackRoot) {
@@ -1639,6 +1676,7 @@ async function activate(context) {
       return { changed: false, reason, aliases: [] };
     }
     try {
+      await syncCliBridgeHosts(stackRoot);
       const result = await reconcileHostCliBridge({ stackRoot, cliBridge, request, runCompose });
       output.appendLine(`[cli-bridge] ${result.reason}${result.aliases.length ? `: ${result.aliases.join(", ")}` : ""}`);
       modelVerificationCache = null;

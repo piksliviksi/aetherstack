@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const test = require("node:test");
 
-const { execFileResult, findStackRoot, installCliPackage, normalizeLocalUiUrl, request, requestStream, responseError, selectAvailableModels, startCompose } = require("../stack-control");
+const { detectHostCliBridgeGateways, execFileResult, findStackRoot, installCliPackage, normalizeLocalUiUrl, request, requestStream, responseError, selectAvailableModels, startCompose } = require("../stack-control");
 
 function makeStackRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aetherstack-cli-install-"));
@@ -22,6 +22,16 @@ test("installCliPackage refuses a directory that isn't an AetherStack checkout",
 test("installCliPackage reports a clear error when integrations/cli is missing", async () => {
   const root = makeStackRoot();
   await assert.rejects(installCliPackage(root), /CLI package not found/);
+});
+
+test("detectHostCliBridgeGateways returns no gateways for a non-AetherStack directory", async () => {
+  const notAStack = fs.mkdtempSync(path.join(os.tmpdir(), "not-a-stack-"));
+  assert.deepEqual(await detectHostCliBridgeGateways(notAStack), []);
+});
+
+test("detectHostCliBridgeGateways returns no gateways when aether-hub isn't running", async () => {
+  const root = makeStackRoot();
+  assert.deepEqual(await detectHostCliBridgeGateways(root), []);
 });
 
 test("command execution streams output without killing a cold pull at the capture limit", async () => {

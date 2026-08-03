@@ -480,6 +480,7 @@ function createCliBridge(options = {}) {
   let reusedServer = false;
   let modelCache = { at: 0, models: {} };
   const quarantinedUntil = new Map();
+  const extraServers = new Map(); // host -> http.Server
 
   async function models(refresh = false) {
     if (reusedServer) return remoteModels(port, token, refresh);
@@ -553,6 +554,27 @@ function createCliBridge(options = {}) {
     token,
     get port() { return port; },
     get host() { return server ? server.address().address : null; },
+    get extraHosts() { return [...extraServers.keys()]; },
+    // Binds one more specific address (e.g. a Docker bridge-network gateway)
+    // without widening the primary loopback-only listener to 0.0.0.0. Safe to
+    // call for an address that's already bound or unreachable on this host —
+    // failures are returned, not thrown, since callers probe speculatively.
+    async addHost(host) {
+      if (!server || !host || host === (server.address() && server.address().address) || extraServers.has(host)) {
+        return { added: false };
+      }
+      const extra = http.createServer((request, response) => { handler(request, response); });
+      try {
+        await new Promise((resolve, reject) => {
+          extra.once("error", reject);
+          extra.listen(port, host, () => resolve());
+        });
+      } catch (error) {
+        return { added: false, error };
+      }
+      extraServers.set(host, extra);
+      return { added: true };
+    },
     async start() {
       if (server) return { port, reused: false };
       server = http.createServer((request, response) => { handler(request, response); });
@@ -594,6 +616,8 @@ function createCliBridge(options = {}) {
       if (server) server.close();
       server = null;
       reusedServer = false;
+      for (const extra of extraServers.values()) extra.close();
+      extraServers.clear();
     },
     models,
   };

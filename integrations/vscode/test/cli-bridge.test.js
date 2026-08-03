@@ -71,6 +71,40 @@ test("default bind is loopback-only when no host is given", async () => {
   }
 });
 
+test("addHost binds an extra listener without widening the primary loopback bind", async () => {
+  const bridge = createCliBridge({ token: "gateway-token", port: 0, host: "127.0.0.1", resolver, runner });
+  const state = await bridge.start();
+  try {
+    assert.equal(bridge.host, "127.0.0.1");
+    const result = await bridge.addHost("127.0.0.2");
+    assert.equal(result.added, true);
+    assert.deepEqual(bridge.extraHosts, ["127.0.0.2"]);
+
+    const response = await fetch(`http://127.0.0.2:${state.port}/health`, {
+      headers: { Authorization: "Bearer gateway-token" },
+    });
+    assert.equal(response.status, 200);
+
+    // Re-adding the same host, or the already-bound primary host, is a no-op.
+    assert.deepEqual(await bridge.addHost("127.0.0.2"), { added: false });
+    assert.deepEqual(await bridge.addHost("127.0.0.1"), { added: false });
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("addHost reports failure instead of throwing for an unbindable address", async () => {
+  const bridge = createCliBridge({ token: "gateway-token", port: 0, host: "127.0.0.1", resolver, runner });
+  await bridge.start();
+  try {
+    const result = await bridge.addHost("203.0.113.1"); // TEST-NET-3, not a local interface
+    assert.equal(result.added, false);
+    assert.ok(result.error);
+  } finally {
+    bridge.stop();
+  }
+});
+
 test("bridge quarantines a provider after a terminal account failure", async () => {
   const bridge = createCliBridge({
     token: "quarantine-token",

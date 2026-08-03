@@ -468,6 +468,38 @@ async function composeLogs(stackRoot, tail = 100) {
   return runCompose(stackRoot, ["logs", "--no-color", "--tail", String(tail)]);
 }
 
+// On native Linux Docker, "host.docker.internal" resolves to the compose
+// network's bridge gateway (e.g. 172.19.0.1), not loopback — a service bound
+// to 127.0.0.1 on the host is unreachable from a container even though the
+// same trick works on Docker Desktop's virtualized networking. Reading the
+// gateway aether-hub itself sees lets a host service opt into exactly that
+// one address instead of every interface (0.0.0.0).
+async function detectHostCliBridgeGateways(stackRoot) {
+  if (!isStackRoot(stackRoot)) return [];
+  let containerId;
+  try {
+    const ps = await runCompose(stackRoot, ["ps", "-q", "aether-hub"]);
+    containerId = ps.stdout.trim().split(/\r?\n/)[0];
+  } catch {
+    return [];
+  }
+  if (!containerId) return [];
+  try {
+    const inspect = await execFileResult(
+      "docker",
+      ["inspect", containerId, "--format", "{{json .NetworkSettings.Networks}}"],
+      { timeout: 15_000 },
+    );
+    const networks = JSON.parse(inspect.stdout.trim() || "{}");
+    const gateways = Object.values(networks)
+      .map((net) => net && net.Gateway)
+      .filter((gateway) => typeof gateway === "string" && gateway.length > 0);
+    return [...new Set(gateways)];
+  } catch {
+    return [];
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -547,6 +579,7 @@ module.exports = {
   responseError,
   composeDetails,
   composeLogs,
+  detectHostCliBridgeGateways,
   execFileResult,
   installCliPackage,
   restartCompose,
