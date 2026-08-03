@@ -356,21 +356,45 @@ fi
 if ! docker info >/dev/null 2>&1; then
   yellow "  Docker daemon not running — trying to start..."
   if [[ "$OS_NAME" == "Darwin" ]]; then
-    # Docker Desktop on macOS
-    open -a Docker 2>/dev/null || true
-    yellow "  Waiting for Docker Desktop..."
+    # macOS has several possible Docker-compatible runtimes; try whichever
+    # one is actually installed instead of assuming Docker Desktop. Colima
+    # and OrbStack are both common Docker Desktop alternatives that leave
+    # `docker` on PATH but require their own daemon/VM to be started first.
+    started_via=""
+    if command -v colima >/dev/null 2>&1; then
+      yellow "  Found Colima — starting it..."
+      colima start >/dev/null 2>&1 || true
+      started_via="Colima"
+    elif [[ -d "/Applications/OrbStack.app" ]]; then
+      yellow "  Found OrbStack — starting it..."
+      open -a OrbStack 2>/dev/null || true
+      started_via="OrbStack"
+    elif [[ -d "/Applications/Rancher Desktop.app" ]]; then
+      yellow "  Found Rancher Desktop — starting it..."
+      open -a "Rancher Desktop" 2>/dev/null || true
+      started_via="Rancher Desktop"
+    else
+      open -a Docker 2>/dev/null || true
+      started_via="Docker Desktop"
+    fi
+    yellow "  Waiting for $started_via..."
     for _ in $(seq 1 30); do
       if docker info >/dev/null 2>&1; then break; fi
       sleep 2
     done
   elif command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl start docker 2>/dev/null || true
-    sleep 2
+    # -n: fail fast instead of blocking on a password prompt when launched
+    # with no TTY (e.g. from the VS Code "Start All Services" button).
+    if sudo -n systemctl start docker 2>/dev/null; then
+      sleep 2
+    else
+      yellow "  Passwordless sudo unavailable — run 'sudo systemctl start docker' in a terminal, then retry."
+    fi
   fi
   if ! docker info >/dev/null 2>&1; then
-    red "  ERROR: cannot reach Docker daemon. Start Docker Desktop / dockerd and retry."
+    red "  ERROR: cannot reach Docker daemon. Start Docker Desktop / Colima / OrbStack / dockerd and retry."
     if [[ "$OS_NAME" == "Darwin" ]]; then
-      yellow "  macOS: open Docker Desktop from Applications, wait until it is Running."
+      yellow "  macOS: open Docker Desktop from Applications (or run 'colima start' / open OrbStack), wait until it is running."
     fi
     exit 1
   fi
@@ -484,7 +508,16 @@ until curl -sf --max-time 2 "$host_ollama_url/api/tags" >/dev/null 2>&1; do
 done
 
 env_ollama_models="$(sed -n 's/^[[:space:]]*AETHER_OLLAMA_MODELS[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '\r' | sed "s/^[\"']//;s/[\"']$//")"
-wanted_models="${AETHER_OLLAMA_MODELS:-${env_ollama_models:-qwen2.5-coder:1.5b,nomic-embed-text}}"
+# local-default (top of every capability's fallback chain in capability_matrix.yaml)
+# is wired to qwen2.5-coder:7b — pull that by default on machines with enough RAM to
+# run it comfortably, so "Start All Services" leaves at least one local model actually
+# healthy. Below that, fall back to the light 1.5b model rather than risk OOM/thrashing.
+default_ollama_models="qwen2.5-coder:1.5b,nomic-embed-text"
+scan_ram_gb="$(python3 -c 'import json; print(json.load(open(".aetherstack/system-scan.json")).get("ram_gb", 0))' 2>/dev/null || echo 0)"
+if awk -v r="$scan_ram_gb" 'BEGIN{exit !(r+0 >= 8)}'; then
+  default_ollama_models="qwen2.5-coder:7b,nomic-embed-text"
+fi
+wanted_models="${AETHER_OLLAMA_MODELS:-${env_ollama_models:-$default_ollama_models}}"
 IFS=',' read -r -a startup_models <<< "$wanted_models"
 for model in "${startup_models[@]}"; do
   model="${model//[[:space:]]/}"

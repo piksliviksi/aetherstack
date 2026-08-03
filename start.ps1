@@ -222,7 +222,18 @@ function Wait-Ollama {
 function Ensure-OllamaModels {
   param([switch]$Container)
   $wanted = if ($env:AETHER_OLLAMA_MODELS) { $env:AETHER_OLLAMA_MODELS } else { Get-DotEnvValue "AETHER_OLLAMA_MODELS" }
-  if (-not $wanted) { $wanted = "qwen2.5-coder:1.5b,nomic-embed-text" }
+  if (-not $wanted) {
+    # local-default (top of every capability's fallback chain in capability_matrix.yaml)
+    # is wired to qwen2.5-coder:7b — pull that by default on machines with enough RAM to
+    # run it comfortably, so "Start All Services" leaves at least one local model actually
+    # healthy. Below that, fall back to the light 1.5b model rather than risk OOM/thrashing.
+    $ramGb = 0
+    $scanPath = Join-Path $Root ".aetherstack\system-scan.json"
+    if (Test-Path $scanPath) {
+      try { $ramGb = (Get-Content -LiteralPath $scanPath -Raw | ConvertFrom-Json).ram_gb } catch {}
+    }
+    $wanted = if ($ramGb -ge 8) { "qwen2.5-coder:7b,nomic-embed-text" } else { "qwen2.5-coder:1.5b,nomic-embed-text" }
+  }
   foreach ($model in @($wanted -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
     Write-Host "  Ensuring Ollama model: $model" -ForegroundColor DarkCyan
     if ($Container) {
