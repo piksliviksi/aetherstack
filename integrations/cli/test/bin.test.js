@@ -221,3 +221,32 @@ test("`aetherstack gdpr erase` prints what was removed", async () => {
   }
   assert.match(lines.join("\n"), /"session": true/);
 });
+
+test("`aetherstack run` prints the answer for a non-streaming (host-CLI) model", async () => {
+  const lines = [];
+  const origLog = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    await withMockedCommands(
+      { runPreset: async () => ({ ok: true, result: { answer: "the real answer", model: "claude-cli" } }) },
+      () => main(["run", "coding", "do it"])
+    );
+  } finally {
+    console.log = origLog;
+  }
+  assert.ok(lines.includes("the real answer"), `expected the answer to be printed, got: ${JSON.stringify(lines)}`);
+});
+
+test("`aetherstack run` exits non-zero when the stream ends with no result", async () => {
+  const errors = [];
+  const origError = console.error;
+  console.error = (line) => errors.push(line);
+  let code;
+  try {
+    code = await withMockedCommands({ runPreset: async () => ({ ok: true, result: null }) }, () => main(["run", "coding", "do it"]));
+  } finally {
+    console.error = origError;
+  }
+  assert.equal(code, 1);
+  assert.match(errors.join("\n"), /ended without a result/);
+});

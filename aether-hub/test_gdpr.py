@@ -133,3 +133,30 @@ def test_erase_user_data_on_a_session_with_nothing_stored_is_a_safe_no_op() -> N
     assert removed["session"] is True
     assert removed["archive_namespace"] is None
     assert removed["tagged_vectors"] == 0
+
+
+def test_export_and_erase_resolve_the_private_vault_storage_id(monkeypatch) -> None:
+    # A private session is stored under a vault-prefixed id/namespace, not the
+    # bare session_id (see privacy.private_session_key / private_archive_ns).
+    # export/erase must resolve that first or they silently miss the data.
+    monkeypatch.setattr(
+        gdpr,
+        "resolve_private_context",
+        lambda session_id=None, **kw: {"private": True, "project_id": "proj-x"},
+    )
+    mem = _mem()
+    store_sid = "private:proj-x:sess-1"
+    archive_ns = "private:proj-x:archive:sess-1"
+    mem.append_message(store_sid, "user", "sensitive private content")
+    mem.upsert_vector("private archive", namespace=archive_ns, meta={"session_id": "sess-1"})
+    # nothing under the bare id — export/erase must not need it to find the data
+    assert mem.get_session("sess-1") == []
+
+    export = gdpr.export_user_data(mem, "sess-1")
+    assert export["session"]["messages"][0]["content"] == "sensitive private content"
+    assert export["archive"]["count"] == 1
+
+    removed = gdpr.erase_user_data(mem, "sess-1")
+    assert removed["archive_namespace"] == archive_ns
+    assert mem.get_session(store_sid) == []
+    assert mem.list_vectors(archive_ns) == []

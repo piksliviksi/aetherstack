@@ -66,3 +66,57 @@ def test_expiry_is_exercised_through_search_too() -> None:
     mem.upsert_vector("old and gone", namespace="ns1", ttl_seconds=-1)
     result = mem.search("gone", namespace="ns1")
     assert result["hits"] == []
+
+
+class _FakeRedis:
+    """Records the TTL append_message actually asks Redis to set."""
+
+    def __init__(self):
+        self.expire_calls = []
+
+    def rpush(self, key, value):
+        pass
+
+    def ltrim(self, key, start, end):
+        pass
+
+    def expire(self, key, ttl):
+        self.expire_calls.append(ttl)
+
+
+def test_gdpr_mode_shortens_the_session_ttl_when_retention_is_stricter(monkeypatch) -> None:
+    import gdpr
+
+    monkeypatch.setattr(gdpr, "GDPR_SETTINGS_FILE", Path("/tmp/does-not-exist-gdpr-settings.json"))
+    gdpr.set_settings({"enabled": True, "retention_days": 1})
+    try:
+        mem = _mem()
+        fake = _FakeRedis()
+        mem._r = fake
+        mem.append_message("s1", "user", "hello")
+        assert fake.expire_calls == [1 * 86400]
+    finally:
+        gdpr.set_settings({"enabled": False})
+
+
+def test_gdpr_mode_does_not_lengthen_the_session_ttl_past_the_env_ceiling(monkeypatch) -> None:
+    import gdpr
+
+    monkeypatch.setattr(gdpr, "GDPR_SETTINGS_FILE", Path("/tmp/does-not-exist-gdpr-settings.json"))
+    gdpr.set_settings({"enabled": True, "retention_days": 3650})  # far longer than the 7d default
+    try:
+        mem = _mem()
+        fake = _FakeRedis()
+        mem._r = fake
+        mem.append_message("s1", "user", "hello")
+        assert fake.expire_calls == [604800]  # unchanged 7d default, not lengthened
+    finally:
+        gdpr.set_settings({"enabled": False})
+
+
+def test_normal_mode_uses_the_plain_env_ttl() -> None:
+    mem = _mem()
+    fake = _FakeRedis()
+    mem._r = fake
+    mem.append_message("s1", "user", "hello")
+    assert fake.expire_calls == [604800]

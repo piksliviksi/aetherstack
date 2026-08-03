@@ -85,6 +85,15 @@ class MemoryStore:
             # keep last 200 messages
             self._r.ltrim(key, -200, -1)
             ttl = int(os.environ.get("AETHER_SESSION_TTL_SEC", "604800"))  # 7d
+            try:
+                # GDPR mode's configured retention can only shorten this TTL,
+                # never lengthen it past the operator's own env-set ceiling.
+                import gdpr  # local import: memory.py must stay importable standalone
+
+                if gdpr.is_enabled():
+                    ttl = min(ttl, gdpr.retention_seconds())
+            except Exception:
+                pass
             self._r.expire(key, ttl)
         else:
             self._local_sessions.setdefault(session_id, []).append(msg)

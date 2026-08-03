@@ -9,7 +9,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402
 
+import gdpr  # noqa: E402
 from graph_exec import MAX_STAGE_OUTPUT_CHARS, _join_upstream_blocks, execute_graph  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def isolate_gdpr_settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(gdpr, "GDPR_SETTINGS_FILE", tmp_path / "gdpr_settings.json")
+    gdpr._consented_sessions.clear()
+    yield
+    gdpr._consented_sessions.clear()
 
 
 class FakeMemory:
@@ -25,8 +34,8 @@ class FakeMemory:
         self.searched.append({"query": query, "namespace": namespace})
         return {"hits": self.hits}
 
-    def upsert_vector(self, text, namespace="default", meta=None, id=None, embedding=None):
-        self.written.append({"text": text, "namespace": namespace, "meta": meta or {}})
+    def upsert_vector(self, text, namespace="default", meta=None, id=None, embedding=None, ttl_seconds=None):
+        self.written.append({"text": text, "namespace": namespace, "meta": meta or {}, "ttl_seconds": ttl_seconds})
         return {"id": f"vec-{len(self.written)}", "namespace": namespace, "dim": 3}
 
     def append_message(self, session_id, role, content, meta=None):
@@ -377,3 +386,87 @@ def test_a_broken_node_script_fails_only_its_own_stage() -> None:
     assert result["ok"] is True
     worker_step = next(s for s in result["steps"] if s.get("stage_id") == "w1")
     assert "script error" in (worker_step.get("error") or "")
+
+
+def test_gdpr_mode_blocks_a_graph_stage_from_resolving_to_a_cloud_model() -> None:
+    gdpr.set_settings({"enabled": True, "require_cloud_consent": True})
+    calls = []
+    result = execute_graph(
+        _graph(with_memory=False),
+        _snapshot(),
+        {"goal": "build the thing"},
+        completion=_completion(calls),
+        session_id="gdpr-graph-test",
+    )
+    # The master stage is pinned to claude-cli (subscription/cloud), but with
+    # consent missing _pick_for_stage's own fallback scoring picks the next
+    # best *available* candidate - local-default is still in `needs`' overlap
+    # (chat) even though it lacks "reason" - so the run still completes, just
+    # without ever calling the blocked cloud model.
+    assert result["ok"] is True
+    models_called = {c["model"] for c in calls}
+    assert "claude-cli" not in models_called
+    assert models_called == {"local-default"}
+
+
+def test_gdpr_mode_allows_the_cloud_model_once_consent_is_recorded() -> None:
+    gdpr.set_settings({"enabled": True, "require_cloud_consent": True})
+    gdpr.record_consent("gdpr-graph-test")
+    calls = []
+    result = execute_graph(
+        _graph(with_memory=False),
+        _snapshot(),
+        {"goal": "build the thing"},
+        completion=_completion(calls),
+        session_id="gdpr-graph-test",
+    )
+    assert result["ok"] is True
+    assert "claude-cli" in [c["model"] for c in calls]
+
+
+def test_node_script_set_model_is_rejected_when_gdpr_blocks_the_target() -> None:
+    gdpr.set_settings({"enabled": True, "require_cloud_consent": True})
+    graph = _graph(with_memory=False)
+    # Master resolves locally so the worker actually gets to run; only the
+    # worker's script tries (and should fail) to force a blocked cloud model.
+    graph["nodes"][1]["data"]["model"] = "local-default"
+    graph["nodes"][2]["data"]["script"] = 'rules:\n  - if: true\n    then: { set_model: claude-cli }\n'
+    result = execute_graph(
+        graph,
+        _snapshot(),
+        {"goal": "build the thing"},
+        completion=_completion([]),
+        session_id="gdpr-graph-test-2",
+    )
+    worker_step = next(s for s in result["steps"] if s.get("stage_id") == "w1")
+    assert "not an available model" in (worker_step.get("error") or "")
+
+
+def test_memory_node_writes_get_an_expiring_ttl_and_session_id_tag_under_gdpr_mode() -> None:
+    gdpr.set_settings({"enabled": True, "retention_days": 14})
+    memory = FakeMemory()
+    execute_graph(
+        _graph(with_memory=True),
+        _snapshot(),
+        {"goal": "build the thing"},
+        completion=_completion([]),
+        memory=memory,
+        session_id="gdpr-retention-test",
+    )
+    assert memory.written, "expected the Memory store node to write"
+    write = memory.written[0]
+    assert write["ttl_seconds"] == 14 * 86400
+    assert write["meta"]["session_id"] == "gdpr-retention-test"
+
+
+def test_memory_node_writes_have_no_ttl_when_gdpr_mode_is_off() -> None:
+    memory = FakeMemory()
+    execute_graph(
+        _graph(with_memory=True),
+        _snapshot(),
+        {"goal": "build the thing"},
+        completion=_completion([]),
+        memory=memory,
+        session_id="normal-test",
+    )
+    assert memory.written and memory.written[0]["ttl_seconds"] is None

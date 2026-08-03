@@ -2128,6 +2128,10 @@ def execute_service(
             raise RunCancelled("run cancelled")
 
     _emit_status(on_status, "planning", label="Planning…")
+    # Named presets share Auto's cloud-consent gate: without this, GDPR mode
+    # would only protect Auto while a named preset (or the node canvas, see
+    # graph_exec.py) could still resolve straight to a cloud/subscription model.
+    snapshot = gdpr.filter_snapshot_for_consent(snapshot, session_id)
     plan = plan_service(service_id, snapshot, event)
     activation = _activate_resolved_service(plan["service"], event)
     calls = plan.get("litellm_calls") or []

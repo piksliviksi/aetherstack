@@ -18,6 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+import gdpr
 from graph import graph_to_pipeline
 from memory import MemoryStore
 from node_script import ScriptError, run_script
@@ -119,11 +120,13 @@ def _memory_writes(
     memory_ops: list[dict[str, Any]],
     goal: str,
     answer: str,
+    session_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run every `store` Memory node against the shared pool."""
     if memory is None or not answer:
         return []
     written: list[dict[str, Any]] = []
+    ttl_seconds = gdpr.retention_seconds() if gdpr.is_enabled() else None
     for op in memory_ops:
         if op.get("action") != "store":
             continue
@@ -131,7 +134,12 @@ def _memory_writes(
             result = memory.upsert_vector(
                 f"Goal: {goal}\n\n{answer}"[:MAX_STAGE_OUTPUT_CHARS],
                 namespace=op.get("namespace") or "default",
-                meta={"source": "graph", "scope": op.get("scope"), "node_id": op.get("node_id")},
+                # session_id in meta is what makes this findable/erasable by
+                # gdpr.export_user_data/erase_user_data's tagged-vector sweep -
+                # without it, a graph's memory-node writes are invisible to
+                # both Article 15 export and Article 17 erasure.
+                meta={"source": "graph", "scope": op.get("scope"), "node_id": op.get("node_id"), "session_id": session_id},
+                ttl_seconds=ttl_seconds,
             )
             written.append({"node_id": op.get("node_id"), **result})
         except Exception as exc:  # a full pool must not lose the answer
@@ -255,6 +263,10 @@ def execute_graph(
     if any(stage.get("workspace_write") for stage in stages) and not event.get("_workspace_write_authorized"):
         raise PermissionError("workspace-write execution requires trusted local authorization")
 
+    # Same cloud-consent gate execute_auto/execute_service apply — a graph run
+    # (canvas or a scripted preset) must not be a way around GDPR mode.
+    snapshot = gdpr.filter_snapshot_for_consent(snapshot, session_id)
+
     memory_ops = pipe.get("memory_ops") or []
     completion = completion or _chat_completion
     started = time.time()
@@ -361,6 +373,22 @@ def execute_graph(
                 _emit(on_status, "stage_done", stage_id=stage_id, label=f"{label} · skipped by script")
                 continue
             if actions.get("set_model"):
+                forced_meta = (snapshot.get("models") or {}).get(actions["set_model"])
+                if not forced_meta or not forced_meta.get("available"):
+                    # Reject rather than silently ignore: a script forcing an
+                    # unavailable/consent-gated model is a config error the
+                    # author should see, not a quiet fallback to the original pick.
+                    steps.append(
+                        {
+                            "stage_id": stage_id,
+                            "label": label,
+                            "role": stage.get("role"),
+                            "model": branches[0]["model"],
+                            "error": f"script error: set_model {actions['set_model']!r} is not an available model",
+                        }
+                    )
+                    _emit(on_status, "stage_error", stage_id=stage_id, label=label)
+                    continue
                 # Collapses to a single branch: a script-forced model choice is
                 # an explicit override, not one candidate among several.
                 branches = [{**branches[0], "model": actions["set_model"]}]
@@ -473,7 +501,7 @@ def execute_graph(
 
     _check_cancelled()
     _emit(on_status, "memory_write", label="Writing shared memory…")
-    written = _memory_writes(memory, memory_ops, goal, answer)
+    written = _memory_writes(memory, memory_ops, goal, answer, session_id=session_id)
     if memory is not None and session_id:
         # Same pool Auto mode reads, so a later model resumes this work.
         try:

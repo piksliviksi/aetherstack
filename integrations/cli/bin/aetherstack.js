@@ -139,11 +139,13 @@ async function main(argv) {
     let goal = rest.slice(1).join(" ").trim();
     if (!goal) goal = (await readStdin()).trim();
     if (!goal) throw new Error("no goal given (pass it as an argument or pipe it on stdin)");
+    let streamed = false;
     const result = await commands.runPreset(client, id, goal, {
       onEvent: (event) => {
         if (event.type === "status") {
           process.stderr.write(`… ${[event.phase, event.label].filter(Boolean).join(" — ")}\n`);
         } else if (event.type === "delta" && event.text && !flags.json) {
+          streamed = true;
           process.stdout.write(event.text);
         }
       },
@@ -152,11 +154,18 @@ async function main(argv) {
       console.error("[cancelled]");
       return 1;
     }
+    if (!result.result) {
+      // The stream ended without a "done" event (e.g. the hub crashed mid-run) —
+      // this is a failure, not a quiet success with nothing to show.
+      console.error("Error: run ended without a result");
+      return 1;
+    }
     if (flags.json) {
       console.log(JSON.stringify(result.result, null, 2));
-    } else if (!result.result?.answer) {
-      // Nothing streamed as delta (host-CLI models don't stream) — print now.
-      console.log(result.result?.answer || "(no answer)");
+    } else if (!streamed) {
+      // Host-CLI models don't stream deltas (services.py disables on_delta for
+      // them) — nothing was printed as it happened, so print the answer now.
+      console.log(result.result.answer || "(no answer)");
     } else {
       console.log("");
     }

@@ -13,6 +13,7 @@ REPO = Path(__file__).resolve().parents[1]
 HUB = REPO / "aether-hub"
 sys.path.insert(0, str(HUB))
 
+import gdpr  # noqa: E402
 import services  # noqa: E402
 import matrix  # noqa: E402
 import openai_gateway  # noqa: E402
@@ -674,6 +675,35 @@ class DynamicServiceTests(unittest.TestCase):
         )
         self.assertTrue(result["ok"])
         self.assertGreaterEqual(attempts, 3)  # lead retry plus final synthesis
+
+    def test_gdpr_mode_keeps_a_named_preset_on_local_models_without_consent(self) -> None:
+        original_file = gdpr.GDPR_SETTINGS_FILE
+        tmp_dir = tempfile.mkdtemp()
+        gdpr.GDPR_SETTINGS_FILE = Path(tmp_dir) / "gdpr_settings.json"
+        gdpr._consented_sessions.clear()
+        try:
+            gdpr.set_settings({"enabled": True, "require_cloud_consent": True})
+            calls: list[str] = []
+
+            def completion(call: dict, messages: list[dict] | None = None) -> dict:
+                calls.append(call["model"])
+                return {"model": call["model"], "content": "recovered locally", "usage": {}}
+
+            result = services.execute_service(
+                "coding",
+                snapshot(),
+                {"goal": "Implement a helper", "verify": False, "agent_budget": "minimal"},
+                completion=completion,
+                session_id="gdpr-service-test",
+            )
+            self.assertTrue(result["ok"])
+            self.assertTrue(calls, "expected the service to still resolve using local models")
+            self.assertNotIn("reason-pro", calls)
+            self.assertNotIn("vision-pro", calls)
+            self.assertNotIn("budget-chat", calls)
+        finally:
+            gdpr.GDPR_SETTINGS_FILE = original_file
+            gdpr._consented_sessions.clear()
 
     def test_intent_only_final_synthesis_is_replaced_before_success(self) -> None:
         final_attempts = 0

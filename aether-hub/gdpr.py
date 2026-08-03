@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from privacy import private_archive_ns, private_session_key, resolve_private_context
+
 ROOT = Path(__file__).resolve().parent.parent
 GDPR_SETTINGS_FILE = Path(
     os.environ.get("AETHER_GDPR_SETTINGS_FILE", str(ROOT / "data" / "gdpr_settings.json"))
@@ -153,14 +155,55 @@ def cloud_dispatch_allowed(session_id: str | None) -> bool:
     return has_consent(session_id or "")
 
 
+def filter_snapshot_for_consent(snapshot: dict[str, Any], session_id: str | None) -> dict[str, Any]:
+    """Applies cloud_dispatch_allowed() to an entire model snapshot: when consent
+    is missing, every non-local model is marked unavailable so every resolution
+    path (named presets, node-graph stages, Auto) sees the same restricted view
+    instead of each needing its own session-aware gate."""
+    if cloud_dispatch_allowed(session_id):
+        return snapshot
+    models = snapshot.get("models") or {}
+    filtered = {
+        alias: (
+            meta
+            if meta.get("tier") == "local"
+            else {**meta, "available": False, "availability_reason": "gdpr_consent_required"}
+        )
+        for alias, meta in models.items()
+    }
+    return {**snapshot, "models": filtered}
+
+
 # ── export / erase ────────────────────────────────────────────────────
+
+def _resolve_storage_ids(session_id: str) -> tuple[str, str]:
+    """(store_sid, archive_ns) for this session — private sessions are stored
+    under a vault-prefixed id/namespace, not the bare session_id (see
+    slash_commands.cmd_clear, which applies this same resolution). Getting
+    this wrong means export/erase silently miss a private session entirely."""
+    ctx = resolve_private_context(session_id=session_id)
+    if ctx.get("private"):
+        store_sid = private_session_key(session_id, ctx.get("project_id"))
+        archive_ns = private_archive_ns(session_id, ctx.get("project_id"))
+    else:
+        store_sid = session_id
+        archive_ns = f"archive:{session_id}"
+    return store_sid, archive_ns
+
 
 def export_user_data(mem: Any, session_id: str) -> dict[str, Any]:
     """Everything stored under this session_id: live messages, its archive (if
-    any), and any vector tagged with this session_id in meta (Article 15/20)."""
+    any), and any vector tagged with this session_id in meta (Article 15/20).
+    Resolves the private vault's storage ids first, so a private session's
+    data is not silently omitted."""
+    store_sid, archive_ns = _resolve_storage_ids(session_id)
     result: dict[str, Any] = {"session_id": session_id, "exported_at": time.time()}
-    result["session"] = mem.export_session(session_id)
-    archive_ns = f"archive:{session_id}"
+    result["session"] = mem.export_session(store_sid)
+    if store_sid != session_id:
+        # A private session may also have residual messages under the bare
+        # id from before it was bound to the vault (see cmd_clear's handling
+        # of the same case) — include them rather than silently dropping them.
+        result["session_pre_bind"] = mem.export_session(session_id)
     result["archive"] = mem.export_namespace(archive_ns) if archive_ns in mem.list_vector_namespaces() else None
     tagged: list[dict[str, Any]] = []
     for ns in mem.list_vector_namespaces():
@@ -176,11 +219,14 @@ def export_user_data(mem: Any, session_id: str) -> dict[str, Any]:
 def erase_user_data(mem: Any, session_id: str) -> dict[str, Any]:
     """Deletes the live session AND its archive AND every vector tagged with
     this session_id anywhere (Article 17) — unlike a plain /clear, nothing is
-    relocated first."""
+    relocated first. Resolves the private vault's storage ids first, so a
+    private session's data is not silently left behind."""
+    store_sid, archive_ns = _resolve_storage_ids(session_id)
     removed: dict[str, Any] = {"session": False, "archive_namespace": None, "tagged_vectors": 0}
-    mem.clear_session(session_id)
+    mem.clear_session(store_sid)
+    if store_sid != session_id:
+        mem.clear_session(session_id)  # wipe any pre-bind residual too
     removed["session"] = True
-    archive_ns = f"archive:{session_id}"
     if archive_ns in mem.list_vector_namespaces() and mem.delete_namespace(archive_ns):
         removed["archive_namespace"] = archive_ns
     for ns in mem.list_vector_namespaces():
