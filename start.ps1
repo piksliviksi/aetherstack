@@ -101,6 +101,17 @@ function Install-DockerDesktop {
   return $true
 }
 
+function Test-DockerReady {
+  # A native command writing to stderr under $ErrorActionPreference='Stop' is a
+  # terminating error, and redirecting (2>) is what makes PowerShell capture it.
+  # Keep it non-fatal here so callers can act on the exit code - otherwise the
+  # very first probe aborts the script whenever the daemon is down, which is
+  # exactly when the auto-start below needs to run.
+  $ErrorActionPreference = "Continue"
+  docker info 2>&1 | Out-Null
+  return $LASTEXITCODE -eq 0
+}
+
 function Ensure-Docker {
   $docker = Get-Command docker -ErrorAction SilentlyContinue
   if (-not $docker) {
@@ -118,8 +129,7 @@ function Ensure-Docker {
     }
   }
 
-  docker info 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { return }
+  if (Test-DockerReady) { return }
 
   Write-Host "  Starting Docker Desktop..." -ForegroundColor Yellow
   $candidates = @(
@@ -135,8 +145,7 @@ function Ensure-Docker {
 
   for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Seconds 3
-    docker info 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-DockerReady) {
       Write-Host "  Docker is ready." -ForegroundColor Green
       return
     }
@@ -240,6 +249,9 @@ function Ensure-OllamaModels {
       docker compose --profile with-ollama-container exec -T ollama ollama pull $model
       if ($LASTEXITCODE -ne 0) { throw "Ollama model pull failed: $model" }
     } elseif (Get-Command ollama -ErrorAction SilentlyContinue) {
+      # Point the CLI at the endpoint we already probed - its own default is
+      # 127.0.0.1:11434, which is the one address the server may not be on.
+      $env:OLLAMA_HOST = $script:HostOllamaUrl
       & ollama pull $model
       if ($LASTEXITCODE -ne 0) { throw "Ollama model pull failed: $model" }
     } elseif (Get-Command curl.exe -ErrorAction SilentlyContinue) {
@@ -286,12 +298,63 @@ function Wait-CoreServices {
   throw "Services did not become ready: $($pending -join ', '). Run docker compose ps and docker compose logs."
 }
 
+function Start-CliBridge {
+  # Host CLI subscriptions (Codex, Claude Code, Grok) are reachable by the Hub
+  # and LiteLLM only while a bridge server is running. start.sh starts one; on
+  # Windows nothing did, so a plain start.bat run left those models invisible
+  # unless the VSCode extension happened to be open with its own bridge. This
+  # mirrors the start.sh block. Best-effort: skip quietly if Node is absent.
+  $stateDir = Join-Path $Root ".aetherstack"
+  if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
+  $pidFile = Join-Path $stateDir "cli-bridge.pid"
+  $logFile = Join-Path $stateDir "cli-bridge.log"
+  $errFile = Join-Path $stateDir "cli-bridge.err"
+
+  if (Test-Path $pidFile) {
+    $old = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ("$old" -match '^\d+$') { Stop-Process -Id ([int]$old) -Force -ErrorAction SilentlyContinue }
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+  }
+
+  if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Host "  Node.js not found - skipping host CLI detection (Codex/Claude/Grok)." -ForegroundColor Yellow
+    return
+  }
+
+  Write-Host "  Detecting host CLI subscriptions (Codex, Claude Code, Grok)..." -ForegroundColor Cyan
+  if (-not $env:AETHER_CLI_BRIDGE_TOKEN) {
+    $bytes = New-Object byte[] 32
+    $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    $env:AETHER_CLI_BRIDGE_TOKEN = -join ($bytes | ForEach-Object { $_.ToString("x2") })
+  }
+  if (-not $env:AETHER_CLI_BRIDGE_URL) { $env:AETHER_CLI_BRIDGE_URL = "http://host.docker.internal:8767" }
+  $env:AETHER_STACK_ROOT = $Root
+
+  $daemon = Join-Path $Root "scripts\cli-bridge-daemon.js"
+  $proc = Start-Process -FilePath "node" -ArgumentList "`"$daemon`"" -WindowStyle Hidden -PassThru `
+    -RedirectStandardOutput $logFile -RedirectStandardError $errFile
+  Set-Content -LiteralPath $pidFile -Value $proc.Id
+  Start-Sleep -Seconds 2
+
+  $log = if (Test-Path $logFile) { (Get-Content -LiteralPath $logFile -Raw) } else { "" }
+  if ($log) { ($log.TrimEnd() -split "`r?`n") | ForEach-Object { Write-Host "  $_" } }
+  if ($log -match 'status=reused') {
+    # Another bridge (the extension's, keyed by its own SecretStorage token)
+    # already owns the port. Ours would never match, so do not hand it to
+    # compose - that owner reconciles its own token with the Hub.
+    $env:AETHER_CLI_BRIDGE_TOKEN = ""
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
 Write-Banner
 Ensure-EnvFile
 Ensure-MasterKey
 $script:HostOllamaUrl = Get-HostOllamaUrl
 Ensure-Docker
 Invoke-SystemScan
+Start-CliBridge
 
 Write-Host "  Starting containers (Open WebUI, LiteLLM, Redis, Hub)..." -ForegroundColor Cyan
 $foundHostOllama = Find-HostOllama
