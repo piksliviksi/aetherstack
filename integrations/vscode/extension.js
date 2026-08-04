@@ -1485,11 +1485,16 @@ async function activate(context) {
     await context.secrets.store("aetherstack.cliBridgeToken", bridgeToken);
   }
   process.env.AETHER_CLI_BRIDGE_TOKEN = bridgeToken;
-  process.env.AETHER_CLI_BRIDGE_URL = "http://host.docker.internal:8767";
   try {
     const bridgeState = await cliBridge.start();
+    // Pass the exact bound port to compose/Hub — free-port fallback means this
+    // is not always the documented default 8767.
+    process.env.AETHER_CLI_BRIDGE_PORT = String(bridgeState.port);
+    process.env.AETHER_CLI_BRIDGE_URL = `http://host.docker.internal:${bridgeState.port}`;
     output.appendLine(`[cli-bridge] ${bridgeState.reused ? "reusing existing" : "started"} host bridge on port ${bridgeState.port}`);
   } catch (error) {
+    delete process.env.AETHER_CLI_BRIDGE_PORT;
+    delete process.env.AETHER_CLI_BRIDGE_URL;
     output.appendLine(`[cli-bridge] unavailable: ${error.message || error}`);
   }
   context.subscriptions.push(new vscode.Disposable(() => cliBridge.stop()));

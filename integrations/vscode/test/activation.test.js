@@ -85,9 +85,15 @@ test("one-button startup delegates to the platform bootstrap scripts", () => {
   assert.match(compose, /RAG_EMBEDDING_ENGINE=ollama/);
   assert.match(compose, /RAG_EMBEDDING_MODEL=nomic-embed-text/);
   assert.doesNotMatch(compose, /container_name:/);
-  assert.match(fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.ps1"), "utf8"), /Select-FallbackOllamaPort/);
+  const winStart = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.ps1"), "utf8");
+  assert.match(winStart, /Select-FallbackOllamaPort/);
+  assert.match(winStart, /Select-CliBridgePort/);
+  // Windows Hyper-V reserves 8768-8867; the bridge must not walk that ladder.
+  assert.doesNotMatch(winStart, /8768,\s*8769,\s*8770/);
   const unixStart = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.sh"), "utf8");
   assert.match(unixStart, /select_fallback_port/);
+  assert.match(unixStart, /select_cli_bridge_port/);
+  assert.doesNotMatch(unixStart, /8768 8769 8770 8771 8772 8773 8774 8775 8776 8777/);
   assert.match(unixStart, /start_macos_host_ollama/);
   assert.match(unixStart, /Ollama-darwin\.zip/);
   assert.match(unixStart, /codesign --verify --deep --strict/);
@@ -255,6 +261,9 @@ test("extension activates and registers lifecycle/control commands", async () =>
     assert.ok(chatViewProvider);
     assert.equal(typeof chatViewProvider.resolveWebviewView, "function");
     assert.equal(cliBridgeStarted, true);
+    assert.equal(process.env.AETHER_CLI_BRIDGE_URL, "http://host.docker.internal:8767");
+    assert.equal(process.env.AETHER_CLI_BRIDGE_PORT, "8767");
+    assert.equal(process.env.AETHER_CLI_BRIDGE_TOKEN, "test-token");
     const roots = treeProvider.getChildren();
     assert.ok(roots.some((item) => String(item.label).includes("Open AetherStack Chat")));
     assert.ok(roots.some((item) => String(item.label).includes("AetherStack has service errors")));
@@ -276,5 +285,8 @@ test("extension activates and registers lifecycle/control commands", async () =>
     Module._load = originalLoad;
     for (const disposable of subscriptions.reverse()) disposable.dispose?.();
     delete require.cache[require.resolve("../extension")];
+    delete process.env.AETHER_CLI_BRIDGE_URL;
+    delete process.env.AETHER_CLI_BRIDGE_PORT;
+    delete process.env.AETHER_CLI_BRIDGE_TOKEN;
   }
 });

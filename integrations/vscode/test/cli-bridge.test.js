@@ -140,6 +140,35 @@ test("reusing a port with a mismatched token fails fast instead of reporting suc
   }
 });
 
+test("default port selection falls back when 8767 is owned by a foreign token", async () => {
+  const { DEFAULT_PORT, FALLBACK_PORTS } = require("../cli-bridge");
+  // Pin the foreign bridge on the documented default so free-port selection must leave it.
+  const foreign = createCliBridge({ token: "foreign-token", port: DEFAULT_PORT, host: "127.0.0.1", resolver, runner });
+  try {
+    await foreign.start();
+  } catch (error) {
+    // If the OS forbids 8767 (rare) or something else owns it without our probe, skip.
+    if (/forbidden|EADDRINUSE|rejected this token|did not respond/i.test(String(error.message || error))) {
+      return;
+    }
+    throw error;
+  }
+  const own = createCliBridge({ token: "own-token", host: "127.0.0.1", resolver, runner });
+  try {
+    const state = await own.start();
+    assert.equal(state.reused, false);
+    assert.notEqual(state.port, DEFAULT_PORT);
+    assert.ok(FALLBACK_PORTS.includes(state.port), `expected a FALLBACK_PORTS entry, got ${state.port}`);
+    const health = await fetch(`http://127.0.0.1:${state.port}/health`, {
+      headers: { Authorization: "Bearer own-token" },
+    });
+    assert.equal(health.status, 200);
+  } finally {
+    own.stop();
+    foreign.stop();
+  }
+});
+
 test("prompt conversion drops system turns and enforces its bound", () => {
   const prompt = promptFromMessages([{ role: "system", content: "rules" }, { role: "user", content: "x".repeat(120_000) }]);
   assert.ok(prompt.length <= 100_000);

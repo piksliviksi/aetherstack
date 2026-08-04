@@ -179,21 +179,6 @@ function Find-HostOllama {
   return $null
 }
 
-function Set-DotEnvValue([string]$Name, [string]$Value) {
-  $path = Join-Path $Root ".env"
-  $lines = if (Test-Path $path) { @(Get-Content -LiteralPath $path) } else { @() }
-  $found = $false
-  $next = foreach ($line in $lines) {
-    if ($line -match "^\s*$([regex]::Escape($Name))\s*=") {
-      if (-not $found) { "$Name=$Value" }
-      $found = $true
-    } else { $line }
-  }
-  if (-not $found) { $next += "$Name=$Value" }
-  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllLines($path, [string[]]$next, $utf8NoBom)
-}
-
 function Test-LocalPortAvailable([int]$Port) {
   $listener = $null
   try {
@@ -217,6 +202,24 @@ function Select-FallbackOllamaPort {
     if ($port -ge 1024 -and $port -le 65535 -and (Test-LocalPortAvailable $port)) { return $port }
   }
   throw "No free loopback port is available for the bundled Ollama fallback (tried 11434 and 11436-11444)."
+}
+
+function Select-CliBridgePort {
+  # Prefer the documented default (8767). Do NOT walk 8768-8777: on Windows
+  # Hyper-V/WSL commonly reserves 8768-8867 (and often the next 100-port block),
+  # so that ladder is all EACCES when 8767 is taken. Probe-bind instead, using
+  # candidates outside the usual exclusion bands.
+  $configured = if ($env:AETHER_CLI_BRIDGE_PORT) { $env:AETHER_CLI_BRIDGE_PORT } else { Get-DotEnvValue "AETHER_CLI_BRIDGE_PORT" }
+  $candidates = @(
+    $configured, 8767,
+    9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010,
+    18765, 18766, 18767, 18768, 18769, 18770
+  ) | Where-Object { $_ -and "$_" -match '^\d+$' } | Select-Object -Unique
+  foreach ($candidate in $candidates) {
+    $port = [int]$candidate
+    if ($port -ge 1024 -and $port -le 65535 -and (Test-LocalPortAvailable $port)) { return $port }
+  }
+  throw "No free loopback port is available for the host CLI bridge (tried 8767, 9001-9010, 18765-18770)."
 }
 
 function Wait-Ollama {
@@ -328,7 +331,19 @@ function Start-CliBridge {
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     $env:AETHER_CLI_BRIDGE_TOKEN = -join ($bytes | ForEach-Object { $_.ToString("x2") })
   }
-  if (-not $env:AETHER_CLI_BRIDGE_URL) { $env:AETHER_CLI_BRIDGE_URL = "http://host.docker.internal:8767" }
+
+  try {
+    $bridgePort = Select-CliBridgePort
+  } catch {
+    Write-Host "  $_" -ForegroundColor Yellow
+    Write-Host "  Skipping host CLI bridge (Codex/Claude/Grok will be unavailable until a free port opens)." -ForegroundColor Yellow
+    return
+  }
+  if ($bridgePort -ne 8767 -and "$env:AETHER_CLI_BRIDGE_PORT" -ne "$bridgePort") {
+    Write-Host "  Port 8767 is unavailable; using CLI bridge port $bridgePort." -ForegroundColor Yellow
+  }
+  $env:AETHER_CLI_BRIDGE_PORT = "$bridgePort"
+  $env:AETHER_CLI_BRIDGE_URL = "http://host.docker.internal:$bridgePort"
   $env:AETHER_STACK_ROOT = $Root
 
   $daemon = Join-Path $Root "scripts\cli-bridge-daemon.js"
@@ -351,7 +366,7 @@ function Start-CliBridge {
   if ($log -match 'status=reused' -or $err -match 'rejected this token|EADDRINUSE') {
     $env:AETHER_CLI_BRIDGE_TOKEN = ""
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
-    Write-Host "  Another host CLI bridge already owns port 8767; leaving it in place." -ForegroundColor Yellow
+    Write-Host "  Another host CLI bridge already owns port $bridgePort; leaving it in place." -ForegroundColor Yellow
   }
 }
 

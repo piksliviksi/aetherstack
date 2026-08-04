@@ -8,6 +8,12 @@ const path = require("path");
 const { execFile, spawn } = require("child_process");
 
 const DEFAULT_PORT = 8767;
+// Prefer 8767, then candidates outside the Windows Hyper-V/WSL exclusion band
+// that commonly covers 8768-8867 (and often the next 100-port block).
+const FALLBACK_PORTS = [
+  9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010,
+  18765, 18766, 18767, 18768, 18769, 18770,
+];
 const MAX_BODY_BYTES = 512 * 1024;
 const MAX_PROMPT_CHARS = 100_000;
 // System prompts travel as argv, and Windows caps a command line near 32 KiB.
@@ -474,12 +480,27 @@ function bridgeFailure(error) {
 
 function createCliBridge(options = {}) {
   const token = options.token || crypto.randomBytes(32).toString("hex");
-  let port = options.port == null ? DEFAULT_PORT : Number(options.port);
+  // Explicit port (including 0 = OS-assigned) stays on that port only. When the
+  // caller leaves port unset, we own free-port selection: try 8767, then
+  // FALLBACK_PORTS, so a foreign bridge or Windows reserved range does not
+  // kill host-CLI detection entirely.
+  const portExplicit = options.port != null;
+  let port = portExplicit ? Number(options.port) : DEFAULT_PORT;
   const cwd = options.cwd || process.cwd();
   let server = null;
   let reusedServer = false;
   let modelCache = { at: 0, models: {} };
   const quarantinedUntil = new Map();
+
+  function portCandidates() {
+    if (portExplicit) return [port];
+    return [DEFAULT_PORT, ...FALLBACK_PORTS];
+  }
+
+  function markPortUnusable(error) {
+    if (error && typeof error === "object") error.portUnusable = true;
+    return error;
+  }
 
   async function models(refresh = false) {
     if (reusedServer) return remoteModels(port, token, refresh);
@@ -549,46 +570,94 @@ function createCliBridge(options = {}) {
     }
   }
 
+  async function bindPort(candidate) {
+    const candidateServer = http.createServer((request, response) => { handler(request, response); });
+    // Default to loopback-only. Callers that need Docker Desktop's
+    // host.docker.internal reachability (e.g. scripts/cli-bridge-daemon.js)
+    // must opt in explicitly by passing host: "0.0.0.0" themselves.
+    const outcome = await new Promise((resolve, reject) => {
+      const onError = (error) => {
+        candidateServer.removeListener("listening", onListening);
+        if (error && error.code === "EADDRINUSE") resolve({ kind: "inuse" });
+        else if (error && (error.code === "EACCES" || error.code === "EPERM")) {
+          resolve({ kind: "denied", error });
+        } else reject(error);
+      };
+      const onListening = () => {
+        candidateServer.removeListener("error", onError);
+        resolve({ kind: "bound" });
+      };
+      candidateServer.once("error", onError);
+      candidateServer.once("listening", onListening);
+      candidateServer.listen(candidate, options.host || "127.0.0.1");
+    });
+
+    if (outcome.kind === "bound") {
+      return { server: candidateServer, port: candidateServer.address().port, reused: false };
+    }
+    candidateServer.close();
+
+    if (outcome.kind === "denied") {
+      throw markPortUnusable(Object.assign(
+        new Error(`port ${candidate} is forbidden by the OS (access denied)`),
+        { code: outcome.error.code },
+      ));
+    }
+
+    // A different process owns that port. Verify our token is actually
+    // accepted before treating it as our own bridge — otherwise a stale
+    // or mismatched token (e.g. start.sh's daemon vs. the extension's
+    // SecretStorage token) would silently "succeed" here and only fail
+    // later, deep inside a model-sync call.
+    await new Promise((resolve, reject) => {
+      const probe = http.get(
+        {
+          hostname: "127.0.0.1",
+          port: candidate,
+          path: "/health",
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 5_000,
+        },
+        (response) => {
+          response.resume();
+          if (response.statusCode === 200) resolve();
+          else {
+            reject(markPortUnusable(new Error(
+              `existing bridge on port ${candidate} rejected this token (HTTP ${response.statusCode})`,
+            )));
+          }
+        },
+      );
+      probe.on("timeout", () => probe.destroy(markPortUnusable(
+        new Error(`existing bridge on port ${candidate} did not respond to a health check`),
+      )));
+      probe.on("error", (error) => reject(markPortUnusable(error)));
+    });
+    return { server: null, port: candidate, reused: true };
+  }
+
   return {
     token,
     get port() { return port; },
     get host() { return server ? server.address().address : null; },
     async start() {
       if (server) return { port, reused: false };
-      server = http.createServer((request, response) => { handler(request, response); });
-      const reused = await new Promise((resolve, reject) => {
-        server.once("error", (error) => {
-          if (error && error.code === "EADDRINUSE") resolve(true);
-          else reject(error);
-        });
-      // Default to loopback-only. Callers that need Docker Desktop's
-      // host.docker.internal reachability (e.g. scripts/cli-bridge-daemon.js)
-      // must opt in explicitly by passing host: "0.0.0.0" themselves.
-      server.listen(port, options.host || "127.0.0.1", () => resolve(false));
-      });
-      if (reused) {
-        server = null;
-        // A different process owns that port. Verify our token is actually
-        // accepted before treating it as our own bridge — otherwise a stale
-        // or mismatched token (e.g. start.sh's daemon vs. the extension's
-        // SecretStorage token) would silently "succeed" here and only fail
-        // later, deep inside a model-sync call.
-        await new Promise((resolve, reject) => {
-          const probe = http.get(
-            { hostname: "127.0.0.1", port, path: "/health", headers: { Authorization: `Bearer ${token}` }, timeout: 5_000 },
-            (response) => {
-              response.resume();
-              if (response.statusCode === 200) resolve();
-              else reject(new Error(`existing bridge on port ${port} rejected this token (HTTP ${response.statusCode})`));
-            },
-          );
-          probe.on("timeout", () => probe.destroy(new Error(`existing bridge on port ${port} did not respond to a health check`)));
-          probe.on("error", reject);
-        });
-        reusedServer = true;
+      let lastError;
+      for (const candidate of portCandidates()) {
+        try {
+          const bound = await bindPort(candidate);
+          server = bound.server;
+          port = bound.port;
+          reusedServer = bound.reused;
+          return { port, reused: bound.reused };
+        } catch (error) {
+          lastError = error;
+          // Explicit port stays sticky (tests and daemon pin a port). Default
+          // selection walks the ladder when the candidate is busy/forbidden.
+          if (portExplicit || !error || !error.portUnusable) throw error;
+        }
       }
-      else port = server.address().port;
-      return { port, reused };
+      throw lastError || new Error("No free loopback port is available for the host CLI bridge");
     },
     stop() {
       if (server) server.close();
@@ -601,6 +670,8 @@ function createCliBridge(options = {}) {
 
 module.exports = {
   CLI_DEFINITIONS,
+  DEFAULT_PORT,
+  FALLBACK_PORTS,
   createCliBridge,
   discoverCliModels,
   findBundledCodex,
