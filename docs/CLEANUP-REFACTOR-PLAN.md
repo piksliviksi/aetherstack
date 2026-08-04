@@ -42,10 +42,10 @@ This plan completes that interrupted audit and turns it into ordered fix work.
 
 | ID | Finding | Evidence | Status |
 |----|---------|----------|--------|
-| P0-1 | CLI bridge port ladder `8767–8777` hits Windows Hyper-V exclusion **8768–8867** (EACCES) | Measured on this host; Claude hit live | **Partially fixed** in uncommitted work (`start.ps1` / `start.sh` / `cli-bridge.js` free-port + extension URL handoff) — **not committed** |
-| P0-2 | Two bridges (extension SecretStorage token vs start-script daemon) fight over port/token; Hub can lose host CLIs | Session log: foreign token on 8767 | Partially mitigated by free-port + clear token on reuse; **no single owner contract** yet |
-| P0-3 | Docker Desktop Extension ships **stale** `extension/litellm_config.yaml` | Root **90** models vs extension **89**; missing **`openai-embed`** | Open |
-| P0-4 | `extension/docker-compose.yaml` is a thin **fork** of root compose (71 vs 261 lines) | Drift hazard for every release | Open |
+| P0-1 | CLI bridge port ladder `8767–8777` hits Windows Hyper-V exclusion **8768–8867** (EACCES) | Measured on this host; Claude hit live | **Done** (`705c0cf`, `56956c2`) |
+| P0-2 | Two bridges (extension SecretStorage token vs start-script daemon) fight over port/token; Hub can lose host CLIs | Session log: foreign token on 8767 | **Documented + free-port** (`docs/VSCODE.md`, free-port fallback). Full single-process merge deferred. |
+| P0-3 | Docker Desktop Extension ships **stale** `extension/litellm_config.yaml` | Root **90** models vs extension **89**; missing **`openai-embed`** | **Done** (`e712f12` + verify-release gate) |
+| P0-4 | `extension/docker-compose.yaml` is a thin **fork** of root compose (71 vs 261 lines) | Drift hazard for every release | Open (intentional slim compose; catalog gate covers models) |
 
 ### P1 — Duplication / single source of truth
 
