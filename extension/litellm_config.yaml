@@ -185,6 +185,12 @@ model_list:
       model: mistral/pixtral-large-latest
       api_key: os.environ/MISTRAL_API_KEY
 
+  # ── Embeddings (memory / RAG via aether-hub or clients) ───────────
+  - model_name: openai-embed
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+
   # ── Multi-account key slots (personal + enterprise) ───────────────
   # Primary alias (no suffix) uses {PROVIDER}_API_KEY.
   # -personal   → {PROVIDER}_API_KEY_PERSONAL   (personal / subscription)

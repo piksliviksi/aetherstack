@@ -92,8 +92,26 @@ if (trackedVsix.error || trackedVsix.status !== 0) {
   fail(`VSIX binaries must be Release assets, not tracked source files:\n${trackedVsix.stdout.trim()}`);
 }
 
+// Docker Desktop Extension carries a copy of the model catalog. Drift here
+// silently drops aliases (seen: openai-embed missing from extension/).
+function modelNames(yamlText) {
+  return [...yamlText.matchAll(/^\s*-\s*model_name:\s*(\S+)\s*$/gm)].map((m) => m[1]).sort();
+}
+const rootModels = modelNames(read("litellm_config.yaml"));
+const extensionModels = modelNames(read("extension/litellm_config.yaml"));
+const missingInExtension = rootModels.filter((name) => !extensionModels.includes(name));
+const extraInExtension = extensionModels.filter((name) => !rootModels.includes(name));
+if (missingInExtension.length || extraInExtension.length) {
+  fail(
+    "extension/litellm_config.yaml model_name set must match root litellm_config.yaml"
+      + (missingInExtension.length ? `; missing in extension: ${missingInExtension.join(", ")}` : "")
+      + (extraInExtension.length ? `; extra in extension: ${extraInExtension.join(", ")}` : ""),
+  );
+}
+
 if (!process.exitCode) {
   console.log(`release identity OK: AetherStack.aetherstack ${version}`);
   console.log(`license policy OK: ${expectedLicense}; required original-author notice present`);
   console.log("repository artifact policy OK: no tracked VSIX binaries");
+  console.log(`Docker Extension model catalog OK: ${rootModels.length} aliases match root`);
 }
