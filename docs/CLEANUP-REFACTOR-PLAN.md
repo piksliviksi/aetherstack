@@ -191,7 +191,19 @@ Add a **parity test** that parses both scripts for required function/command nam
 | One-click (manual/optional) | `node scripts/verify-one-click.mjs` | Windows smoke |
 | Start syntax | parse `start.ps1`; `bash -n start.sh` | PR0–4 |
 
-Baseline from prior session: **Python ~242**, **JS ~87–89 pass / 0 fail** — re-measure after PR0 and treat regressions as blockers.
+Baseline **measured 2026-08-04**: **Python 242 passed**, **JS 89 tests / 89 pass
+/ 0 fail** (`npm test`, exit 0), `start.ps1` parses clean, `bash -n start.sh`
+clean. Treat any regression as a blocker.
+
+> The old "run each JS file separately, `hubchat.test.js` hangs" workaround is
+> **obsolete** — `npm test` completes normally. Looping per file and skipping
+> that file under-reports the suite.
+
+> **These gates have only ever run locally.** Every GitHub Actions run fails in
+> 3–12s with *"The job was not started because your account is locked due to a
+> billing issue"* — jobs never start, so `ci.yml` has validated nothing on any
+> commit. All green results are one machine / one OS / one Node / one Python.
+> The cross-platform matrix in `ci.yml` is unverified until billing is cleared.
 
 ---
 
@@ -268,9 +280,20 @@ Baseline from prior session: **Python ~242**, **JS ~87–89 pass / 0 fail** — 
 
 ## Success criteria
 
-- [ ] No hard-coded CLI bridge ports in the Hyper-V exclusion band.  
-- [ ] Extension model catalog matches root (or CI fails).  
-- [ ] Zero unreferenced scripts without explicit archive/docs home.  
-- [ ] Documented single primary chat surface + optional surfaces.  
-- [ ] `npm test` (vscode) + `pytest` green; start scripts parse clean.  
-- [ ] `release:check` green before next tagged release.
+- [x] No hard-coded CLI bridge ports in the Hyper-V exclusion band. — `activation.test.js` asserts neither ladder reappears.
+- [x] Extension model catalog matches root (or CI fails). — root 90 / extension 90, diff 0; `verify-release.mjs` gates it.
+- [x] Zero unreferenced scripts without explicit archive/docs home. — `scripts/README.md` lists all 9 as manual/lab tools with a sunset rule.
+- [x] Documented single primary chat surface + optional surfaces. — "Current tree" + overlap diagram in this document.
+- [x] `npm test` (vscode) + `pytest` green; start scripts parse clean. — measured 2026-08-04, see PR5.
+- [x] `release:check` green before next tagged release. — run locally 2026-08-04, **exit 0** (VSIX `aetherstack-0.3.23.vsix`, runtime `aetherstack-runtime-0.3.23.tar.gz`, 148 tracked files, privacy/licence checks passed). **CI cannot confirm this** while the Actions billing lock stands, so re-run it locally before every tag.
+
+### PR3 / PR4 status (verified 2026-08-04)
+
+- **PR3 — done via documentation, not deletion.** The plan offered
+  wire/archive/delete; `scripts/README.md` takes a fourth route: every orphan is
+  listed with intent plus "zero maintainers and zero docs links for a release
+  cycle → delete". No silent orphans remain, which was the actual goal.
+- **PR4 — done.** `activation.test.js` implements the parity checklist as
+  marker patterns over both start scripts. One asymmetry fixed on 2026-08-04:
+  the shell list asserted no core-service readiness wait even though `start.sh`
+  performs one, so deleting that wait would not have failed the checklist.

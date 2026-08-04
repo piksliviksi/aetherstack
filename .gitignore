@@ -1,5 +1,9 @@
 .env
 *.env.local
+# Backups of .env hold real API keys and the gateway master key; ignoring only
+# ".env" left these one `git add -A` away from being committed.
+.env.bak*
+.env.*.bak
 .DS_Store
 Thumbs.db
 models/

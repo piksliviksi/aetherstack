@@ -111,6 +111,9 @@ test("one-button startup delegates to the platform bootstrap scripts", () => {
       /start_managed_cli_bridge/,
       /AETHER_CLI_BRIDGE_URL/,
       /scan-system/,
+      // Core-service readiness wait: start.ps1 asserts Wait-CoreServices, so
+      // assert the shell equivalent too or the checklist is only half enforced.
+      /health\/liveliness/,
       /start_macos_host_ollama/,
     ]],
   ]) {
