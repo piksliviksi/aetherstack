@@ -25,10 +25,23 @@ VS Code does not load model weights or perform GPU inference.
                                       ┌─► provider APIs
 VS Code ─► Aether Hub :8766 ─► LiteLLM :4000 ─► host Ollama / GPU
                   │
-                  └─► protected host CLI bridge :8767 ─► authenticated Codex/Claude/Grok CLI
+                  └─► protected host CLI bridge :8767(+fallback) ─► authenticated Codex/Claude/Grok CLI
 ```
 
 The host CLI bridge uses already authenticated CLI sessions. Its random bearer token is stored in VS Code SecretStorage and supplied to Hub through Compose; credentials are not copied and provider API keys are not generated. A refresh re-probes CLI login/install changes in place. Hub recreation is a fallback only when the bridge environment is stale.
+
+### Host CLI bridge ownership
+
+| Owner | When | Port | Token |
+|---|---|---|---|
+| VS Code extension | Extension activated | Prefers `8767`, then free ports from `FALLBACK_PORTS` in `cli-bridge.js` | SecretStorage (`aetherstack.cliBridgeToken`) |
+| `start.ps1` / `start.sh` daemon | One-click start without (or before) the extension | Same selector: `scripts/select-cli-bridge-port.mjs` | Ephemeral token for that process |
+
+Rules:
+
+1. **One usable bridge for the Hub.** Compose gets `AETHER_CLI_BRIDGE_URL` + `AETHER_CLI_BRIDGE_TOKEN` for the process that successfully bound (or reused with a matching token).
+2. **Foreign token on the preferred port** → do not force the Hub onto that port with a new token; bind a free fallback port (never `8768–8777` on Windows — Hyper-V often excludes that band) or leave CLI models for the extension to reconcile.
+3. **Port list is not copied into shell.** `DEFAULT_PORT` / `FALLBACK_PORTS` live only in `integrations/vscode/cli-bridge.js`; start scripts call `node scripts/select-cli-bridge-port.mjs`.
 
 Optional active-model telemetry merges LiteLLM and host-CLI calls. It records model alias, source, call id, state, and timestamps only—never prompts, responses, headers, users, costs, or keys.
 

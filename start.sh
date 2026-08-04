@@ -136,19 +136,16 @@ select_fallback_port() {
 }
 
 select_cli_bridge_port() {
-  # Prefer the documented default (8767). Skip 8768-8777: on Windows Hyper-V/WSL
-  # those sit inside the common TCP exclusion range (8768-8867, often the next
-  # 100-port block too), so the old ladder is all EACCES when 8767 is taken.
-  # port_is_available / bind probes skip both busy and OS-reserved ports.
-  local configured="${AETHER_CLI_BRIDGE_PORT:-8767}" candidate
-  for candidate in "$configured" 8767 \
-      9001 9002 9003 9004 9005 9006 9007 9008 9009 9010 \
-      18765 18766 18767 18768 18769 18770; do
-    [[ "$candidate" =~ ^[0-9]+$ ]] || continue
-    (( candidate >= 1024 && candidate <= 65535 )) || continue
-    if port_is_available "$candidate"; then printf '%s\n' "$candidate"; return 0; fi
-  done
-  return 1
+  # Port ladder lives in integrations/vscode/cli-bridge.js. This wrapper calls
+  # scripts/select-cli-bridge-port.mjs so start.sh does not re-copy FALLBACK_PORTS
+  # (and never walks 8768-8777, which is EACCES under Windows Hyper-V).
+  local selector="$ROOT/scripts/select-cli-bridge-port.mjs" out
+  if ! command -v node >/dev/null 2>&1 || [[ ! -f "$selector" ]]; then
+    return 1
+  fi
+  out="$(node "$selector" 2>/dev/null)" || return 1
+  [[ "$out" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$out"
 }
 
 find_host_ollama() {
@@ -466,7 +463,7 @@ cli_bridge_ready() {
 stop_managed_cli_bridge
 if command -v node >/dev/null 2>&1; then
   cyan "  Detecting host CLI subscriptions (Codex, Claude Code, Grok)…"
-  cli_bridge_port="$(select_cli_bridge_port)" || { red "  ERROR: no free loopback port for the host CLI bridge (tried 8767, 9001-9010, 18765-18770)."; exit 1; }
+  cli_bridge_port="$(select_cli_bridge_port)" || { red "  ERROR: no free loopback port for the host CLI bridge (see scripts/select-cli-bridge-port.mjs)."; exit 1; }
   if [[ "$cli_bridge_port" != "${AETHER_CLI_BRIDGE_PORT:-8767}" ]]; then
     yellow "  Port ${AETHER_CLI_BRIDGE_PORT:-8767} is occupied; using CLI bridge port $cli_bridge_port."
   fi

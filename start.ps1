@@ -205,21 +205,28 @@ function Select-FallbackOllamaPort {
 }
 
 function Select-CliBridgePort {
-  # Prefer the documented default (8767). Do NOT walk 8768-8777: on Windows
-  # Hyper-V/WSL commonly reserves 8768-8867 (and often the next 100-port block),
-  # so that ladder is all EACCES when 8767 is taken. Probe-bind instead, using
-  # candidates outside the usual exclusion bands.
-  $configured = if ($env:AETHER_CLI_BRIDGE_PORT) { $env:AETHER_CLI_BRIDGE_PORT } else { Get-DotEnvValue "AETHER_CLI_BRIDGE_PORT" }
-  $candidates = @(
-    $configured, 8767,
-    9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010,
-    18765, 18766, 18767, 18768, 18769, 18770
-  ) | Where-Object { $_ -and "$_" -match '^\d+$' } | Select-Object -Unique
-  foreach ($candidate in $candidates) {
-    $port = [int]$candidate
-    if ($port -ge 1024 -and $port -le 65535 -and (Test-LocalPortAvailable $port)) { return $port }
+  # Port ladder lives in integrations/vscode/cli-bridge.js (DEFAULT_PORT +
+  # FALLBACK_PORTS). scripts/select-cli-bridge-port.mjs is the only place start
+  # scripts probe from — do not re-list 8768-8777 (Windows Hyper-V EACCES).
+  $selector = Join-Path $Root "scripts\select-cli-bridge-port.mjs"
+  if (-not (Test-Path -LiteralPath $selector)) {
+    throw "Missing $selector (host CLI bridge port selector)."
   }
-  throw "No free loopback port is available for the host CLI bridge (tried 8767, 9001-9010, 18765-18770)."
+  $prev = $env:AETHER_CLI_BRIDGE_PORT
+  if (-not $env:AETHER_CLI_BRIDGE_PORT) {
+    $fromEnv = Get-DotEnvValue "AETHER_CLI_BRIDGE_PORT"
+    if ($fromEnv) { $env:AETHER_CLI_BRIDGE_PORT = $fromEnv }
+  }
+  try {
+    $out = & node $selector 2>&1
+    if ($LASTEXITCODE -ne 0 -or ("$out" -notmatch '^\d+$')) {
+      throw "No free loopback port is available for the host CLI bridge ($out)."
+    }
+    return [int]("$out".Trim())
+  } finally {
+    if ($null -eq $prev) { Remove-Item Env:AETHER_CLI_BRIDGE_PORT -ErrorAction SilentlyContinue }
+    else { $env:AETHER_CLI_BRIDGE_PORT = $prev }
+  }
 }
 
 function Wait-Ollama {

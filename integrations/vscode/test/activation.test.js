@@ -86,15 +86,44 @@ test("one-button startup delegates to the platform bootstrap scripts", () => {
   assert.match(compose, /RAG_EMBEDDING_MODEL=nomic-embed-text/);
   assert.doesNotMatch(compose, /container_name:/);
   const winStart = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.ps1"), "utf8");
-  assert.match(winStart, /Select-FallbackOllamaPort/);
-  assert.match(winStart, /Select-CliBridgePort/);
+  const unixStart = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.sh"), "utf8");
+  // Start-script parity checklist (behavior, not a full shell runner).
+  for (const [label, src, patterns] of [
+    ["start.ps1", winStart, [
+      /Ensure-Docker|Test-DockerReady/,
+      /Ensure-MasterKey/,
+      /Find-HostOllama/,
+      /Select-FallbackOllamaPort/,
+      /Select-CliBridgePort/,
+      /Start-CliBridge/,
+      /select-cli-bridge-port\.mjs/,
+      /AETHER_CLI_BRIDGE_URL/,
+      /Publish-SystemScan|Invoke-SystemScan/,
+      /Wait-CoreServices/,
+    ]],
+    ["start.sh", unixStart, [
+      /docker info|install_.*docker/,
+      /LITELLM_MASTER_KEY/,
+      /find_host_ollama/,
+      /select_fallback_port/,
+      /select_cli_bridge_port/,
+      /select-cli-bridge-port\.mjs/,
+      /start_managed_cli_bridge/,
+      /AETHER_CLI_BRIDGE_URL/,
+      /scan-system/,
+      /start_macos_host_ollama/,
+    ]],
+  ]) {
+    for (const pattern of patterns) {
+      assert.match(src, pattern, `${label} missing parity marker ${pattern}`);
+    }
+  }
   // Windows Hyper-V reserves 8768-8867; the bridge must not walk that ladder.
   assert.doesNotMatch(winStart, /8768,\s*8769,\s*8770/);
-  const unixStart = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "start.sh"), "utf8");
-  assert.match(unixStart, /select_fallback_port/);
-  assert.match(unixStart, /select_cli_bridge_port/);
   assert.doesNotMatch(unixStart, /8768 8769 8770 8771 8772 8773 8774 8775 8776 8777/);
-  assert.match(unixStart, /start_macos_host_ollama/);
+  const portSelector = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "scripts", "select-cli-bridge-port.mjs"), "utf8");
+  assert.match(portSelector, /DEFAULT_PORT/);
+  assert.match(portSelector, /FALLBACK_PORTS/);
   assert.match(unixStart, /Ollama-darwin\.zip/);
   assert.match(unixStart, /codesign --verify --deep --strict/);
   const unixStop = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "stop.sh"), "utf8");
